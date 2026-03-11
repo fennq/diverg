@@ -1,0 +1,20 @@
+{
+  "name": "headers_ssl",
+  "display_name": "HTTP Headers & SSL/TLS Analyzer",
+  "description": "Audits HTTP security headers and SSL/TLS configuration including protocol versions, cipher suites, and certificate validity.",
+  "version": "1.0.0",
+  "entry_point": "headers_ssl.py",
+  "parameters": {
+    "target_url": {
+      "type": "string",
+      "description": "Full URL of the target to analyze",
+      "required": true
+    },
+    "scan_type": {
+      "type": "string",
+      "description": "Type of analysis: 'full', 'headers', 'ssl'",
+      "default": "full"
+    }
+  },
+  "tags": ["security", "headers", "ssl", "tls"]
+}

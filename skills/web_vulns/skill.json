@@ -1,0 +1,25 @@
+{
+  "name": "web_vulns",
+  "display_name": "Web Vulnerability Scanner",
+  "description": "Detects common web vulnerabilities: reflected XSS, SQL injection, CSRF token issues, and directory traversal.",
+  "version": "1.0.0",
+  "entry_point": "web_vulns.py",
+  "parameters": {
+    "target_url": {
+      "type": "string",
+      "description": "Full URL of the target to scan",
+      "required": true
+    },
+    "scan_type": {
+      "type": "string",
+      "description": "Type of scan: 'full', 'xss', 'sqli', 'csrf', 'traversal'",
+      "default": "full"
+    },
+    "crawl_depth": {
+      "type": "integer",
+      "description": "How many links deep to crawl from the target URL",
+      "default": 2
+    }
+  },
+  "tags": ["security", "vulnerability", "web"]
+}

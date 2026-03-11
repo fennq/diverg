@@ -1,0 +1,25 @@
+{
+  "name": "telegram_report",
+  "display_name": "Telegram Report Sender",
+  "description": "Formats security scan findings and sends structured reports to a Telegram chat.",
+  "version": "1.0.0",
+  "entry_point": "telegram_report.py",
+  "parameters": {
+    "findings_json": {
+      "type": "string",
+      "description": "JSON string of findings to report",
+      "required": true
+    },
+    "target": {
+      "type": "string",
+      "description": "Target domain/URL that was scanned",
+      "required": true
+    },
+    "report_type": {
+      "type": "string",
+      "description": "Type of report: 'summary', 'detailed', 'alert'",
+      "default": "summary"
+    }
+  },
+  "tags": ["reporting", "telegram", "notification"]
+}

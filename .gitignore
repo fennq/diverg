@@ -1,0 +1,32 @@
+# Environment and secrets
+.env
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Logs and runtime
+*.log
+bot.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Optional: uncomment to ignore results (scan outputs)
+# results/*.txt

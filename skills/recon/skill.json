@@ -1,0 +1,25 @@
+{
+  "name": "recon",
+  "display_name": "Reconnaissance Scanner",
+  "description": "Performs target reconnaissance: port scanning, subdomain enumeration, and technology fingerprinting.",
+  "version": "1.0.0",
+  "entry_point": "recon.py",
+  "parameters": {
+    "target": {
+      "type": "string",
+      "description": "Target domain or IP address",
+      "required": true
+    },
+    "scan_type": {
+      "type": "string",
+      "description": "Type of recon to perform: 'full', 'ports', 'subdomains', 'techstack'",
+      "default": "full"
+    },
+    "port_range": {
+      "type": "string",
+      "description": "Port range for nmap scan (e.g. '1-1000' or 'top1000')",
+      "default": "top1000"
+    }
+  },
+  "tags": ["security", "reconnaissance", "scanning"]
+}

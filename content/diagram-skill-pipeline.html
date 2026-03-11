@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Diverg — Skill Pipeline</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1419;
+      color: #e7e9ea;
+      min-height: 100vh;
+      padding: 32px;
+      line-height: 1.4;
+    }
+    .diagram { max-width: 960px; margin: 0 auto; }
+    .logo-wrap { text-align: center; margin-bottom: 20px; }
+    .logo-wrap img { height: 42px; width: auto; display: inline-block; vertical-align: middle; }
+    .title { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 6px; text-align: center; }
+    .subtitle { font-size: 13px; color: #71767b; text-align: center; margin-bottom: 28px; }
+    .section-label { font-size: 11px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+    .node {
+      background: #1c2128;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: #e7e9ea;
+      display: inline-block;
+      margin: 4px;
+    }
+    .node strong { color: #fff; }
+    .phase { margin-bottom: 24px; }
+    .phase-title { font-size: 13px; font-weight: 600; color: #58a6ff; margin-bottom: 10px; }
+    .pipe { width: 2px; height: 12px; background: #30363d; margin: 4px auto; }
+    .pipe-label { font-size: 10px; color: #58a6ff; margin: 2px 0; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="diagram">
+    <div class="logo-wrap"><img src="neuro-logo.png" alt="Neuro" /></div>
+    <div class="title">Diverg — Skill Pipeline</div>
+    <div class="subtitle">Full-scan tool chain (adaptive runs pick a subset by profile)</div>
+
+    <div class="phase">
+      <div class="section-label">Phase: Discover</div>
+      <div class="phase-title">OSINT · Recon · Headers & TLS</div>
+      <div>
+        <span class="node">osint</span>
+        <span class="node">recon</span>
+        <span class="node">headers_ssl</span>
+      </div>
+    </div>
+
+    <div class="pipe-label">↓</div>
+    <div class="phase">
+      <div class="section-label">Phase: Code & dependency intel</div>
+      <div class="phase-title">Client surface · Dependency audit</div>
+      <div>
+        <span class="node">crypto_security</span>
+        <span class="node">data_leak_risks</span>
+        <span class="node">client_surface</span>
+        <span class="node">dependency_audit</span>
+        <span class="node">logic_abuse</span>
+      </div>
+    </div>
+
+    <div class="pipe-label">↓</div>
+    <div class="phase">
+      <div class="section-label">Phase: Exploit-surface assessment</div>
+      <div class="phase-title">Web · Auth · API · Company exposure</div>
+      <div>
+        <span class="node">web_vulns</span>
+        <span class="node">auth_test</span>
+        <span class="node">api_test</span>
+        <span class="node">company_exposure</span>
+      </div>
+    </div>
+
+    <div class="pipe-label">↓</div>
+    <div class="phase">
+      <div class="section-label">Phase: High-value & business logic</div>
+      <div class="phase-title">IDOR · Race · Payment</div>
+      <div>
+        <span class="node">high_value_flaws</span>
+        <span class="node">race_condition</span>
+        <span class="node">payment_financial</span>
+      </div>
+    </div>
+
+    <div class="pipe-label">↓</div>
+    <div class="node" style="display: block; text-align: center; margin-top: 12px;">
+      <strong>Correlate</strong> → ranked findings, attack paths, recommended_next_tests → <strong>Report</strong>
+    </div>
+  </div>
+</body>
+</html>

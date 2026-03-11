@@ -1,0 +1,20 @@
+{
+  "name": "osint",
+  "display_name": "OSINT Gatherer",
+  "description": "Performs open-source intelligence gathering: WHOIS lookups, DNS enumeration, email pattern discovery, and Wayback Machine snapshots.",
+  "version": "1.0.0",
+  "entry_point": "osint.py",
+  "parameters": {
+    "target": {
+      "type": "string",
+      "description": "Target domain name",
+      "required": true
+    },
+    "scan_type": {
+      "type": "string",
+      "description": "Type of OSINT: 'full', 'whois', 'dns', 'emails', 'wayback'",
+      "default": "full"
+    }
+  },
+  "tags": ["security", "osint", "intelligence", "reconnaissance"]
+}

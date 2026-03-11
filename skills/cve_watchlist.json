@@ -1,0 +1,46 @@
+{
+  "description": "Curated high-impact CVEs for common stacks. Update when new critical CVEs drop.",
+  "products": {
+    "Next.js": [
+      {
+        "cve_id": "CVE-2025-29927",
+        "affected_versions": ["14.0.0", "14.0.1", "14.0.2"],
+        "summary": "Middleware bypass / path traversal. Verify patch applied."
+      },
+      {
+        "cve_id": "CVE-2024-34351",
+        "affected_versions": ["13.0.0", "13.1.0", "13.2.0", "13.3.0", "13.4.0", "13.5.0", "14.0.0"],
+        "summary": "SSRF via server-side fetch. Update to patched version."
+      }
+    ],
+    "React": [
+      {
+        "cve_id": "CVE-2024-46786",
+        "affected_versions": ["18.0.0", "18.1.0", "18.2.0"],
+        "summary": "React2Shell-style RCE in dev mode / SSR. Ensure production build and patch."
+      }
+    ],
+    "Express": [
+      {
+        "cve_id": "CVE-2022-24999",
+        "affected_versions": ["4.17.0", "4.17.1", "4.17.2", "4.17.3"],
+        "summary": "ReDoS in qs parser. Upgrade to 4.17.3+ or 4.18+."
+      }
+    ],
+    "Django": [
+      {
+        "cve_id": "CVE-2024-34048",
+        "affected_versions": ["4.2", "5.0"],
+        "summary": "Potential DoS. Update to patched release."
+      }
+    ],
+    "WordPress": [
+      {
+        "cve_id": "CVE-2024-5806",
+        "affected_versions": ["6.4", "6.5"],
+        "summary": "Auth bypass / privilege escalation. Update immediately."
+      }
+    ]
+  },
+  "version_match": "prefix"
+}

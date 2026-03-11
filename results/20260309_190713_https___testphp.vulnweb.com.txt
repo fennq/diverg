@@ -1,0 +1,214 @@
+Diverg Assessment Results
+Timestamp: 2026-03-09T11:07:13.801635+00:00
+Target: https://testphp.vulnweb.com
+======================================================================
+
+[osint:dns]
+{
+  "target": "testphp.vulnweb.com",
+  "whois_info": null,
+  "dns_records": [],
+  "email_patterns": [],
+  "wayback_snapshots": [],
+  "subdomains": [],
+  "google_dorks": [],
+  "tech_infra": null,
+  "social_media": [],
+  "breach_info": [],
+  "errors": [
+    "DNS enum error: local variable 'dns' referenced before assignment"
+  ]
+}
+
+----------------------------------------------------------------------
+
+[recon:subdomains]
+{
+  "target": "testphp.vulnweb.com",
+  "ports": [],
+  "subdomains": [],
+  "technologies": [],
+  "sensitive_files": [],
+  "waf": null,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[recon:techstack]
+{"error": "recon timed out after 120s", "target": "testphp.vulnweb.com"}
+
+----------------------------------------------------------------------
+
+[headers_ssl:full]
+{
+  "target_url": "https://testphp.vulnweb.com",
+  "header_findings": [
+    {
+      "header": "CONNECTION",
+      "status": "error",
+      "value": "HTTPSConnectionPool(host='testphp.vulnweb.com', port=443): Max retries exceeded with url: / (Caused by ConnectTimeoutError(<HTTPSConnection(host='testphp.vulnweb.com', port=443) at 0x10f15edc0>, 'Connection to testphp.vulnweb.com timed out. (connect timeout=10)'))",
+      "severity": "Info",
+      "recommendation": "Could not connect to target."
+    }
+  ],
+  "ssl_findings": [
+    {
+      "check": "SSL Connection",
+      "status": "fail",
+      "detail": "Could not establish SSL connection: timed out",
+      "severity": "High"
+    },
+    {
+      "check": "Weak Protocol: TLSv1.0",
+      "status": "pass",
+      "detail": "Server correctly rejects TLSv1.0.",
+      "severity": "Info"
+    },
+    {
+      "check": "Weak Protocol: TLSv1.1",
+      "status": "pass",
+      "detail": "Server correctly rejects TLSv1.1.",
+      "severity": "Info"
+    }
+  ],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[recon:sensitive]
+{
+  "target": "testphp.vulnweb.com",
+  "ports": [],
+  "subdomains": [],
+  "technologies": [],
+  "sensitive_files": [],
+  "waf": null,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[api_test:discovery]
+{
+  "target_url": "https://testphp.vulnweb.com",
+  "endpoints_found": [],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[auth_test:forms]
+{"error": "auth_test timed out after 120s", "target": "https://testphp.vulnweb.com"}
+
+----------------------------------------------------------------------
+
+[auth_test:session]
+{
+  "target_url": "https://testphp.vulnweb.com",
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[company_exposure:operational]
+{
+  "target_url": "https://testphp.vulnweb.com",
+  "surfaces": [],
+  "findings": [],
+  "errors": [
+    "Budget expired before completing category: admin"
+  ]
+}
+
+----------------------------------------------------------------------
+
+[web_vulns:files]
+{
+  "target_url": "https://testphp.vulnweb.com",
+  "findings": [],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[api_test:info_disclosure]
+{
+  "target_url": "https://testphp.vulnweb.com",
+  "endpoints_found": [],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[api_test:auth_bypass]
+{
+  "target_url": "https://testphp.vulnweb.com",
+  "endpoints_found": [],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[auth_test:enumeration]
+{"error": "auth_test timed out after 120s", "target": "https://testphp.vulnweb.com"}
+
+----------------------------------------------------------------------
+
+[company_exposure:business]
+{
+  "target_url": "https://testphp.vulnweb.com",
+  "surfaces": [],
+  "findings": [],
+  "errors": [
+    "Budget expired before completing category: exports"
+  ]
+}
+
+----------------------------------------------------------------------
+
+[web_vulns:ssrf]
+{
+  "target_url": "https://testphp.vulnweb.com",
+  "findings": [],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[web_vulns:cmdi]
+{
+  "target_url": "https://testphp.vulnweb.com",
+  "findings": [],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[web_vulns:ssti]
+{
+  "target_url": "https://testphp.vulnweb.com",
+  "findings": [],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[web_vulns:sqli]
+{
+  "target_url": "https://testphp.vulnweb.com",
+  "findings": [],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------

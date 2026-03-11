@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Diverg: Shop-Style Proof Scan Architecture</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1a1a1a;
+      color: #d4d4d4;
+      min-height: 100vh;
+      padding: 32px;
+      line-height: 1.4;
+    }
+    .diagram {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #e6edf3;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    .section-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #8b949e;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .block {
+      background: #262626;
+      border: 1px solid #404040;
+      border-radius: 6px;
+      padding: 14px 20px;
+      font-size: 14px;
+      color: #d4d4d4;
+    }
+    .block-top {
+      text-align: center;
+      margin-bottom: 12px;
+    }
+    .block-main {
+      text-align: center;
+      margin-bottom: 16px;
+      padding: 18px 24px;
+      background: #2d2d2d;
+      border-color: #4a4a4a;
+    }
+    .block-main .name { font-weight: 600; font-size: 15px; color: #fff; }
+    .row {
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      gap: 24px;
+      margin-top: 16px;
+    }
+    .branch {
+      flex: 1;
+      max-width: 380px;
+    }
+    .branch-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #8b949e;
+      margin-bottom: 10px;
+      text-align: center;
+    }
+    .branch-content {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .branch-content .block {
+      text-align: center;
+      padding: 12px 14px;
+      font-size: 13px;
+    }
+    .arrow-down {
+      text-align: center;
+      color: #505050;
+      font-size: 14px;
+      margin: 6px 0;
+    }
+    .arrow-label {
+      font-size: 11px;
+      color: #6e7681;
+      margin-top: 4px;
+    }
+    .project-structure {
+      margin-top: 32px;
+      padding-top: 20px;
+      border-top: 1px solid #333;
+    }
+    .project-structure .section-label {
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="diagram">
+    <div class="title">Diverg: Shop-Style Proof Scan Architecture</div>
+    <div class="section-label">Architecture</div>
+
+    <div class="block block-top">Target (e.g. Juice Shop, authorized URL)</div>
+    <div class="arrow-down">↓</div>
+    <div class="block block-top">Proof Scan Config (headers, crypto, payment, high-value)</div>
+    <div class="arrow-down">↓</div>
+    <div class="block block-main">
+      <span class="name">Diverg Agent</span>
+    </div>
+    <div class="arrow-down">
+      <span>↓</span>
+      <div class="arrow-label">orchestrates</div>
+    </div>
+
+    <div class="row">
+      <div class="branch">
+        <div class="branch-label">Discovery &amp; Flow</div>
+        <div class="branch-content">
+          <div class="block">Discover Surface<br><span class="arrow-label">headers_ssl + recon (techstack)</span></div>
+          <div class="block">Adapt<br><span class="arrow-label">pick tools that match site</span></div>
+        </div>
+      </div>
+      <div class="branch">
+        <div class="branch-label">Custom Security Skills</div>
+        <div class="branch-content">
+          <div class="block">Headers/SSL Skill</div>
+          <div class="block">Crypto Security Skill</div>
+          <div class="block">Payment &amp; Financial Skill</div>
+          <div class="block">High-Value Flaws Skill</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-down" style="margin-top: 16px;">↓</div>
+    <div class="block block-top" style="text-align: center;">Report → Findings + fixes (no sensitive data exposed)</div>
+
+    <div class="project-structure">
+      <div class="section-label">Project Structure</div>
+      <div class="block" style="font-size: 12px; color: #8b949e;">
+        scripts/run_proof_scan.py → content/&lt;host&gt;-proof-results.json
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Diverg — From Raw to Report</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1419;
+      color: #e7e9ea;
+      min-height: 100vh;
+      padding: 32px;
+      line-height: 1.4;
+    }
+    .diagram { max-width: 920px; margin: 0 auto; }
+    .logo-wrap { text-align: center; margin-bottom: 20px; }
+    .logo-wrap img { height: 42px; width: auto; display: inline-block; vertical-align: middle; }
+    .title { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 6px; text-align: center; }
+    .subtitle { font-size: 13px; color: #71767b; text-align: center; margin-bottom: 28px; }
+    .section-label { font-size: 11px; font-weight: 600; color: #8b949e; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+    .node {
+      background: #1c2128;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 13px;
+      color: #e7e9ea;
+    }
+    .node strong { color: #fff; }
+    .node.highlight { border-color: #58a6ff; background: #0d1117; }
+    .row { display: flex; gap: 20px; margin: 12px 0; flex-wrap: wrap; justify-content: center; }
+    .col { flex: 1; min-width: 260px; max-width: 420px; }
+    .connector { text-align: center; color: #30363d; font-size: 12px; margin: 6px 0; }
+    .pipe { width: 2px; background: linear-gradient(to bottom, #30363d, #58a6ff33); margin: 0 auto; min-height: 10px; }
+    .pipe-label { font-size: 10px; color: #58a6ff; margin: 2px 0; }
+    .list-compact { font-size: 12px; color: #8b949e; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <div class="diagram">
+    <div class="logo-wrap"><img src="neuro-logo.png" alt="Neuro" /></div>
+    <div class="title">From Raw to Report</div>
+    <div class="subtitle">How tool output becomes a prioritized, evidence-backed report</div>
+
+    <div class="connector"><div class="pipe-label">INPUT</div><div class="pipe" style="height: 8px;"></div></div>
+    <div class="node">
+      <strong>Raw results</strong><br>
+      <span class="list-compact">JSON per skill: findings, header_findings, ssl_findings, extracted_endpoints, detected_versions, errors. Keyed by e.g. headers_ssl:full, client_surface:full.</span>
+    </div>
+
+    <div class="connector"><div class="pipe" style="height: 18px;"></div><div class="pipe-label">Correlation</div></div>
+
+    <div class="row">
+      <div class="col">
+        <div class="node">
+          <strong>Collect & classify</strong>
+          <div class="list-compact">All findings → buckets (Data Exposure, Access Control, Auth, Operational, Exploitation, Transport…).</div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="node">
+          <strong>Rank & attack paths</strong>
+          <div class="list-compact">Exploitability score. Likely attack paths (e.g. “Info disclosure → SSRF”). Evidence finding IDs.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="col">
+        <div class="node">
+          <strong>Recommended next tests</strong>
+          <div class="list-compact">If verbose error → SSRF. If IDOR + JWT → user_id sub. If GraphQL → batch/depth. If client_surface endpoints → API discovery.</div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="node">
+          <strong>Quality & readiness</strong>
+          <div class="list-compact">Coverage, confidence, not_fully_tested. Readiness score for “how production-ready is this target?”</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector"><div class="pipe" style="height: 18px;"></div><div class="pipe-label">LLM analysis</div></div>
+    <div class="node highlight" style="text-align: center;">
+      <strong>Context</strong>: Correlated context (buckets, ranked_findings, likely_attack_paths, recommended_next_tests) + truncated raw results.
+    </div>
+    <div class="connector"><div class="pipe" style="height: 10px;"></div></div>
+    <div class="node highlight" style="text-align: center;">
+      <strong>Report</strong>: Top findings, attack paths, RECOMMENDED NEXT TESTS, detection/readiness. CONFIRMED vs POSSIBLE. Source tags per claim. No sensitive data in evidence.
+    </div>
+  </div>
+</body>
+</html>

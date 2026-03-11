@@ -1,0 +1,20 @@
+{
+  "name": "auth_test",
+  "display_name": "Authentication & Session Tester",
+  "description": "Analyzes login forms, session cookies, and authentication mechanisms for security weaknesses.",
+  "version": "1.0.0",
+  "entry_point": "auth_test.py",
+  "parameters": {
+    "target_url": {
+      "type": "string",
+      "description": "Full URL of the target (ideally a login page)",
+      "required": true
+    },
+    "scan_type": {
+      "type": "string",
+      "description": "Type of test: 'full', 'forms', 'cookies', 'session'",
+      "default": "full"
+    }
+  },
+  "tags": ["security", "authentication", "session"]
+}

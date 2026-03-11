@@ -1,0 +1,290 @@
+SecTester Assessment Results
+Timestamp: 2026-03-09T00:56:52.322907+00:00
+Target: testphp.vulnweb.com
+======================================================================
+
+[run_osint]
+{
+  "target": "testphp.vulnweb.com",
+  "whois_info": {
+    "domain": "testphp.vulnweb.com",
+    "registrar": "Gandi SAS",
+    "creation_date": "2010-06-14 07:50:29+00:00",
+    "expiration_date": "2027-06-14 07:50:29+00:00",
+    "name_servers": [
+      "ns-105-a.gandi.net",
+      "ns-11-b.gandi.net",
+      "ns-140-c.gandi.net"
+    ],
+    "org": "Invicti Security Limited",
+    "country": "MT",
+    "emails": [
+      "abuse@support.gandi.net",
+      "e7c92ba29faca2e997bfc9ce58d5c661-57148476@contact.gandi.net"
+    ],
+    "dnssec": "unsigned"
+  },
+  "dns_records": [],
+  "email_patterns": [
+    {
+      "pattern": "{first}.{last}@testphp.vulnweb.com",
+      "source": "common pattern",
+      "confidence": "low"
+    },
+    {
+      "pattern": "{first}{last}@testphp.vulnweb.com",
+      "source": "common pattern",
+      "confidence": "low"
+    },
+    {
+      "pattern": "{f}{last}@testphp.vulnweb.com",
+      "source": "common pattern",
+      "confidence": "low"
+    },
+    {
+      "pattern": "{first}_{last}@testphp.vulnweb.com",
+      "source": "common pattern",
+      "confidence": "low"
+    },
+    {
+      "pattern": "{first}@testphp.vulnweb.com",
+      "source": "common pattern",
+      "confidence": "low"
+    },
+    {
+      "pattern": "{last}.{first}@testphp.vulnweb.com",
+      "source": "common pattern",
+      "confidence": "low"
+    }
+  ],
+  "wayback_snapshots": [
+    {
+      "url": "https://web.archive.org/web/20121206174033/http://testphp.vulnweb.com/",
+      "timestamp": "20121206174033",
+      "status_code": "200"
+    }
+  ],
+  "errors": [
+    "DNS enum error: local variable 'dns' referenced before assignment"
+  ]
+}
+
+----------------------------------------------------------------------
+
+[run_recon]
+{"error": "No module named 'Wappalyzer'", "traceback": "Traceback (most recent call last):\n  File \"/Users/fen/Documents/Sectester/bot.py\", line 901, in run_scan_skill\n    import recon\n  File \"/Users/fen/Documents/Sectester/skills/recon/recon.py\", line 21, in <module>\n    from Wappalyzer import Wappalyzer, WebPage\nModuleNotFoundError: No module named 'Wappalyzer'\n"}
+
+----------------------------------------------------------------------
+
+[run_headers_ssl]
+{
+  "target_url": "http://testphp.vulnweb.com",
+  "header_findings": [
+    {
+      "header": "Strict-Transport-Security",
+      "status": "missing",
+      "value": null,
+      "severity": "High",
+      "recommendation": "Add 'Strict-Transport-Security: max-age=31536000; includeSubDomains; preload' to enforce HTTPS."
+    },
+    {
+      "header": "Content-Security-Policy",
+      "status": "missing",
+      "value": null,
+      "severity": "Medium",
+      "recommendation": "Implement a Content-Security-Policy header to mitigate XSS and data injection attacks."
+    },
+    {
+      "header": "X-Content-Type-Options",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add 'X-Content-Type-Options: nosniff' to prevent MIME-type sniffing."
+    },
+    {
+      "header": "X-Frame-Options",
+      "status": "missing",
+      "value": null,
+      "severity": "Medium",
+      "recommendation": "Add 'X-Frame-Options: DENY' or 'SAMEORIGIN' to prevent clickjacking."
+    },
+    {
+      "header": "X-XSS-Protection",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add 'X-XSS-Protection: 1; mode=block' (legacy browsers) or rely on CSP."
+    },
+    {
+      "header": "Referrer-Policy",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add 'Referrer-Policy: strict-origin-when-cross-origin' to limit referrer leakage."
+    },
+    {
+      "header": "Permissions-Policy",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add a Permissions-Policy header to restrict browser feature access (camera, mic, geolocation)."
+    },
+    {
+      "header": "Cross-Origin-Opener-Policy",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add 'Cross-Origin-Opener-Policy: same-origin' to isolate browsing context."
+    },
+    {
+      "header": "Cross-Origin-Resource-Policy",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add 'Cross-Origin-Resource-Policy: same-origin' to prevent cross-origin resource loading."
+    },
+    {
+      "header": "Server",
+      "status": "present",
+      "value": "nginx/1.19.0",
+      "severity": "Low",
+      "recommendation": "Reveals web server software and version. Remove or genericize this header."
+    },
+    {
+      "header": "X-Powered-By",
+      "status": "present",
+      "value": "PHP/5.6.40-38+ubuntu20.04.1+deb.sury.org+1",
+      "severity": "Low",
+      "recommendation": "Reveals backend framework. Remove this header to reduce information leakage."
+    }
+  ],
+  "ssl_findings": [
+    {
+      "check": "HTTPS",
+      "status": "fail",
+      "detail": "Target is not using HTTPS.",
+      "severity": "High"
+    }
+  ],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[run_web_vulns]
+{
+  "target_url": "http://testphp.vulnweb.com",
+  "findings": [
+    {
+      "title": "POST form missing CSRF token",
+      "severity": "Medium",
+      "url": "http://testphp.vulnweb.com/login.php",
+      "category": "OWASP-A01 Broken Access Control (CSRF)",
+      "evidence": "Form action: http://testphp.vulnweb.com/userinfo.php\nInput fields: uname, pass, \nNo CSRF token field detected",
+      "impact": "An attacker could forge cross-site requests to perform actions on behalf of authenticated users.",
+      "remediation": "Add a unique, unpredictable CSRF token to every state-changing form and validate it server-side.",
+      "cvss": "4.3 (Medium)"
+    },
+    {
+      "title": "POST form missing CSRF token",
+      "severity": "Medium",
+      "url": "http://testphp.vulnweb.com/login.php",
+      "category": "OWASP-A01 Broken Access Control (CSRF)",
+      "evidence": "Form action: http://testphp.vulnweb.com/search.php?test=query\nInput fields: searchfor, gobutton\nNo CSRF token field detected",
+      "impact": "An attacker could forge cross-site requests to perform actions on behalf of authenticated users.",
+      "remediation": "Add a unique, unpredictable CSRF token to every state-changing form and validate it server-side.",
+      "cvss": "4.3 (Medium)"
+    },
+    {
+      "title": "POST form missing CSRF token",
+      "severity": "Medium",
+      "url": "http://testphp.vulnweb.com/categories.php",
+      "category": "OWASP-A01 Broken Access Control (CSRF)",
+      "evidence": "Form action: http://testphp.vulnweb.com/search.php?test=query\nInput fields: searchfor, gobutton\nNo CSRF token field detected",
+      "impact": "An attacker could forge cross-site requests to perform actions on behalf of authenticated users.",
+      "remediation": "Add a unique, unpredictable CSRF token to every state-changing form and validate it server-side.",
+      "cvss": "4.3 (Medium)"
+    },
+    {
+      "title": "POST form missing CSRF token",
+      "severity": "Medium",
+      "url": "http://testphp.vulnweb.com/userinfo.php",
+      "category": "OWASP-A01 Broken Access Control (CSRF)",
+      "evidence": "Form action: http://testphp.vulnweb.com/userinfo.php\nInput fields: uname, pass, \nNo CSRF token field detected",
+      "impact": "An attacker could forge cross-site requests to perform actions on behalf of authenticated users.",
+      "remediation": "Add a unique, unpredictable CSRF token to every state-changing form and validate it server-side.",
+      "cvss": "4.3 (Medium)"
+    },
+    {
+      "title": "POST form missing CSRF token",
+      "severity": "Medium",
+      "url": "http://testphp.vulnweb.com/userinfo.php",
+      "category": "OWASP-A01 Broken Access Control (CSRF)",
+      "evidence": "Form action: http://testphp.vulnweb.com/search.php?test=query\nInput fields: searchfor, gobutton\nNo CSRF token field detected",
+      "impact": "An attacker could forge cross-site requests to perform actions on behalf of authenticated users.",
+      "remediation": "Add a unique, unpredictable CSRF token to every state-changing form and validate it server-side.",
+      "cvss": "4.3 (Medium)"
+    },
+    {
+      "title": "POST form missing CSRF token",
+      "severity": "Medium",
+      "url": "http://testphp.vulnweb.com/disclaimer.php",
+      "category": "OWASP-A01 Broken Access Control (CSRF)",
+      "evidence": "Form action: http://testphp.vulnweb.com/search.php?test=query\nInput fields: searchfor, gobutton\nNo CSRF token field detected",
+      "impact": "An attacker could forge cross-site requests to perform actions on behalf of authenticated users.",
+      "remediation": "Add a unique, unpredictable CSRF token to every state-changing form and validate it server-side.",
+      "cvss": "4.3 (Medium)"
+    },
+    {
+      "title": "POST form missing CSRF token",
+      "severity": "Medium",
+      "url": "http://testphp.vulnweb.com/cart.php",
+      "category": "OWASP-A01 Broken Access Control (CSRF)",
+      "evidence": "Form action: http://testphp.vulnweb.com/search.php?test=query\nInput fields: searchfor, gobutton\nNo CSRF token field detected",
+      "impact": "An attacker could forge cross-site requests to perform actions on behalf of authenticated users.",
+      "remediation": "Add a unique, unpredictable CSRF token to every state-changing form and validate it server-side.",
+      "cvss": "4.3 (Medium)"
+    },
+    {
+      "title": "POST form missing CSRF token",
+      "severity": "Medium",
+      "url": "http://testphp.vulnweb.com",
+      "category": "OWASP-A01 Broken Access Control (CSRF)",
+      "evidence": "Form action: http://testphp.vulnweb.com/search.php?test=query\nInput fields: searchfor, gobutton\nNo CSRF token field detected",
+      "impact": "An attacker could forge cross-site requests to perform actions on behalf of authenticated users.",
+      "remediation": "Add a unique, unpredictable CSRF token to every state-changing form and validate it server-side.",
+      "cvss": "4.3 (Medium)"
+    },
+    {
+      "title": "POST form missing CSRF token",
+      "severity": "Medium",
+      "url": "http://testphp.vulnweb.com/guestbook.php",
+      "category": "OWASP-A01 Broken Access Control (CSRF)",
+      "evidence": "Form action: http://testphp.vulnweb.com/guestbook.php\nInput fields: name, submit\nNo CSRF token field detected",
+      "impact": "An attacker could forge cross-site requests to perform actions on behalf of authenticated users.",
+      "remediation": "Add a unique, unpredictable CSRF token to every state-changing form and validate it server-side.",
+      "cvss": "4.3 (Medium)"
+    },
+    {
+      "title": "POST form missing CSRF token",
+      "severity": "Medium",
+      "url": "http://testphp.vulnweb.com/guestbook.php",
+      "category": "OWASP-A01 Broken Access Control (CSRF)",
+      "evidence": "Form action: http://testphp.vulnweb.com/search.php?test=query\nInput fields: searchfor, gobutton\nNo CSRF token field detected",
+      "impact": "An attacker could forge cross-site requests to perform actions on behalf o
+
+----------------------------------------------------------------------
+
+[run_auth_test]
+{
+  "target_url": "http://testphp.vulnweb.com",
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[run_api_test]
+{"error": "api_test timed out after 45s", "target": "http://testphp.vulnweb.com"}
+
+----------------------------------------------------------------------

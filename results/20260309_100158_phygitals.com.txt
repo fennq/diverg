@@ -1,0 +1,197 @@
+SecTester Assessment Results
+Timestamp: 2026-03-09T02:01:58.045218+00:00
+Target: phygitals.com
+======================================================================
+
+[run_recon]
+{"error": "No module named 'Wappalyzer'", "traceback": "Traceback (most recent call last):\n  File \"/Users/fen/Documents/Sectester/bot.py\", line 1145, in run_scan_skill\n    import recon\n  File \"/Users/fen/Documents/Sectester/skills/recon/recon.py\", line 23, in <module>\n    from Wappalyzer import Wappalyzer, WebPage\nModuleNotFoundError: No module named 'Wappalyzer'\n"}
+
+----------------------------------------------------------------------
+
+[run_web_vulns]
+{
+  "target_url": "http://phygitals.com",
+  "findings": [
+    {
+      "title": "CSP header missing \u2014 no XSS mitigation at browser level",
+      "severity": "Medium",
+      "url": "http://phygitals.com",
+      "category": "OWASP-A05 Security Misconfiguration (Headers)",
+      "evidence": "Response headers do not include 'Content-Security-Policy'",
+      "impact": "Missing Content-Security-Policy header reduces defense-in-depth against common web attacks.",
+      "remediation": "Add the 'Content-Security-Policy' response header with an appropriate value.",
+      "cvss": ""
+    },
+    {
+      "title": "X-Content-Type-Options missing \u2014 MIME sniffing possible",
+      "severity": "Low",
+      "url": "http://phygitals.com",
+      "category": "OWASP-A05 Security Misconfiguration (Headers)",
+      "evidence": "Response headers do not include 'X-Content-Type-Options'",
+      "impact": "Missing X-Content-Type-Options header reduces defense-in-depth against common web attacks.",
+      "remediation": "Add the 'X-Content-Type-Options' response header with an appropriate value.",
+      "cvss": ""
+    },
+    {
+      "title": "X-Frame-Options missing \u2014 clickjacking possible",
+      "severity": "Medium",
+      "url": "http://phygitals.com",
+      "category": "OWASP-A05 Security Misconfiguration (Headers)",
+      "evidence": "Response headers do not include 'X-Frame-Options'",
+      "impact": "Missing X-Frame-Options header reduces defense-in-depth against common web attacks.",
+      "remediation": "Add the 'X-Frame-Options' response header with an appropriate value.",
+      "cvss": ""
+    },
+    {
+      "title": "X-XSS-Protection missing \u2014 legacy XSS filter not enabled",
+      "severity": "Low",
+      "url": "http://phygitals.com",
+      "category": "OWASP-A05 Security Misconfiguration (Headers)",
+      "evidence": "Response headers do not include 'X-XSS-Protection'",
+      "impact": "Missing X-XSS-Protection header reduces defense-in-depth against common web attacks.",
+      "remediation": "Add the 'X-XSS-Protection' response header with an appropriate value.",
+      "cvss": ""
+    },
+    {
+      "title": "Referrer-Policy missing \u2014 referrer leakage possible",
+      "severity": "Low",
+      "url": "http://phygitals.com",
+      "category": "OWASP-A05 Security Misconfiguration (Headers)",
+      "evidence": "Response headers do not include 'Referrer-Policy'",
+      "impact": "Missing Referrer-Policy header reduces defense-in-depth against common web attacks.",
+      "remediation": "Add the 'Referrer-Policy' response header with an appropriate value.",
+      "cvss": ""
+    },
+    {
+      "title": "Permissions-Policy missing \u2014 browser features not restricted",
+      "severity": "Low",
+      "url": "http://phygitals.com",
+      "category": "OWASP-A05 Security Misconfiguration (Headers)",
+      "evidence": "Response headers do not include 'Permissions-Policy'",
+      "impact": "Missing Permissions-Policy header reduces defense-in-depth against common web attacks.",
+      "remediation": "Add the 'Permissions-Policy' response header with an appropriate value.",
+      "cvss": ""
+    }
+  ],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[run_headers_ssl]
+{
+  "target_url": "http://phygitals.com",
+  "header_findings": [
+    {
+      "header": "Strict-Transport-Security",
+      "status": "present",
+      "value": "max-age=63072000",
+      "severity": "Info",
+      "recommendation": "Header is present: max-age=63072000"
+    },
+    {
+      "header": "Content-Security-Policy",
+      "status": "missing",
+      "value": null,
+      "severity": "Medium",
+      "recommendation": "Implement a Content-Security-Policy header to mitigate XSS and data injection attacks."
+    },
+    {
+      "header": "X-Content-Type-Options",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add 'X-Content-Type-Options: nosniff' to prevent MIME-type sniffing."
+    },
+    {
+      "header": "X-Frame-Options",
+      "status": "missing",
+      "value": null,
+      "severity": "Medium",
+      "recommendation": "Add 'X-Frame-Options: DENY' or 'SAMEORIGIN' to prevent clickjacking."
+    },
+    {
+      "header": "X-XSS-Protection",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add 'X-XSS-Protection: 1; mode=block' (legacy browsers) or rely on CSP."
+    },
+    {
+      "header": "Referrer-Policy",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add 'Referrer-Policy: strict-origin-when-cross-origin' to limit referrer leakage."
+    },
+    {
+      "header": "Permissions-Policy",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add a Permissions-Policy header to restrict browser feature access (camera, mic, geolocation)."
+    },
+    {
+      "header": "Cross-Origin-Opener-Policy",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add 'Cross-Origin-Opener-Policy: same-origin' to isolate browsing context."
+    },
+    {
+      "header": "Cross-Origin-Resource-Policy",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add 'Cross-Origin-Resource-Policy: same-origin' to prevent cross-origin resource loading."
+    },
+    {
+      "header": "Strict-Transport-Security",
+      "status": "misconfigured",
+      "value": "max-age=63072000",
+      "severity": "Medium",
+      "recommendation": "Add 'includeSubDomains' directive to HSTS header."
+    },
+    {
+      "header": "Server",
+      "status": "present",
+      "value": "cloudflare",
+      "severity": "Low",
+      "recommendation": "Reveals web server software and version. Remove or genericize this header."
+    },
+    {
+      "header": "X-Powered-By",
+      "status": "present",
+      "value": "Next.js",
+      "severity": "Low",
+      "recommendation": "Reveals backend framework. Remove this header to reduce information leakage."
+    }
+  ],
+  "ssl_findings": [
+    {
+      "check": "HTTPS",
+      "status": "fail",
+      "detail": "Target is not using HTTPS.",
+      "severity": "High"
+    }
+  ],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[run_auth_test]
+{"error": "auth_test timed out after 45s", "target": "http://phygitals.com"}
+
+----------------------------------------------------------------------
+
+[run_api_test]
+{"error": "api_test timed out after 45s", "target": "http://phygitals.com"}
+
+----------------------------------------------------------------------
+
+[run_osint]
+{"error": "osint timed out after 45s", "target": "phygitals.com"}
+
+----------------------------------------------------------------------

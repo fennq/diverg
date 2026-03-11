@@ -1,0 +1,13 @@
+# openclaw-sdk>=2.1.0  # install separately if running OpenClaw locally
+python-nmap>=0.7.1
+dnspython>=2.6.0
+python-whois>=0.9.4
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+cryptography>=42.0.0
+python-telegram-bot>=21.0
+Wappalyzer>=0.3.1
+openapi-spec-validator>=0.7.0
+aiohttp>=3.9.0
+openai>=1.30.0
+python-dotenv>=1.0.0

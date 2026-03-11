@@ -1,0 +1,1111 @@
+Diverg Assessment Results
+Timestamp: 2026-03-11T02:52:56.472005+00:00
+Target: moltbook.com
+======================================================================
+
+[osint:full]
+{
+  "target": "moltbook.com",
+  "whois_info": {
+    "domain": "moltbook.com",
+    "registrar": "DREAMHOST",
+    "creation_date": "2026-01-27 12:42:30+00:00",
+    "expiration_date": "2027-01-27 12:42:30+00:00",
+    "name_servers": [
+      "albert.ns.cloudflare.com",
+      "angela.ns.cloudflare.com"
+    ],
+    "org": "Proxy Protection LLC",
+    "country": "US",
+    "emails": [
+      "domain-abuse@dreamhost.com",
+      "dj8cmkmteywel2k@proxy.dreamhost.com"
+    ],
+    "dnssec": "unsigned"
+  },
+  "dns_records": [],
+  "email_patterns": [
+    {
+      "pattern": "Google Workspace (Gmail)",
+      "source": "SPF record",
+      "confidence": "high"
+    },
+    {
+      "pattern": "Google Workspace",
+      "source": "MX: smtp.google.com.",
+      "confidence": "high"
+    },
+    {
+      "pattern": "{first}.{last}@moltbook.com",
+      "source": "common pattern",
+      "confidence": "low"
+    },
+    {
+      "pattern": "{first}{last}@moltbook.com",
+      "source": "common pattern",
+      "confidence": "low"
+    },
+    {
+      "pattern": "{f}{last}@moltbook.com",
+      "source": "common pattern",
+      "confidence": "low"
+    },
+    {
+      "pattern": "{first}_{last}@moltbook.com",
+      "source": "common pattern",
+      "confidence": "low"
+    },
+    {
+      "pattern": "{first}@moltbook.com",
+      "source": "common pattern",
+      "confidence": "low"
+    },
+    {
+      "pattern": "{last}.{first}@moltbook.com",
+      "source": "common pattern",
+      "confidence": "low"
+    },
+    {
+      "pattern": "info@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "admin@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "support@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "contact@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "help@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "sales@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "security@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "abuse@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "webmaster@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "postmaster@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "noreply@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "team@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "hello@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "office@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "press@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "media@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "hr@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "jobs@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "careers@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "billing@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "accounts@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "legal@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "privacy@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "compliance@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "ceo@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "cto@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "cfo@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "dev@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "engineering@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "ops@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "marketing@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "feedback@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "newsletter@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "service@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "customerservice@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "it@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "sysadmin@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "root@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    },
+    {
+      "pattern": "hostmaster@moltbook.com",
+      "source": "common role address",
+      "confidence": "medium"
+    }
+  ],
+  "wayback_snapshots": [],
+  "subdomains": [
+    {
+      "subdomain": "cdrcb.com.moltbook.com",
+      "source": "crt.sh"
+    },
+    {
+      "subdomain": "moltbook.com",
+      "source": "crt.sh"
+    },
+    {
+      "subdomain": "www.moltbook.com",
+      "source": "crt.sh"
+    }
+  ],
+  "google_dorks": [],
+  "tech_infra": null,
+  "social_media": [],
+  "breach_info": [],
+  "errors": [
+    "DNS enum error: local variable 'dns' referenced before assignment"
+  ]
+}
+
+----------------------------------------------------------------------
+
+[recon:subdomains]
+{
+  "target": "moltbook.com",
+  "ports": [],
+  "subdomains": [
+    {
+      "subdomain": "www.moltbook.com",
+      "ip": "99.86.212.38",
+      "source": "crt.sh"
+    },
+    {
+      "subdomain": "cdrcb.com.moltbook.com",
+      "ip": null,
+      "source": "crt.sh"
+    }
+  ],
+  "technologies": [],
+  "sensitive_files": [],
+  "waf": null,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[recon:techstack]
+{
+  "target": "moltbook.com",
+  "ports": [],
+  "subdomains": [],
+  "technologies": [
+    {
+      "name": "Amazon Web Services",
+      "categories": [
+        "PaaS"
+      ],
+      "version": ""
+    },
+    {
+      "name": "Next.js",
+      "categories": [
+        "Web frameworks",
+        "Web servers"
+      ],
+      "version": ""
+    },
+    {
+      "name": "React",
+      "categories": [
+        "JavaScript frameworks"
+      ],
+      "version": ""
+    },
+    {
+      "name": "webpack",
+      "categories": [
+        "Miscellaneous"
+      ],
+      "version": ""
+    },
+    {
+      "name": "Node.js",
+      "categories": [
+        "Programming languages"
+      ],
+      "version": ""
+    },
+    {
+      "name": "Amazon Cloudfront",
+      "categories": [
+        "CDN"
+      ],
+      "version": ""
+    },
+    {
+      "name": "CloudFront",
+      "categories": [
+        "web-server"
+      ],
+      "version": ""
+    },
+    {
+      "name": "Miss from cloudfront",
+      "categories": [
+        "cache"
+      ],
+      "version": ""
+    },
+    {
+      "name": "MEL51-P1",
+      "categories": [
+        "cdn"
+      ],
+      "version": ""
+    }
+  ],
+  "sensitive_files": [],
+  "waf": null,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[recon:sensitive]
+{
+  "target": "moltbook.com",
+  "ports": [],
+  "subdomains": [],
+  "technologies": [],
+  "sensitive_files": [
+    {
+      "path": "/log/production.log",
+      "status_code": 403,
+      "severity": "Low",
+      "category": "Logs",
+      "evidence": "Status: 403 Forbidden (exists but protected)"
+    }
+  ],
+  "waf": null,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[headers_ssl:full]
+{
+  "target_url": "https://moltbook.com",
+  "header_findings": [
+    {
+      "header": "Strict-Transport-Security",
+      "status": "present",
+      "value": "max-age=63072000; includeSubdomains; preload",
+      "severity": "Info",
+      "recommendation": "Header is present: max-age=63072000; includeSubdomains; preload"
+    },
+    {
+      "header": "Content-Security-Policy",
+      "status": "present",
+      "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data: https:; connect-src 'self' https: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+      "severity": "Info",
+      "recommendation": "Header is present: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data: https:; connect-src 'self' https: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+    },
+    {
+      "header": "X-Content-Type-Options",
+      "status": "present",
+      "value": "nosniff",
+      "severity": "Info",
+      "recommendation": "Header is present: nosniff"
+    },
+    {
+      "header": "X-Frame-Options",
+      "status": "present",
+      "value": "DENY",
+      "severity": "Info",
+      "recommendation": "Header is present: DENY"
+    },
+    {
+      "header": "X-XSS-Protection",
+      "status": "present",
+      "value": "1; mode=block",
+      "severity": "Info",
+      "recommendation": "Header is present: 1; mode=block"
+    },
+    {
+      "header": "Referrer-Policy",
+      "status": "present",
+      "value": "strict-origin-when-cross-origin",
+      "severity": "Info",
+      "recommendation": "Header is present: strict-origin-when-cross-origin"
+    },
+    {
+      "header": "Permissions-Policy",
+      "status": "present",
+      "value": "camera=(), microphone=(), geolocation=()",
+      "severity": "Info",
+      "recommendation": "Header is present: camera=(), microphone=(), geolocation=()"
+    },
+    {
+      "header": "Cross-Origin-Opener-Policy",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add 'Cross-Origin-Opener-Policy: same-origin' to isolate browsing context."
+    },
+    {
+      "header": "Cross-Origin-Resource-Policy",
+      "status": "missing",
+      "value": null,
+      "severity": "Low",
+      "recommendation": "Add 'Cross-Origin-Resource-Policy: same-origin' to prevent cross-origin resource loading."
+    },
+    {
+      "header": "Strict-Transport-Security",
+      "status": "misconfigured",
+      "value": "max-age=63072000; includeSubdomains; preload",
+      "severity": "Medium",
+      "recommendation": "Add 'includeSubDomains' directive to HSTS header."
+    },
+    {
+      "header": "Server",
+      "status": "present",
+      "value": "CloudFront",
+      "severity": "Low",
+      "recommendation": "Reveals web server software and version. Remove or genericize this header."
+    },
+    {
+      "header": "X-Powered-By",
+      "status": "present",
+      "value": "Next.js",
+      "severity": "Low",
+      "recommendation": "Reveals backend framework. Remove this header to reduce information leakage."
+    }
+  ],
+  "ssl_findings": [
+    {
+      "check": "Protocol Version",
+      "status": "pass",
+      "detail": "Negotiated protocol: TLSv1.2",
+      "severity": "Info"
+    },
+    {
+      "check": "Cipher Suite",
+      "status": "pass",
+      "detail": "Cipher: ECDHE-RSA-AES128-GCM-SHA256, Key bits: 128",
+      "severity": "Info"
+    },
+    {
+      "check": "Certificate Expiry",
+      "status": "pass",
+      "detail": "Certificate valid for 372 days (expires: 2027-03-18T23:59:59+00:00)",
+      "severity": "Info"
+    },
+    {
+      "check": "Certificate Details",
+      "status": "pass",
+      "detail": "Subject: CN=moltbook.com\nIssuer: CN=Amazon RSA 2048 M01,O=Amazon,C=US",
+      "severity": "Info"
+    },
+    {
+      "check": "Weak Protocol: TLSv1.0",
+      "status": "pass",
+      "detail": "Server correctly rejects TLSv1.0.",
+      "severity": "Info"
+    },
+    {
+      "check": "Weak Protocol: TLSv1.1",
+      "status": "pass",
+      "detail": "Server correctly rejects TLSv1.1.",
+      "severity": "Info"
+    }
+  ],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[crypto_security:full]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [
+    {
+      "title": "Weak crypto in frontend: Math.random() used (predictable; use crypto.getRandomValues) [VERIFY]",
+      "severity": "Medium",
+      "url": "https://moltbook.com/_next/static/chunks/785528a67640bd6e.js",
+      "category": "Crypto / Frontend",
+      "evidence": "Pattern matched in asset. If used for tokens/sessions/passwords, impact is high.",
+      "impact": "Predictable or weak crypto can lead to session prediction, token forgery, or password cracking.",
+      "remediation": "Use crypto.getRandomValues() for randomness; avoid MD5/DES/RC4/ECB for security-sensitive data."
+    },
+    {
+      "title": "Weak crypto in frontend: Math.random() used (predictable; use crypto.getRandomValues) [VERIFY]",
+      "severity": "Medium",
+      "url": "https://moltbook.com/_next/static/chunks/b236f1f448afb5e0.js",
+      "category": "Crypto / Frontend",
+      "evidence": "Pattern matched in asset. If used for tokens/sessions/passwords, impact is high.",
+      "impact": "Predictable or weak crypto can lead to session prediction, token forgery, or password cracking.",
+      "remediation": "Use crypto.getRandomValues() for randomness; avoid MD5/DES/RC4/ECB for security-sensitive data."
+    }
+  ],
+  "jwt_checked": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[data_leak_risks:full]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [
+    {
+      "title": "Verbose error or internal path disclosure [CONFIRMED]",
+      "severity": "Medium",
+      "url": "https://moltbook.com/api/user/../../../etc/passwd",
+      "category": "Data Leak Risks",
+      "evidence": "Response (404) matched internal/stack/path pattern. Snippet (sanitized): <!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"stylesheet\" href=\"/_next/static/chunks/b35d7cbd7f232d6a.css\"...",
+      "impact": "Small disclosure that can become a big leak: attackers learn stack, paths, or internal IPs and chain into further exploitation.",
+      "remediation": "Return generic error pages in production; disable stack traces and path disclosure; avoid leaking framework or DB names."
+    }
+  ],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[client_surface:deep]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [
+    {
+      "title": "Dangerous sink in chunk: innerHTML assignment [VERIFY]",
+      "severity": "Medium",
+      "url": "https://moltbook.com/_next/static/chunks/694aaced0024becc.js",
+      "category": "Client-Side Security",
+      "evidence": "Pattern matched in JS. If user-controlled data reaches this sink, XSS or code execution is possible.",
+      "impact": "Attackers may achieve XSS or execute script if they control input that flows to this sink.",
+      "remediation": "Avoid eval/new Function with user input. Sanitize and CSP for innerHTML/document.write."
+    },
+    {
+      "title": "postMessage / message listener in chunk [REVIEW]",
+      "severity": "Low",
+      "url": "https://moltbook.com/_next/static/chunks/694aaced0024becc.js",
+      "category": "Client-Side Security",
+      "evidence": "postMessage or addEventListener('message') found. Verify origin validation to prevent cross-origin abuse.",
+      "impact": "Missing origin check can lead to cross-origin data theft or command injection.",
+      "remediation": "Always validate event.origin (allowlist) before processing postMessage."
+    },
+    {
+      "title": "postMessage / message listener in chunk [REVIEW]",
+      "severity": "Low",
+      "url": "https://moltbook.com/_next/static/chunks/a6dad97d9634a72d.js",
+      "category": "Client-Side Security",
+      "evidence": "postMessage or addEventListener('message') found. Verify origin validation to prevent cross-origin abuse.",
+      "impact": "Missing origin check can lead to cross-origin data theft or command injection.",
+      "remediation": "Always validate event.origin (allowlist) before processing postMessage."
+    },
+    {
+      "title": "Dangerous sink in chunk: innerHTML assignment [VERIFY]",
+      "severity": "Medium",
+      "url": "https://moltbook.com/_next/static/chunks/785528a67640bd6e.js",
+      "category": "Client-Side Security",
+      "evidence": "Pattern matched in JS. If user-controlled data reaches this sink, XSS or code execution is possible.",
+      "impact": "Attackers may achieve XSS or execute script if they control input that flows to this sink.",
+      "remediation": "Avoid eval/new Function with user input. Sanitize and CSP for innerHTML/document.write."
+    },
+    {
+      "title": "postMessage / message listener in chunk [REVIEW]",
+      "severity": "Low",
+      "url": "https://moltbook.com/_next/static/chunks/785528a67640bd6e.js",
+      "category": "Client-Side Security",
+      "evidence": "postMessage or addEventListener('message') found. Verify origin validation to prevent cross-origin abuse.",
+      "impact": "Missing origin check can lead to cross-origin data theft or command injection.",
+      "remediation": "Always validate event.origin (allowlist) before processing postMessage."
+    },
+    {
+      "title": "API endpoints extracted from client JS [INFO]",
+      "severity": "Info",
+      "url": "https://moltbook.com",
+      "category": "Client-Side Security",
+      "evidence": "Found 5 path-like strings (fetch/axios/literals). Use for targeted API testing. Sample: /api/v1/activity/recent, /api/v1/auth/me, /api/v1/homepage, /api/v1/observers, /api/v1/posts",
+      "impact": "Client-known endpoints may not be in server docs; test for auth bypass and parameter abuse.",
+      "remediation": "Ensure API docs and auth coverage match what the frontend actually calls."
+    }
+  ],
+  "extracted_endpoints": [
+    "/api/v1/activity/recent",
+    "/api/v1/auth/me",
+    "/api/v1/homepage",
+    "/api/v1/observers",
+    "/api/v1/posts"
+  ],
+  "detected_versions": [],
+  "source_map_count": 0,
+  "js_files_scanned": 15,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[dependency_audit:full]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [
+    {
+      "title": "Detected versions (no CVE match in watchlist)",
+      "severity": "Info",
+      "url": "https://moltbook.com",
+      "category": "Dependency / CVE",
+      "evidence": "Collected: Next.js unknown",
+      "impact": "Update cve_watchlist.json when new critical CVEs drop to get alerts.",
+      "remediation": "Keep stack updated; add new CVEs to watchlist for future scans."
+    }
+  ],
+  "detected_versions": [
+    {
+      "product": "Next.js",
+      "version": "unknown",
+      "source": "header:X-Powered-By"
+    }
+  ],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[logic_abuse:full]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "endpoints_probed": 12,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[api_test:discovery]
+{
+  "target_url": "https://moltbook.com",
+  "endpoints_found": [
+    {
+      "url": "https://moltbook.com/admin/",
+      "status_code": 308,
+      "methods": [],
+      "content_type": "",
+      "auth_required": false
+    },
+    {
+      "url": "https://moltbook.com/dashboard",
+      "status_code": 200,
+      "methods": [],
+      "content_type": "text/html; charset=utf-8",
+      "auth_required": false
+    },
+    {
+      "url": "https://moltbook.com/phpMyAdmin/",
+      "status_code": 308,
+      "methods": [],
+      "content_type": "",
+      "auth_required": false
+    },
+    {
+      "url": "https://moltbook.com/app.config",
+      "status_code": 403,
+      "methods": [],
+      "content_type": "text/html",
+      "auth_required": true
+    }
+  ],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[api_test:graphql]
+{
+  "target_url": "https://moltbook.com",
+  "endpoints_found": [],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[auth_test:forms]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[auth_test:session]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[company_exposure:operational]
+{
+  "target_url": "https://moltbook.com",
+  "surfaces": [
+    {
+      "category": "admin",
+      "label": "Dashboard",
+      "url": "https://moltbook.com/dashboard",
+      "status_code": 200,
+      "exposure_type": "public",
+      "platform": "",
+      "notes": "Admin or management route returned content"
+    },
+    {
+      "category": "admin",
+      "label": "Admin panel",
+      "url": "https://moltbook.com/admin",
+      "status_code": 200,
+      "exposure_type": "public",
+      "platform": "",
+      "notes": "Admin or management route returned content"
+    },
+    {
+      "category": "identity",
+      "label": "Login surface",
+      "url": "https://moltbook.com/login",
+      "status_code": 200,
+      "exposure_type": "public",
+      "platform": "",
+      "notes": "Identity-related route returned content"
+    },
+    {
+      "category": "observability",
+      "label": "Health endpoint",
+      "url": "https://moltbook.com/health",
+      "status_code": 200,
+      "exposure_type": "public",
+      "platform": "",
+      "notes": "Operational endpoint returned content"
+    }
+  ],
+  "findings": [
+    {
+      "title": "Publicly reachable admin or management surface",
+      "severity": "High",
+      "url": "https://moltbook.com/dashboard",
+      "category": "Operational Exposure",
+      "evidence": "Status: 200 | Type: text/html; charset=utf-8 | Note: Admin or management route returned content | Body: <!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"stylesheet\" href=\"/_next/static/chunks/b",
+      "impact": "Internet-facing admin surfaces increase the chance of unauthorized access attempts, credential attacks, and sensitive workflow exposure.",
+      "remediation": "Restrict admin interfaces behind strong authentication, IP allowlists, VPN, or zero-trust access controls."
+    },
+    {
+      "title": "Publicly reachable admin or management surface",
+      "severity": "High",
+      "url": "https://moltbook.com/admin",
+      "category": "Operational Exposure",
+      "evidence": "Status: 200 | Type: text/html; charset=utf-8 | Note: Admin or management route returned content | Body: <!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"stylesheet\" href=\"/_next/static/chunks/b",
+      "impact": "Internet-facing admin surfaces increase the chance of unauthorized access attempts, credential attacks, and sensitive workflow exposure.",
+      "remediation": "Restrict admin interfaces behind strong authentication, IP allowlists, VPN, or zero-trust access controls."
+    },
+    {
+      "title": "Identity or sso surface publicly reachable",
+      "severity": "Medium",
+      "url": "https://moltbook.com/login",
+      "category": "Authentication",
+      "evidence": "Status: 200 | Type: text/html; charset=utf-8 | Note: Identity-related route returned content | Body: <!DOCTYPE html><html lang=\"en\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><link rel=\"stylesheet\" href=\"/_next/static/chunks/b",
+      "impact": "Public identity surfaces concentrate login, federation, and account-recovery flows that deserve priority hardening and monitoring.",
+      "remediation": "Review exposed identity routes, harden federation settings, and monitor them closely for brute-force, enumeration, and token abuse."
+    },
+    {
+      "title": "Operational or debug endpoint reachable from the internet",
+      "severity": "Medium",
+      "url": "https://moltbook.com/health",
+      "category": "Operational Exposure",
+      "evidence": "Status: 200 | Type: application/json | Note: Operational endpoint returned content | Body: {\"status\":\"OK\"}",
+      "impact": "Debug and observability endpoints can reveal internal configuration, process data, metrics, and implementation details valuable to attackers.",
+      "remediation": "Remove public exposure from debug and telemetry endpoints or place them behind authenticated internal-only access."
+    }
+  ],
+  "errors": [
+    "Budget expired before completing alternate-host probing"
+  ]
+}
+
+----------------------------------------------------------------------
+
+[high_value_flaws:full]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [
+    {
+      "title": "Possible secret/credential exposure in src [VERIFY]",
+      "severity": "Critical",
+      "url": "https://moltbook.com/_next/static/chunks/785528a67640bd6e.js",
+      "category": "Sensitive Data Exposure",
+      "evidence": "Pattern: SECRET:!0,r...tion. Source: src. Verify manually; do not expose in reports.",
+      "impact": "Leaked credentials can lead to account takeover, data breach, or financial loss.",
+      "remediation": "Remove secrets from client-side code. Use backend-only keys and env vars."
+    }
+  ],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[race_condition:full]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "endpoints_tested": 10,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[payment_financial:full]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "endpoints_probed": 10,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[api_test:info_disclosure]
+{
+  "target_url": "https://moltbook.com",
+  "endpoints_found": [],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[company_exposure:debug]
+{
+  "target_url": "https://moltbook.com",
+  "surfaces": [],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[company_exposure:docs]
+{
+  "target_url": "https://moltbook.com",
+  "surfaces": [],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[company_exposure:observability]
+{
+  "target_url": "https://moltbook.com",
+  "surfaces": [
+    {
+      "category": "observability",
+      "label": "Health endpoint",
+      "url": "https://moltbook.com/health",
+      "status_code": 200,
+      "exposure_type": "public",
+      "platform": "",
+      "notes": "Operational endpoint returned content"
+    }
+  ],
+  "findings": [
+    {
+      "title": "Operational or debug endpoint reachable from the internet",
+      "severity": "Medium",
+      "url": "https://moltbook.com/health",
+      "category": "Operational Exposure",
+      "evidence": "Status: 200 | Type: application/json | Note: Operational endpoint returned content | Body: {\"status\":\"OK\"}",
+      "impact": "Debug and observability endpoints can reveal internal configuration, process data, metrics, and implementation details valuable to attackers.",
+      "remediation": "Remove public exposure from debug and telemetry endpoints or place them behind authenticated internal-only access."
+    }
+  ],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[web_vulns:full]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[api_test:auth_bypass]
+{
+  "target_url": "https://moltbook.com",
+  "endpoints_found": [],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[api_test:cors]
+{
+  "target_url": "https://moltbook.com",
+  "endpoints_found": [],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[auth_test:enumeration]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[auth_test:jwt]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[company_exposure:business]
+{
+  "target_url": "https://moltbook.com",
+  "surfaces": [],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[api_test:methods]
+{
+  "target_url": "https://moltbook.com",
+  "endpoints_found": [],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[web_vulns:files]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[company_exposure:exports]
+{
+  "target_url": "https://moltbook.com",
+  "surfaces": [],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[company_exposure:storage]
+{
+  "target_url": "https://moltbook.com",
+  "surfaces": [],
+  "findings": [],
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[web_vulns:headers]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[web_vulns:xss]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[web_vulns:ssrf]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[web_vulns:cmdi]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[web_vulns:ssti]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------
+
+[web_vulns:sqli]
+{
+  "target_url": "https://moltbook.com",
+  "findings": [],
+  "pages_crawled": 1,
+  "errors": []
+}
+
+----------------------------------------------------------------------

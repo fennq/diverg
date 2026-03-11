@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+  openclaw:
+    image: openclaw/openclaw:latest
+    container_name: sectester-openclaw
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./agents:/app/agents
+      - ./skills:/app/skills
+      - ./config.json:/app/config.json
+    env_file:
+      - .env
+    environment:
+      - OPENCLAW_AUTH_TOKEN=${OPENCLAW_AUTH_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - sectester-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: sectester-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - sectester-net
+
+volumes:
+  redis-data:
+
+networks:
+  sectester-net:
+    driver: bridge

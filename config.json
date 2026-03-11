@@ -1,0 +1,38 @@
+{
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "temperature": 0.2,
+    "max_tokens": 4096
+  },
+  "auth": {
+    "token": "${OPENCLAW_AUTH_TOKEN}"
+  },
+  "sandbox": {
+    "enabled": true,
+    "network_access": true,
+    "filesystem": "read-only"
+  },
+  "tools": {
+    "allowed_groups": [
+      "group:web",
+      "group:runtime"
+    ],
+    "denied_tools": [
+      "canvas",
+      "cron"
+    ]
+  },
+  "agents": {
+    "default": "sectester",
+    "directory": "./agents"
+  },
+  "skills": {
+    "directory": "./skills",
+    "auto_load": true
+  },
+  "rate_limits": {
+    "requests_per_minute": 30,
+    "max_concurrent_scans": 3
+  }
+}

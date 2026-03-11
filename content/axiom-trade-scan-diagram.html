@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>axiom.trade Security Scan — Story</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1419;
+      color: #e7e9ea;
+      min-height: 100vh;
+      padding: 32px;
+      line-height: 1.4;
+    }
+    .diagram {
+      max-width: 920px;
+      margin: 0 auto;
+    }
+    .title {
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: #71767b;
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .logo-wrap {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .logo-wrap img {
+      height: 42px;
+      width: auto;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .node {
+      background: #1c2128;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 14px 18px;
+      font-size: 13px;
+      color: #e7e9ea;
+    }
+    .node strong { color: #fff; }
+    .node.highlight { border-color: #58a6ff; background: #0d1117; }
+    .node.finding { border-left: 3px solid #f85149; }
+    .row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      gap: 20px;
+      margin: 12px 0;
+    }
+    .col { flex: 1; max-width: 280px; }
+    .connector {
+      text-align: center;
+      color: #30363d;
+      font-size: 12px;
+      margin: 6px 0;
+    }
+    .connector .line {
+      display: block;
+      width: 1px;
+      height: 14px;
+      background: linear-gradient(to bottom, #30363d, transparent);
+      margin: 0 auto 2px;
+    }
+    .flow-line {
+      stroke: #30363d;
+      stroke-width: 1;
+      fill: none;
+    }
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 10px;
+    }
+    .list-compact { font-size: 12px; color: #8b949e; margin-top: 6px; }
+    .list-compact span { color: #e7e9ea; }
+    .pipe {
+      width: 2px;
+      background: linear-gradient(to bottom, #30363d, #58a6ff33);
+      margin: 0 auto;
+      min-height: 10px;
+    }
+    .pipe-label { font-size: 10px; color: #58a6ff; margin: 2px 0; }
+  </style>
+</head>
+<body>
+  <div class="diagram">
+    <div class="logo-wrap">
+      <img src="neuro-logo.png" alt="Neuro" />
+    </div>
+    <div class="title">axiom.trade Security Scan</div>
+    <div class="subtitle">Solana crypto trading terminal — authorized assessment</div>
+
+    <div class="connector"><div class="pipe-label">TARGET</div><div class="pipe" style="height: 8px;"></div></div>
+    <div class="node highlight" style="text-align: center;">
+      <strong>axiom.trade</strong><br>
+      <span style="font-size: 12px; color: #8b949e;">Primary + 60+ subdomains (crt.sh)</span>
+    </div>
+
+    <div class="connector"><div class="pipe" style="height: 20px;"></div><div class="pipe-label">Diverg full scan</div></div>
+
+    <div class="row">
+      <div class="col">
+        <div class="section-label">Discovery</div>
+        <div class="node">
+          <strong>Recon</strong>
+          <div class="list-compact">cluster2–9, api, api2–11, beta, dev, docs, orders, orders-v2, socket, pulse, backup, health, secure, translate, cloak, reporting, data-stats, GCP regions…</div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="section-label">Tech &amp; protection</div>
+        <div class="node">
+          <strong>Cloudflare</strong> CDN<br>
+          <span style="font-size: 12px; color: #8b949e;">Main site: 403 on aggressive probes</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector"><div class="pipe" style="height: 18px;"></div><div class="pipe-label">Headers &amp; TLS</div></div>
+
+    <div class="row">
+      <div class="col">
+        <div class="node finding">
+          <strong>Headers</strong><br>
+          HSTS missing (High), CSP missing (Medium). Present: X-Content-Type-Options, X-Frame-Options, Referrer-Policy, COOP, CORP.
+        </div>
+      </div>
+      <div class="col">
+        <div class="node finding">
+          <strong>TLS</strong><br>
+          TLS 1.0 / 1.1 still accepted (High). Negotiated: TLS 1.2, strong cipher. Cert valid.
+        </div>
+      </div>
+    </div>
+
+    <div class="connector"><div class="pipe" style="height: 18px;"></div><div class="pipe-label">Crypto &amp; API surface</div></div>
+
+    <div class="row">
+      <div class="col">
+        <div class="node finding">
+          <strong>Crypto</strong><br>
+          Weak TLS (confirmed). Frontend: hardcoded IV pattern (verify).
+        </div>
+      </div>
+      <div class="col">
+        <div class="node">
+          <strong>API discovery</strong><br>
+          <span class="list-compact">200: /api/v1/wallet, /api/graphiql, /api/transaction, /api/data-export. 403: /internal/api, /admin/reports, actuator, /version.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector"><div class="pipe" style="height: 18px;"></div><div class="pipe-label">Business logic &amp; exposure</div></div>
+
+    <div class="row">
+      <div class="col">
+        <div class="node finding">
+          <strong>Race condition (verify)</strong><br>
+          /api/coupon/apply — 8 concurrent requests → 8× 200. Confirm idempotency.
+        </div>
+      </div>
+      <div class="col">
+        <div class="node finding">
+          <strong>Possible exposure (verify)</strong><br>
+          Token/hash-like pattern in page. Sensitive paths: .env.old, appsettings.json (403).
+        </div>
+      </div>
+    </div>
+
+    <div class="connector"><div class="pipe" style="height: 18px;"></div></div>
+    <div class="node highlight" style="text-align: center;">
+      <strong>Outcome</strong>: Large surface mapped. Header/TLS and crypto hardening recommended. Public API endpoints and coupon flow merit review.
+    </div>
+  </div>
+</body>
+</html>
