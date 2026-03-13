@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-SecTester Orchestrator — drives OpenClaw security scans via the Python SDK.
+Diverg orchestrator — runs security scans (web, recon, API, etc.) and can optionally
+delegate to OpenClaw for multi-agent mode (--use-openclaw).
 
 Usage:
     python orchestrator.py --target https://example.com --scope full
@@ -424,7 +425,7 @@ def build_openclaw_manifest(target: str, scope: str, report_type: str) -> dict:
 def build_openclaw_prompt(target: str, scope: str, report_type: str) -> str:
     manifest = build_openclaw_manifest(target, scope, report_type)
     return (
-        "Run an authorized security assessment using OpenClaw as an orchestration engine, not a single linear prompt.\n\n"
+        "Run an authorized security assessment using the configured agents as coordinated workstreams, not a single linear prompt.\n\n"
         f"ENGAGEMENT MANIFEST:\n{json.dumps(manifest, indent=2)}\n\n"
         "EXECUTION RULES:\n"
         "- Use the listed skills as coordinated workstreams.\n"
@@ -881,7 +882,7 @@ async def run_via_openclaw(target: str, scope: str, report_type: str) -> None:
             stage_outputs: dict[str, dict] = {}
             stage_raw_content: dict[str, str] = {}
 
-            print("  OpenClaw multi-agent engagement starting...")
+            print("  Multi-agent engagement starting...")
             mapper_ok, mapper_payload, mapper_content = await _run_agent_stage(
                 agents["surface_mapper"],
                 "surface_mapper",
@@ -979,7 +980,7 @@ async def run_via_openclaw(target: str, scope: str, report_type: str) -> None:
             if not telegram_findings:
                 telegram_findings = _default_findings_from_payload(correlation_payload, "openclaw_correlation")
 
-            print("  OpenClaw multi-agent engagement completed successfully.")
+            print("  Multi-agent engagement completed successfully.")
             print(f"  Final report:\n{final_report}")
 
             report_path = _save_openclaw_report(
@@ -999,18 +1000,18 @@ async def run_via_openclaw(target: str, scope: str, report_type: str) -> None:
                 },
                 reporter_payload,
             )
-            print(f"  OpenClaw report saved: {report_path}")
+            print(f"  Report saved: {report_path}")
 
             if telegram_findings:
                 send_telegram_report(telegram_findings, target, report_type)
             else:
-                print("  Telegram: No structured findings produced by OpenClaw reporter")
+                print("  Telegram: No structured findings from reporter")
 
     except ImportError:
         print("  openclaw-sdk not installed. Running skills directly.")
         run_direct(target, scope, report_type)
     except Exception as exc:
-        print(f"  OpenClaw connection failed ({exc}). Falling back to direct execution.")
+        print(f"  Multi-agent connection failed ({exc}). Falling back to direct execution.")
         run_direct(target, scope, report_type)
 
 
@@ -1096,7 +1097,7 @@ def main() -> None:
     parser.add_argument("--report", default="summary", choices=["summary", "detailed", "alert"],
                         help="Telegram report format (default: summary)")
     parser.add_argument("--use-openclaw", action="store_true",
-                        help="Delegate to OpenClaw agent instead of running skills directly")
+                        help="Use optional OpenClaw multi-agent session instead of running skills directly")
 
     args = parser.parse_args()
 
