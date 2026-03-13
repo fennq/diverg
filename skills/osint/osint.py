@@ -39,6 +39,7 @@ class WHOISInfo:
     expiration_date: Optional[str] = None
     name_servers: list[str] = field(default_factory=list)
     org: Optional[str] = None
+    registrant_name: Optional[str] = None  # registrant / name from WHOIS for owner research
     country: Optional[str] = None
     emails: list[str] = field(default_factory=list)
     dnssec: Optional[str] = None
@@ -144,6 +145,11 @@ def lookup_whois(domain: str) -> WHOISInfo:
     emails = w.emails if isinstance(w.emails, list) else ([w.emails] if w.emails else [])
     ns = w.name_servers if isinstance(w.name_servers, list) else ([w.name_servers] if w.name_servers else [])
     ns = [n.lower() for n in ns if n]
+    registrant_name = _safe_str(getattr(w, "name", None))
+    if not registrant_name and hasattr(w, "contacts") and isinstance(w.contacts, dict):
+        reg = w.contacts.get("registrant") or w.contacts.get("owner")
+        if isinstance(reg, dict) and reg.get("name"):
+            registrant_name = _safe_str(reg["name"])
 
     return WHOISInfo(
         domain=domain,
@@ -152,6 +158,7 @@ def lookup_whois(domain: str) -> WHOISInfo:
         expiration_date=_safe_str(w.expiration_date),
         name_servers=ns,
         org=_safe_str(w.org),
+        registrant_name=registrant_name,
         country=_safe_str(w.country),
         emails=emails,
         dnssec=_safe_str(w.dnssec),

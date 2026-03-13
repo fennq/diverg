@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,6 +33,12 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+
+# ---------------------------------------------------------------------------
+# Version (shown in /start when brain identity has no last_system_update)
+# ---------------------------------------------------------------------------
+
+DIVERG_SYSTEM_VERSION = "2025-03"  # Entity reputation, crypto-relation scans, crime report
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -695,7 +702,33 @@ def build_system_prompt() -> str:
           generator (77 dorks), tech infrastructure (reverse DNS, ASN, CDN detection,
           SPF/DKIM/DMARC), social media discovery (18 platforms), data breach checks
           (HIBP/IntelX/Dehashed), email discovery (36 patterns + SMTP verify),
-          Wayback Machine (200 URLs + removed page detection).
+          Wayback Machine (200 URLs + removed page detection). WHOIS includes
+          registrant_name for owner research.
+
+        ENTITY REPUTATION (run_entity_reputation):
+          External research on domain owners and entities: WHOIS org/registrant +
+          optional OSINT result. Searches for fraud, lawsuit, convicted, breach,
+          FTC/SEC/regulatory, CEO/founder/arrested/indicted/sanction. Email-domain
+          breach check. Returns severity (High/Medium/Low), date_hint, and
+          recommended_queries. Use to assess foul play, backdooring, or past crime.
+          Recommend after OSINT when assessing company/owner trust.
+
+        BLOCKCHAIN INVESTIGATION (run_blockchain_investigation):
+          On-chain crime signals for launchpads/exchanges: sniper (same wallet early
+          across tokens), LP removal/rug, fee vs on-chain, token mint/freeze
+          authority, deployer counterparties (Arkham), risk score 0-100, structured
+          crime report. Crypto relation (launchpad/exchange/dex/wallet) is
+          auto-detected from URL and content. Use on crypto/launchpad targets.
+          Pass deployer_address or token_addresses when known.
+
+        BUBBLEMAPS (run_bubblemaps):
+          On-chain intelligence from bubblemaps.io: token holder map, wallet clusters,
+          transfer relationships, decentralization score, CEX/DEX/contract supply share.
+          Fact-only: data from live API when BUBBLEMAPS_API_KEY set. Use when operator
+          asks for token distribution, holder clusters, or Bubblemaps. Params: token_address, chain (solana, eth, base, bsc, etc.).
+
+        FOCUS ONE PART AT A TIME:
+          Operator can request blockchain-only or web-only. Blockchain-only: wallet or token + optional prompt (e.g. find connected wallets, trace funds). Use /chain or run_blockchain_investigation with deployer_address + run_bubblemaps for token. Web-only: URL only, no chain. Use /web or run only web skills (recon, headers_ssl, api_test, company_exposure, etc.). Do not mix unless operator asks for full scan.
 
         DISCOVER (run_discover_surface):
           Lightweight discovery on a target; returns surface_summary, profiles_detected,
@@ -712,6 +745,8 @@ def build_system_prompt() -> str:
         - When given a URL or domain, adapt which tools you use to what the site actually is. Do not run every tool on every target.
         - Preferred: use run_full_attack(target) — it discovers the surface first, then runs only the tools that match (e.g. payment tools only if checkout/billing detected, API tools only if API surface found).
         - Alternative: use run_discover_surface(target) first; it returns recommended_skills with reasons. Then run only those recommended tools (run_payment_financial, run_auth_test, etc.) as appropriate. Skip tools that do not match the site (e.g. no payment tools on a static blog).
+        - For crypto/launchpad/exchange targets: run_blockchain_investigation and run_entity_reputation (owner/entity foul-play research) are high value; crypto_relation is auto-detected and used in analysis.
+        - For trust or foul-play questions (backdoor, past crime, owner history): run_entity_reputation after run_osint so entities (org, registrant, email domains) are available.
         - You decide what to run based on discovery; never blindly run all tools.
 
         HOW YOU RESPOND:
@@ -1236,6 +1271,64 @@ TOOL_FUNCTIONS = [
     {
         "type": "function",
         "function": {
+            "name": "run_entity_reputation",
+            "description": (
+                "External research on domain owners and associated entities: surfaces past crimes, lawsuits, breaches, regulatory action (FTC/SEC), "
+                "and controversy. Uses WHOIS (org, registrant) and optional OSINT result to identify entities, then searches for fraud, backdooring, "
+                "convictions, fines. Use to assess whether a company or its owners have been linked to foul play or crime (years back)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Domain or URL to research (e.g. example.com)"},
+                    "osint_result": {"type": "string", "description": "Optional: raw JSON from run_osint for this domain to use WHOIS org/registrant"},
+                },
+                "required": ["target"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_blockchain_investigation",
+            "description": (
+                "Blockchain investigation (launchpads like liquid.af): detects potential crime — sniper (same wallet buying at launch across many tokens), "
+                "liquidity pull/rug (holder concentration, LP removal), fee extraction (fee/tax mentions), deployer history (serial launcher). "
+                "Uses Solscan (SOLSCAN_PRO_API_KEY) and optionally Arkham (ARKHAM_API_KEY) for on-chain checks. Use when target is a launchpad or token-creation platform."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_url": {"type": "string", "description": "Base URL of launchpad or crypto platform (e.g. https://liquid.af)"},
+                    "deployer_address": {"type": "string", "description": "Optional deployer/treasury address for transfer history, LP-remove check, and labels"},
+                    "chain": {"type": "string", "description": "Chain: solana (default, uses Solscan) or ethereum (uses Etherscan)"},
+                },
+                "required": ["target_url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_bubblemaps",
+            "description": (
+                "Bubblemaps (bubblemaps.io) — on-chain intelligence: token holder map, wallet clusters, transfer relationships, "
+                "decentralization score, CEX/DEX/contract supply share. Fact-only: uses live API when BUBBLEMAPS_API_KEY set. "
+                "Use for token distribution analysis, cluster detection, or to complement blockchain_investigation."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "token_address": {"type": "string", "description": "Token contract or mint address"},
+                    "chain": {"type": "string", "description": "Chain: solana, eth, base, bsc, polygon, avalanche, tron, ton, apechain, sonic, monad (default solana)"},
+                },
+                "required": ["token_address"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_discover_surface",
             "description": (
                 "Lightweight discovery: runs headers_ssl and recon (techstack) on the target, then infers what kind of site it is "
@@ -1264,7 +1357,7 @@ TOOL_FUNCTIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "target": {"type": "string", "description": "Authorized target domain or URL"},
+                    "target": {"type": "string", "description": "Authorized target domain or URL (e.g. liquid.af, https://liquid.af, example.com)"},
                     "objective": {"type": "string", "description": "Optional assessment objective (e.g. quick, api, waf)"},
                     "cookies": {"type": "string", "description": "Optional cookie string for authenticated scan (e.g. session=abc; token=xyz)"},
                     "bearer_token": {"type": "string", "description": "Optional Bearer token for authenticated scan"},
@@ -1308,7 +1401,49 @@ TOOL_FUNCTIONS = [
 
 
 SKILL_TIMEOUT = 120  # generous cap; each skill exits in ~58s so we never hit this
-CHAT_ATTACK_SKILLS = ["recon", "headers_ssl", "web_vulns", "api_test", "company_exposure", "high_value_flaws", "race_condition", "payment_financial", "crypto_security", "data_leak_risks"]
+CHAT_ATTACK_SKILLS = ["recon", "headers_ssl", "web_vulns", "api_test", "company_exposure", "high_value_flaws", "race_condition", "payment_financial", "crypto_security", "data_leak_risks", "blockchain_investigation", "entity_reputation"]
+
+# Short-lived cache for recon/headers/osint to avoid duplicate work (same host within TTL)
+SKILL_RESULT_CACHE_TTL_SEC = 300  # 5 minutes
+SKILL_RESULT_CACHE_MAX_ENTRIES = 50
+_CACHEABLE_SKILLS = frozenset({"recon", "headers_ssl", "osint"})
+_skill_result_cache: dict[str, dict] = {}  # key -> {"result": str, "expires_at": float}
+
+
+def _normalize_cache_target(skill: str, target: str) -> str:
+    """Normalize target for cache key: host for recon/osint, host for headers_ssl."""
+    t = (target or "").strip()
+    if t.startswith("http://") or t.startswith("https://"):
+        from urllib.parse import urlparse
+        return urlparse(t).netloc.lower().split(":")[0] or t
+    return t.lower().split("/")[0].split(":")[0]
+
+
+def _skill_cache_key(skill: str, target: str, scan_type: str) -> str:
+    norm = _normalize_cache_target(skill, target)
+    return f"{skill}:{norm}:{scan_type}"
+
+
+def _skill_cache_get(key: str) -> str | None:
+    now = time.time()
+    entry = _skill_result_cache.get(key)
+    if not entry or entry["expires_at"] <= now:
+        if entry:
+            del _skill_result_cache[key]
+        return None
+    return entry["result"]
+
+
+def _skill_cache_set(key: str, result: str) -> None:
+    now = time.time()
+    # Evict expired
+    for k in list(_skill_result_cache.keys()):
+        if _skill_result_cache[k]["expires_at"] <= now:
+            del _skill_result_cache[k]
+    while len(_skill_result_cache) >= SKILL_RESULT_CACHE_MAX_ENTRIES and _skill_result_cache:
+        oldest = min(_skill_result_cache.keys(), key=lambda k: _skill_result_cache[k]["expires_at"])
+        del _skill_result_cache[oldest]
+    _skill_result_cache[key] = {"result": result, "expires_at": now + SKILL_RESULT_CACHE_TTL_SEC}
 
 
 def _run_skill_with_timeout(
@@ -1321,7 +1456,15 @@ def _run_skill_with_timeout(
     context: dict | None = None,
 ) -> str:
     """Run a scan skill with a hard timeout. auth: cookies/bearer for authenticated scans. context: optional prior results (e.g. client_surface_json) for dependency_audit/logic_abuse."""
-    import concurrent.futures, time as _time
+    import concurrent.futures
+    import time as _time
+    # Use cache for recon/headers_ssl/osint when no auth/context (same host + scan_type within TTL)
+    if skill in _CACHEABLE_SKILLS and not auth and not context:
+        cache_key = _skill_cache_key(skill, target, scan_type)
+        cached = _skill_cache_get(cache_key)
+        if cached is not None:
+            log.info(f"  [{skill}] cache hit for {cache_key}")
+            return cached
     log.info(f"  [{skill}] starting against {target}" + (" (authenticated)" if auth else "") + (" (with context)" if context else ""))
     t0 = _time.time()
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -1338,6 +1481,13 @@ def _run_skill_with_timeout(
         pool.shutdown(wait=False)
     else:
         pool.shutdown(wait=False)
+        if skill in _CACHEABLE_SKILLS and not auth and not context:
+            try:
+                data = json.loads(result) if result else {}
+                if not data.get("error"):
+                    _skill_cache_set(_skill_cache_key(skill, target, scan_type), result)
+            except Exception:
+                pass
     log.info(f"  [{skill}] done in {_time.time()-t0:.1f}s")
     return result
 
@@ -1390,6 +1540,35 @@ def _execute_tool_call(name: str, args: dict, chat_id: int | None = None) -> str
             return _run_skill_with_timeout("client_surface", args["target_url"], scan_type="full")
         elif name == "run_osint":
             return _run_skill_with_timeout("osint", args["target"], scan_type="full")
+        elif name == "run_entity_reputation":
+            target = args.get("target", "").strip() or args.get("target_url", "").strip()
+            if not target:
+                return json.dumps({"error": "target or target_url required"})
+            domain = target.replace("https://", "").replace("http://", "").split("/")[0]
+            ctx = {}
+            if args.get("osint_result"):
+                ctx["osint_json"] = args["osint_result"]
+            return _run_skill_with_timeout("entity_reputation", domain, scan_type="full", context=ctx)
+        elif name == "run_bubblemaps":
+            token = (args.get("token_address") or "").strip()
+            chain = (args.get("chain") or "solana").strip()
+            return _run_skill_with_timeout("bubblemaps", token, scan_type="full", context={"token_address": token, "chain": chain})
+        elif name == "run_blockchain_investigation":
+            url = args.get("target_url", "").strip()
+            if not url.startswith("http"):
+                url = f"https://{url}"
+            ctx = {}
+            if args.get("deployer_address"):
+                ctx["deployer_address"] = args["deployer_address"].strip()
+            if args.get("chain"):
+                ctx["chain"] = args["chain"].strip().lower()[:10]
+            if args.get("token_addresses"):
+                ctx["token_addresses"] = args["token_addresses"] if isinstance(args["token_addresses"], list) else []
+            # Infer crypto relation from URL/objective so scan and crime signals match site type
+            relations = _infer_crypto_relation(url, "", args.get("objective", ""))
+            if relations:
+                ctx["crypto_relation"] = relations[0][0]
+            return _run_skill_with_timeout("blockchain_investigation", url, scan_type="full", context=ctx)
         elif name == "run_discover_surface":
             target = args.get("target", "").strip()
             domain = target.replace("https://", "").replace("http://", "").split("/")[0]
@@ -1653,9 +1832,29 @@ def run_scan_skill(
             url = target if target.startswith("http") else f"https://{target}"
             client_json = (context or {}).get("client_surface_json")
             return logic_abuse.run(url, scan_type=scan_type, extracted_endpoints=None, client_surface_json=client_json)
+        elif skill_name == "blockchain_investigation":
+            import blockchain_investigation
+            url = target if target.startswith("http") else f"https://{target}"
+            deployer = (context or {}).get("deployer_address")
+            tokens = (context or {}).get("token_addresses")
+            chain = (context or {}).get("chain", "solana")
+            crypto_relation = (context or {}).get("crypto_relation")
+            return blockchain_investigation.run(
+                url, scan_type=scan_type, deployer_address=deployer, token_addresses=tokens, chain=chain, crypto_relation=crypto_relation
+            )
+        elif skill_name == "bubblemaps":
+            import bubblemaps
+            token_addr = (context or {}).get("token_address") or target
+            chain = (context or {}).get("chain", "solana")
+            return bubblemaps.run(token_address=token_addr, chain=chain)
         elif skill_name == "osint":
             import osint
             return osint.run(target, scan_type=scan_type)
+        elif skill_name == "entity_reputation":
+            import entity_reputation
+            domain = target.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+            osint_json = (context or {}).get("osint_json")
+            return entity_reputation.run(domain, scan_type=scan_type, osint_json=osint_json)
         return json.dumps({"error": f"Unknown skill: {skill_name}"})
     except Exception as exc:
         return json.dumps({"error": str(exc), "traceback": traceback.format_exc()})
@@ -1695,6 +1894,81 @@ def format_scan_results(skill_name: str, raw_json: str, target: str) -> str:
     if data.get("surfaces"):
         surfaces = data["surfaces"]
         lines.append(f"*Company Surfaces:* {len(surfaces)} notable surfaces")
+
+    if skill_name == "entity_reputation":
+        if data.get("summary"):
+            lines.append(f"*Summary:* {data['summary'][:180]}")
+        if data.get("entities_searched"):
+            lines.append(f"*Entities researched:* {', '.join(str(x) for x in data['entities_searched'][:5])}")
+        if data.get("findings"):
+            high = sum(1 for f in data["findings"] if isinstance(f, dict) and f.get("severity") == "High")
+            lines.append(f"*Reputation findings:* {len(data['findings'])} ({high} high-severity)")
+            for f in data["findings"][:4]:
+                if isinstance(f, dict) and f.get("relevance_hint") not in ("reputation",):
+                    date_str = f" [{f.get('date_hint')}]" if f.get("date_hint") else ""
+                    lines.append(f"  — {f.get('entity', '?')}: {f.get('relevance_hint', '')}{date_str} — {(f.get('title') or f.get('snippet') or '')[:70]}...")
+        if data.get("recommended_queries") and not data.get("findings"):
+            lines.append(f"*Recommended manual searches:* {len(data['recommended_queries'])} (see raw output)")
+
+    if skill_name == "blockchain_investigation":
+        if data.get("crypto_relation"):
+            lines.append(f"*Crypto relation:* {data['crypto_relation']}")
+        if data.get("risk_score") is not None:
+            lines.append(f"*Risk score:* {data['risk_score']}/100")
+        if data.get("crime_report"):
+            cr = data["crime_report"]
+            if cr.get("summary"):
+                lines.append(f"*Crime report:* {cr['summary'][:200]}...")
+            if cr.get("linked_wallets"):
+                lines.append(f"*Linked wallets:* {len(cr['linked_wallets'])}")
+        if data.get("chain"):
+            lines.append(f"*Chain:* {data['chain']}")
+        if data.get("platform_type"):
+            lines.append(f"*Platform type:* {data['platform_type']}")
+        if data.get("on_chain_used"):
+            lines.append("*On-chain:* live (Solscan/Arkham or Etherscan)")
+        else:
+            lines.append("*On-chain:* skipped (no API key — set SOLSCAN_PRO_API_KEY or ETHERSCAN_API_KEY for real data)")
+        cr = data.get("crime_report") or {}
+        if cr.get("data_sources"):
+            ds = cr["data_sources"]
+            lines.append(f"*Data truthfulness:* on_chain_used={ds.get('on_chain_used', False)} — {ds.get('on_chain_reason', '')[:80]}")
+        if data.get("tokens_discovered"):
+            lines.append(f"*Tokens discovered:* {len(data['tokens_discovered'])}")
+        if data.get("sniper_alerts"):
+            lines.append(f"*Sniper alerts:* {len(data['sniper_alerts'])}")
+        if data.get("liquidity_alerts"):
+            lines.append(f"*Liquidity alerts:* {len(data['liquidity_alerts'])}")
+        if data.get("fee_comparison"):
+            fc = data["fee_comparison"]
+            lines.append(f"*Fee:* {fc.get('evidence', 'N/A')}")
+        if data.get("flow_graph") and data.get("on_chain_used"):
+            fg = data["flow_graph"]
+            nodes_n = len(fg.get("nodes") or [])
+            edges_n = len(fg.get("edges") or [])
+            lines.append(f"*Flow graph:* {nodes_n} nodes, {edges_n} edges (diagram from live data)")
+        else:
+            lines.append("*Flow graph:* only from live API data when keys set; no placeholder data")
+
+    if skill_name == "bubblemaps":
+        if data.get("api_used"):
+            lines.append("*Bubblemaps:* live (data from API)")
+            if data.get("decentralization_score") is not None:
+                lines.append(f"*Decentralization score:* {data['decentralization_score']}")
+            if data.get("top_holders_count") is not None:
+                lines.append(f"*Top holders:* {data['top_holders_count']}")
+            if data.get("relationships_count") is not None:
+                lines.append(f"*Relationships:* {data['relationships_count']}")
+            if data.get("clusters_count") is not None:
+                lines.append(f"*Clusters:* {data['clusters_count']}")
+            if data.get("share_in_cexs") is not None:
+                lines.append(f"*Share in CEXs:* {data.get('share_in_cexs', 0):.2%}")
+            if data.get("share_in_dexs") is not None:
+                lines.append(f"*Share in DEXs:* {data.get('share_in_dexs', 0):.2%}")
+        else:
+            lines.append("*Bubblemaps:* skipped (no BUBBLEMAPS_API_KEY or API error)")
+        if data.get("error"):
+            lines.append(f"*Note:* {data['error'][:120]}")
 
     # De-duplicate noisy repeated findings (same title+severity+category).
     grouped: dict[tuple, dict] = {}
@@ -1847,6 +2121,89 @@ def _extract_surface_signals(raw_results: dict[str, str]) -> dict:
     }
 
 
+# Crypto relation types: used to classify site and tailor scans + crime signals
+CRYPTO_RELATION_LAUNCHPAD = "launchpad"  # token creation, fair launch, bonding curve — sniper, rug, fees
+CRYPTO_RELATION_EXCHANGE = "exchange"     # CEX, buy/sell, KYC — withdrawal, insider, user leakage
+CRYPTO_RELATION_DEX = "dex"              # DEX, swap, AMM — front-run, slippage, liquidity
+CRYPTO_RELATION_WALLET = "wallet"         # wallet app, connect wallet — key/seed exposure, phishing
+CRYPTO_RELATION_DEFI = "defi"            # lending, staking, yield — oracle, rate, liquidation
+CRYPTO_RELATION_NFT = "nft"               # NFT marketplace — royalty, creator abuse, wash trading
+CRYPTO_RELATION_BRIDGE = "bridge"         # cross-chain bridge — withdrawal limits, bridge exploit
+CRYPTO_RELATION_GENERAL = "crypto-general"  # crypto-related but unspecified — generic crypto checks
+
+
+def _infer_crypto_relation(target_url: str, hay: str, objective: str) -> list[tuple[str, str]]:
+    """Infer one or more crypto relation types from URL, discovery text, and objective. Returns [(relation, reason), ...]."""
+    target_lower = (target_url or "").lower()
+    obj_lower = (objective or "").lower()
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def add(relation: str, reason: str):
+        if relation not in seen:
+            seen.add(relation)
+            out.append((relation, reason))
+
+    # URL-based (highest confidence)
+    if any(k in target_lower for k in ("liquid.af", "pump.fun", "pumps.fun", "bonk.fun", "letsbonk", "fairlaunch", "moonshot", "dexscreener", "launchpad")):
+        add(CRYPTO_RELATION_LAUNCHPAD, "URL is a launchpad or token-creation platform.")
+    if any(k in target_lower for k in ("raydium.io", "meteora", "orca", "jupiter", "uniswap", "pancakeswap", "sushiswap", "1inch", "swap")) and "launchpad" not in target_lower:
+        add(CRYPTO_RELATION_DEX, "URL suggests DEX or swap platform.")
+    if any(k in target_lower for k in ("binance", "coinbase", "kraken", "kucoin", "bybit", "okx", "gate.io", "cex", "exchange")) and "dex" not in target_lower:
+        add(CRYPTO_RELATION_EXCHANGE, "URL suggests centralized exchange (CEX).")
+    if any(k in target_lower for k in ("phantom", "metamask", "wallet", "connect wallet", "walletconnect", "rabby", "rainbow")):
+        add(CRYPTO_RELATION_WALLET, "URL suggests wallet or wallet-connect product.")
+    if any(k in target_lower for k in ("opensea", "blur", "rarible", "foundation", "nft", "marketplace")) and "launchpad" not in target_lower:
+        add(CRYPTO_RELATION_NFT, "URL suggests NFT marketplace.")
+    if any(k in target_lower for k in ("bridge", "wormhole", "layerzero", "stargate", "synapse", "cross-chain")):
+        add(CRYPTO_RELATION_BRIDGE, "URL suggests bridge or cross-chain product.")
+    if any(k in target_lower for k in ("aave", "compound", "maker", "lido", "yearn", "curve", "convex", "lending", "staking", "yield")):
+        add(CRYPTO_RELATION_DEFI, "URL suggests DeFi protocol (lending/staking/yield).")
+
+    # Objective-based
+    if any(k in obj_lower for k in ("investigate", "crime", "sniper", "rug", "launchpad", "blockchain crime", "on-chain")):
+        add(CRYPTO_RELATION_LAUNCHPAD, "Objective requests launchpad/on-chain investigation.")
+    if any(k in obj_lower for k in ("exchange", "kyc", "withdrawal", "cex")):
+        add(CRYPTO_RELATION_EXCHANGE, "Objective mentions exchange/KYC/withdrawal.")
+    if any(k in obj_lower for k in ("wallet", "key", "seed", "phishing")):
+        add(CRYPTO_RELATION_WALLET, "Objective mentions wallet or key security.")
+    if any(k in obj_lower for k in ("nft", "royalty", "creator")):
+        add(CRYPTO_RELATION_NFT, "Objective mentions NFT or creator.")
+
+    # Content/hay-based (from discovery) — refines or adds when URL did not classify
+    h = hay or ""
+    if any(k in h for k in ("launchpad", "pump.fun", "liquid.af", "token launch", "bonding curve", "first block", "create token", "fair launch")):
+        add(CRYPTO_RELATION_LAUNCHPAD, "Page or discovery content mentions launchpad/token creation.")
+    if any(k in h for k in ("connect wallet", "wallet connect", "phantom", "metamask", "sign message", "approve transaction")):
+        add(CRYPTO_RELATION_WALLET, "Page mentions wallet connection or signing.")
+    if any(k in h for k in ("swap", "liquidity", "amm", "pool", "slippage", "raydium", "uniswap", "jupiter")):
+        add(CRYPTO_RELATION_DEX, "Page or discovery mentions swap/DEX/liquidity.")
+    if any(k in h for k in ("kyc", "withdraw", "deposit", "orderbook", "limit order", "exchange", "trading pair")):
+        add(CRYPTO_RELATION_EXCHANGE, "Page or discovery mentions exchange/KYC/trading.")
+    if any(k in h for k in ("nft", "mint nft", "collection", "opensea", "royalty")):
+        add(CRYPTO_RELATION_NFT, "Page or discovery mentions NFT/collection.")
+    if any(k in h for k in ("bridge", "cross-chain", "wormhole", "layerzero")):
+        add(CRYPTO_RELATION_BRIDGE, "Page or discovery mentions bridge/cross-chain.")
+    if any(k in h for k in ("lend", "borrow", "stake", "apy", "collateral", "liquidation", "oracle")):
+        add(CRYPTO_RELATION_DEFI, "Page or discovery mentions lending/staking/DeFi.")
+    if any(k in h for k in ("solana", "ethereum", "evm", "crypto", "defi", "token", "blockchain", "web3")) and not out:
+        add(CRYPTO_RELATION_GENERAL, "Page or discovery indicates crypto/blockchain but type unclear.")
+
+    return out
+
+
+def _primary_crypto_relation(profiles: dict[str, list[str]] | list[str]) -> str | None:
+    """Return the primary crypto relation from profile names (e.g. crypto-launchpad -> launchpad). Prefer specific over crypto-general."""
+    names = list(profiles.keys()) if isinstance(profiles, dict) else list(profiles)
+    for rel in (CRYPTO_RELATION_LAUNCHPAD, CRYPTO_RELATION_EXCHANGE, CRYPTO_RELATION_DEX, CRYPTO_RELATION_WALLET,
+                CRYPTO_RELATION_DEFI, CRYPTO_RELATION_NFT, CRYPTO_RELATION_BRIDGE):
+        if f"crypto-{rel}" in names:
+            return rel
+    if "crypto-general" in names:
+        return CRYPTO_RELATION_GENERAL
+    return None
+
+
 def _infer_target_profiles(raw_results: dict[str, str], target_url: str = "", objective: str = "") -> dict[str, list[str]]:
     surface = _extract_surface_signals(raw_results)
     hay_parts = [
@@ -1871,12 +2228,21 @@ def _infer_target_profiles(raw_results: dict[str, str], target_url: str = "", ob
         if reason not in profiles[name]:
             profiles[name].append(reason)
 
-    # Crypto / trading platform (e.g. axiom.trade, Solana) — user leakage and financial focus
-    if target_lower and any(k in target_lower for k in ("axiom", "crypto", ".trade", "solana", "defi", "exchange")):
-        add("crypto-trading-surface", "Target URL suggests crypto/trading platform (e.g. axiom.trade).")
+    # Crypto relation: granular type (launchpad, exchange, dex, wallet, defi, nft, bridge, crypto-general)
+    for relation, reason in _infer_crypto_relation(target_url, hay, objective_lower):
+        profile_name = f"crypto-{relation}"
+        add(profile_name, reason)
+        if relation == CRYPTO_RELATION_LAUNCHPAD:
+            add("blockchain-investigation", "Crypto relation is launchpad; run on-chain crime investigation.")
+        if relation == CRYPTO_RELATION_GENERAL:
+            add("crypto-trading-surface", "Crypto-related site; run crypto and financial checks.")
+
+    # Legacy / broad crypto (keep for backward compatibility)
+    if target_lower and any(k in target_lower for k in ("axiom", "crypto", ".trade", "solana", "defi", "exchange")) and "crypto-launchpad" not in profiles and "crypto-exchange" not in profiles and "crypto-dex" not in profiles:
+        add("crypto-trading-surface", "Target URL suggests crypto/trading platform.")
     if objective_lower and any(k in objective_lower for k in ("crypto", "trading", "user leakage", "full security", "solana", "wallet", "exchange")):
-        add("crypto-trading-surface", "Scope/objective indicates crypto trading or user-leakage assessment.")
-    if any(k in hay for k in ("solana", "crypto", "trading", "wallet", "swap", "position", "pnl", "defi", "axiom", "orderbook")):
+        add("crypto-trading-surface", "Scope/objective indicates crypto or user-leakage assessment.")
+    if any(k in hay for k in ("solana", "crypto", "trading", "wallet", "swap", "position", "pnl", "defi", "axiom", "orderbook")) and not any(p.startswith("crypto-") for p in profiles):
         add("crypto-trading-surface", "Discovery found crypto/trading/wallet-related markers.")
 
     if any(k in hay for k in ("graphql", "graphiql", "graphql/schema")):
@@ -1939,11 +2305,13 @@ PROFILE_TO_SKILLS: dict[str, list[tuple[str, str, str]]] = {
         ("auth_test", "forms", "Admin surface; test login and session"),
         ("crypto_security", "full", "Admin/auth; check JWT and crypto"),
         ("company_exposure", "admin", "Admin routes; map admin exposure"),
+        ("entity_reputation", "full", "Admin/company; research owner/entity history for foul play"),
     ],
     "identity-surface": [
         ("auth_test", "forms", "Identity/auth surface; test login and session"),
         ("auth_test", "jwt", "Identity surface; test JWT security"),
         ("crypto_security", "full", "Auth surface; check JWT and weak crypto"),
+        ("entity_reputation", "full", "Identity/company; research registrant and entity history"),
     ],
     "data-exposure-surface": [
         ("recon", "sensitive", "Data/storage markers; find sensitive paths"),
@@ -1986,6 +2354,63 @@ PROFILE_TO_SKILLS: dict[str, list[tuple[str, str, str]]] = {
         ("client_surface", "full", "Crypto/trading; client JS intel, API extraction, dangerous sinks"),
         ("dependency_audit", "full", "Crypto/trading; version/CVE check for detected stack"),
         ("logic_abuse", "full", "Crypto/trading; numeric/bounds abuse on trade amount and limit"),
+    ],
+    "blockchain-investigation": [
+        ("blockchain_investigation", "full", "Launchpad; sniper, LP pull, fees, deployer intel via Solscan/Arkham"),
+        ("crypto_security", "full", "Blockchain; JWT, weak crypto, client-side keys"),
+        ("client_surface", "full", "Blockchain; API extraction, fee/sniper mentions in JS"),
+        ("payment_financial", "full", "Blockchain; payment and fee flows"),
+        ("high_value_flaws", "full", "Blockchain; IDOR on wallet/token data"),
+    ],
+    "crypto-launchpad": [
+        ("blockchain_investigation", "full", "Launchpad: sniper, rug, fees, token authority; on-chain crime signals"),
+        ("crypto_security", "full", "Launchpad: JWT, weak crypto, key exposure"),
+        ("client_surface", "full", "Launchpad: API/fee/sniper in frontend"),
+        ("payment_financial", "full", "Launchpad: fee and payment flows"),
+        ("high_value_flaws", "full", "Launchpad: IDOR on wallet/token data"),
+    ],
+    "crypto-exchange": [
+        ("payment_financial", "full", "Exchange: withdrawal, deposit, KYC abuse, insider trading signals"),
+        ("high_value_flaws", "full", "Exchange: user leakage, IDOR on orders/balances"),
+        ("crypto_security", "full", "Exchange: JWT, TLS, weak crypto"),
+        ("data_leak_risks", "full", "Exchange: PII/KYC in responses and errors"),
+        ("auth_test", "full", "Exchange: login, session, 2FA bypass"),
+        ("race_condition", "full", "Exchange: race on order/withdraw"),
+    ],
+    "crypto-dex": [
+        ("payment_financial", "full", "DEX: swap, liquidity, fee extraction"),
+        ("crypto_security", "full", "DEX: signing, TLS, weak crypto"),
+        ("client_surface", "full", "DEX: API/slippage in frontend"),
+        ("high_value_flaws", "full", "DEX: IDOR on position/pool data"),
+        ("race_condition", "full", "DEX: front-run, race on swap"),
+    ],
+    "crypto-wallet": [
+        ("crypto_security", "full", "Wallet: key/seed exposure, weak randomness, signing"),
+        ("client_surface", "full", "Wallet: API extraction, dangerous sinks, storage"),
+        ("high_value_flaws", "full", "Wallet: IDOR, balance leakage"),
+        ("data_leak_risks", "full", "Wallet: PII or key material in client"),
+    ],
+    "crypto-defi": [
+        ("payment_financial", "full", "DeFi: deposit/withdraw, rate, liquidation flows"),
+        ("logic_abuse", "full", "DeFi: amount/limit/oracle abuse"),
+        ("crypto_security", "full", "DeFi: signing, TLS, weak crypto"),
+        ("race_condition", "full", "DeFi: liquidation race, flash loan abuse"),
+    ],
+    "crypto-nft": [
+        ("payment_financial", "full", "NFT: purchase, royalty, creator payouts"),
+        ("high_value_flaws", "full", "NFT: IDOR on collection/listing, user leakage"),
+        ("crypto_security", "full", "NFT: signing, wallet connect security"),
+    ],
+    "crypto-bridge": [
+        ("payment_financial", "full", "Bridge: deposit/withdraw, limits, cross-chain flow"),
+        ("crypto_security", "full", "Bridge: signing, replay, validation"),
+        ("high_value_flaws", "full", "Bridge: IDOR on pending transfers"),
+    ],
+    "crypto-general": [
+        ("crypto_security", "full", "Crypto site: JWT, TLS, weak crypto in frontend"),
+        ("payment_financial", "full", "Crypto site: payment and financial flows"),
+        ("client_surface", "full", "Crypto site: API and client exposure"),
+        ("data_leak_risks", "full", "Crypto site: PII/wallet in responses"),
     ],
     "waf": [],
 }
@@ -2103,6 +2528,7 @@ def _build_followup_attack_steps(
             ("high_value_flaws", url, "full", "medium"),
             ("race_condition", url, "full", "medium"),
             ("payment_financial", url, "full", "medium"),
+            ("entity_reputation", domain, "full", "medium"),
         ]
         phase3 = [
             ("web_vulns", url, "full", "medium"),
@@ -2121,6 +2547,7 @@ def _build_followup_attack_steps(
             ("crypto_security", url, "full", "medium"),
             ("data_leak_risks", url, "full", "medium"),
             ("recon", domain, "sensitive", "medium"),
+            ("entity_reputation", domain, "full", "medium"),
             ("api_test", url, "discovery", "medium"),
             ("auth_test", url, "forms", "medium"),
             ("auth_test", url, "session", "medium"),
@@ -2207,6 +2634,9 @@ def _build_followup_attack_steps(
             ("web_vulns", url, "xss", "medium"),
         ])
 
+    if "blockchain-investigation" in profiles or "crypto-launchpad" in profiles:
+        phase2.append(("blockchain_investigation", url, "full", "medium"))
+
     if mode in {"adversary", "deep"}:
         phase3.extend([
             ("web_vulns", url, "ssrf", "medium"),
@@ -2289,8 +2719,15 @@ def build_quality_summary(raw_results: dict[str, str], expected_steps: list[str]
             err = str(data.get("error", "")).lower()
             if "timed out" in err:
                 timed_out += 1
-            else:
-                errors += 1
+                partial_or_skipped.append(step_key)
+                continue
+            # API-key skipped (blockchain/bubblemaps) is not an error — tools work in unison with or without keys
+            if ("blockchain_investigation" in step_key or "bubblemaps" in step_key) and (
+                "api key" in err or "no api key" in err or "skipped" in err
+            ):
+                partial_or_skipped.append(step_key)
+                continue
+            errors += 1
             partial_or_skipped.append(step_key)
             continue
         findings += len(data.get("findings", []))
@@ -2314,6 +2751,42 @@ def build_quality_summary(raw_results: dict[str, str], expected_steps: list[str]
         "confidence_score": confidence,
         "not_fully_tested": partial_or_skipped,
     }
+
+
+def build_data_status(all_results: dict[str, str]) -> str:
+    """Return one-line data accuracy status: what is live vs skipped. 100% truthful attribution."""
+    parts = []
+    for key, raw in all_results.items():
+        if "blockchain_investigation" in key:
+            try:
+                data = json.loads(raw)
+                if data.get("on_chain_used"):
+                    parts.append("Blockchain: live")
+                else:
+                    parts.append("Blockchain: skipped (no API key)")
+            except json.JSONDecodeError:
+                parts.append("Blockchain: —")
+            break
+    for key, raw in all_results.items():
+        if "bubblemaps" in key:
+            try:
+                data = json.loads(raw)
+                if data.get("api_used"):
+                    parts.append("Bubblemaps: live")
+                else:
+                    parts.append("Bubblemaps: skipped (no API key)")
+            except json.JSONDecodeError:
+                parts.append("Bubblemaps: —")
+            break
+    if any("entity_reputation" in k for k in all_results):
+        parts.append("Entity: DDG")
+    if any("osint" in k for k in all_results):
+        parts.append("OSINT: live")
+    if any(k.startswith("recon:") or k.startswith("headers_ssl:") or k.startswith("company_exposure:") for k in all_results):
+        parts.append("Web: live")
+    if not parts:
+        return "Data status: (no steps)"
+    return "Data: " + " | ".join(parts)
 
 
 def _collect_structured_findings(raw_results: dict[str, str]) -> list[dict]:
@@ -2652,6 +3125,38 @@ def _extract_breach_exposure(raw_results: dict[str, str]) -> list[dict]:
     return []
 
 
+def _extract_entity_reputation(raw_results: dict[str, str]) -> dict | None:
+    """Pull entity_reputation result for owner/company history and foul-play context."""
+    for key, raw in raw_results.items():
+        if "entity_reputation" not in key.lower():
+            continue
+        try:
+            data = json.loads(raw)
+            if data.get("errors") and not data.get("entities_searched") and not data.get("findings"):
+                return None
+            findings = []
+            for f in (data.get("findings") or [])[:15]:
+                if not isinstance(f, dict):
+                    continue
+                findings.append({
+                    "entity": f.get("entity"),
+                    "relevance_hint": f.get("relevance_hint"),
+                    "severity": f.get("severity", "Medium"),
+                    "date_hint": f.get("date_hint"),
+                    "title": (f.get("title") or "")[:150],
+                    "snippet": (f.get("snippet") or "")[:200],
+                })
+            return {
+                "summary": data.get("summary", ""),
+                "entities_searched": data.get("entities_searched", []),
+                "findings": findings,
+                "recommended_queries": data.get("recommended_queries", [])[:5],
+            }
+        except Exception:
+            pass
+    return None
+
+
 def build_analysis_context(raw_results: dict[str, str], quality: dict, preset: str, mode: str) -> dict:
     findings = _collect_structured_findings(raw_results)
     profiles = _infer_target_profiles(raw_results)
@@ -2662,6 +3167,7 @@ def build_analysis_context(raw_results: dict[str, str], quality: dict, preset: s
     recommended_next_tests = _recommend_next_tests(findings, raw_results)
     surface_highlights = _surface_highlights(raw_results)
     breach_exposure = _extract_breach_exposure(raw_results)
+    entity_reputation = _extract_entity_reputation(raw_results)
     readiness_score = max(
         25.0,
         min(
@@ -2672,6 +3178,8 @@ def build_analysis_context(raw_results: dict[str, str], quality: dict, preset: s
             - (len(ranked_findings[:5]) * 1.2),
         ),
     )
+    primary_crypto = _primary_crypto_relation(profiles)
+    data_status = build_data_status(raw_results)
     return {
         "preset": preset,
         "mode": mode,
@@ -2679,6 +3187,7 @@ def build_analysis_context(raw_results: dict[str, str], quality: dict, preset: s
         "confidence_score": quality.get("confidence_score"),
         "readiness_score": round(readiness_score, 1),
         "target_profiles": profiles,
+        "primary_crypto_relation": primary_crypto,
         "attack_surface_highlights": surface_highlights,
         "finding_buckets": buckets,
         "top_exposures": top_exposure_items,
@@ -2686,16 +3195,210 @@ def build_analysis_context(raw_results: dict[str, str], quality: dict, preset: s
         "likely_attack_paths": attack_paths,
         "recommended_next_tests": recommended_next_tests,
         "breach_exposure": breach_exposure,
+        "entity_reputation": entity_reputation,
         "not_fully_tested": quality.get("not_fully_tested", []),
+        "data_status": data_status,
     }
 
 
-FULL_SCAN_SKILLS = ["osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "client_surface", "dependency_audit", "logic_abuse", "web_vulns", "auth_test", "api_test", "company_exposure", "high_value_flaws", "race_condition", "payment_financial"]
+FULL_SCAN_SKILLS = ["osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "client_surface", "dependency_audit", "logic_abuse", "entity_reputation", "web_vulns", "auth_test", "api_test", "company_exposure", "high_value_flaws", "race_condition", "payment_financial"]
+
+
+def normalize_scan_target(target: str) -> tuple[str, str]:
+    """Normalize target to (url, domain). Handles bare domains like liquid.af, with or without scheme."""
+    t = (target or "").strip()
+    if not t:
+        return "https://localhost", "localhost"
+    if t.startswith("http://") or t.startswith("https://"):
+        from urllib.parse import urlparse
+        parsed = urlparse(t)
+        domain = (parsed.netloc or t).lower().split(":")[0]
+        url = f"{parsed.scheme}://{domain}" if parsed.scheme else f"https://{domain}"
+        return url, domain
+    domain = t.lower().split("/")[0].split(":")[0]
+    return f"https://{domain}", domain
+
+
+# Chain IDs accepted for /chain (blockchain-only scan)
+CHAIN_IDS = frozenset({"solana", "eth", "ethereum", "base", "bsc", "bnb", "polygon", "avalanche", "avax", "tron", "ton", "apechain", "sonic", "monad"})
+
+
+async def run_blockchain_scan(
+    address: str,
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    chain: str = "solana",
+    prompt: str = "",
+) -> None:
+    """Blockchain-only investigation: wallet or token + optional prompt. No web skills. Focus on chain intel only."""
+    chat_id = update.effective_chat.id
+    address = (address or "").strip()
+    if not address or len(address) < 20:
+        await update.message.reply_text(
+            "Usage: /chain <wallet_or_token_address> [chain] [prompt]\n"
+            "Example: /chain 7xK9...mN2p solana find connected wallets\n"
+            "Example: /chain 0x123...abc eth trace funds\n"
+            "Runs blockchain investigation + Bubblemaps (token map) only. No web scan."
+        )
+        return
+    _set_runtime("running", target=address, phase="chain")
+    await update.message.reply_text(
+        f"Running *blockchain-only* investigation on `{address[:16]}...` (chain: {chain}). "
+        "No web scan — chain intel only.",
+        parse_mode="Markdown",
+    )
+    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+    all_results: dict[str, str] = {}
+    # 1) Blockchain investigation (post-rug style: deployer = address, no URL needed)
+    ctx = {"deployer_address": address, "chain": chain, "crypto_relation": "launchpad"}
+    raw_bc = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: _run_skill_with_timeout(
+            "blockchain_investigation",
+            "https://post-rug.local",
+            scan_type="full",
+            context=ctx,
+        ),
+    )
+    all_results["blockchain_investigation:full"] = raw_bc
+    try:
+        data = json.loads(raw_bc)
+        count = len(data.get("findings", []))
+        await update.message.reply_text(f"✅ blockchain_investigation done — {count} findings", parse_mode="Markdown")
+    except Exception:
+        await update.message.reply_text("✅ blockchain_investigation done")
+    # 2) Bubblemaps if we have a token (use address as token when it looks like a mint/contract)
+    if address and (len(address) >= 32 or address.startswith("0x")):
+        raw_bm = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: _run_skill_with_timeout(
+                "bubblemaps",
+                address,
+                scan_type="full",
+                context={"token_address": address, "chain": chain},
+            ),
+        )
+        all_results["bubblemaps:full"] = raw_bm
+        try:
+            bm_data = json.loads(raw_bm)
+            if bm_data.get("api_used"):
+                await update.message.reply_text(
+                    f"✅ Bubblemaps done — {bm_data.get('top_holders_count', 0)} holders, "
+                    f"{bm_data.get('relationships_count', 0)} relationships",
+                    parse_mode="Markdown",
+                )
+            else:
+                await update.message.reply_text("✅ Bubblemaps skipped (no API key or error)")
+        except Exception:
+            await update.message.reply_text("✅ Bubblemaps done")
+    # Summary + data status
+    data_status = build_data_status(all_results)
+    summary_bc = format_scan_results("blockchain_investigation", raw_bc, address)
+    for chunk in _split_msg(summary_bc):
+        await update.message.reply_text(chunk, parse_mode="Markdown")
+    if all_results.get("bubblemaps:full"):
+        summary_bm = format_scan_results("bubblemaps", all_results["bubblemaps:full"], address)
+        for chunk in _split_msg(summary_bm):
+            await update.message.reply_text(chunk, parse_mode="Markdown")
+    await update.message.reply_text(f"{data_status}\n_Blockchain-only; no web scan._", parse_mode="Markdown")
+    raw_outputs = [f"[{k}]\n{all_results[k]}" for k in all_results]
+    results_file = _save_full_results(raw_outputs, f"chain_{address[:16]}")
+    if results_file:
+        try:
+            await context.bot.send_document(chat_id=chat_id, document=results_file, caption="Blockchain scan raw data")
+        except Exception as exc:
+            log.warning(f"Could not send chain results file: {exc}")
+    diagram_path = _save_flow_diagram_if_present(all_results, address)
+    if diagram_path:
+        try:
+            await context.bot.send_document(chat_id=chat_id, document=diagram_path, caption="Blockchain flow diagram")
+        except Exception as exc:
+            log.warning(f"Could not send flow diagram: {exc}")
+    quality = build_quality_summary(all_results, list(all_results.keys()))
+    _set_last_scan({
+        "target": address,
+        "preset": "chain",
+        "scope": "chain",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "elapsed_sec": 0,
+        "quality": quality,
+        "results_file": str(results_file) if results_file else None,
+    })
+    _set_runtime("idle")
+
+
+async def run_web_scan(target: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Web-only scan: URL or domain. No blockchain skills. Focus on website/API/recon only."""
+    url, domain = normalize_scan_target(target)
+    chat_id = update.effective_chat.id
+    preset = "web"
+    scan_start = datetime.now(timezone.utc)
+    _set_runtime("running", target=target, phase="web")
+    plan = [
+        ("osint", domain, "full", "medium"),
+        ("recon", domain, "subdomains", "medium"),
+        ("recon", domain, "techstack", "medium"),
+        ("headers_ssl", url, "full", "medium"),
+        ("company_exposure", url, "operational", "medium"),
+        ("api_test", url, "discovery", "medium"),
+        ("auth_test", url, "forms", "medium"),
+        ("web_vulns", url, "full", "medium"),
+        ("high_value_flaws", url, "full", "medium"),
+        ("data_leak_risks", url, "full", "medium"),
+        ("crypto_security", url, "full", "medium"),
+    ]
+    await update.message.reply_text(
+        f"Engaging *web only* `{target}` — {len(plan)} steps (no blockchain).",
+        parse_mode="Markdown",
+    )
+    all_results: dict[str, str] = {}
+    for idx, (skill, t, scan_type, wordlist) in enumerate(plan, start=1):
+        phase_label = f"{idx}/{len(plan)} {skill}:{scan_type}"
+        _set_runtime("running", target=target, phase=phase_label)
+        await update.message.reply_text(f"▶️ {phase_label}")
+        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+        raw = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: _run_skill_with_timeout(skill, t, scan_type, wordlist, "top100", None, None),
+        )
+        key = f"{skill}:{scan_type}"
+        all_results[key] = raw
+        try:
+            data = json.loads(raw)
+            count = len(data.get("findings", []) + data.get("header_findings", []) + data.get("ssl_findings", []))
+            await update.message.reply_text(f"✅ {key} — {count} findings", parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(f"✅ {key} done")
+        await asyncio.sleep(0.3)
+    results_file = _save_full_results([f"[{k}]\n{all_results[k]}" for k in all_results], target)
+    if results_file:
+        try:
+            await context.bot.send_document(chat_id=chat_id, document=results_file, caption="Web scan raw results")
+        except Exception as exc:
+            log.warning(f"Could not send results file: {exc}")
+    quality = build_quality_summary(all_results, [f"{s}:{st}" for s, _, st, _ in plan])
+    total_elapsed = (datetime.now(timezone.utc) - scan_start).total_seconds()
+    data_status = build_data_status(all_results)
+    msg = (
+        f"Web scan complete in {total_elapsed:.1f}s.\n"
+        f"Coverage: {quality['coverage_score']}% | Findings: {quality['total_findings']}\n"
+        f"{data_status}\n_Web only; no blockchain._"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
+    _set_last_scan({
+        "target": target,
+        "preset": "web",
+        "scope": "web",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "elapsed_sec": round(total_elapsed, 1),
+        "quality": quality,
+        "results_file": str(results_file) if results_file else None,
+    })
+    _set_runtime("idle")
 
 
 async def run_full_scan(target: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
-    url = target if target.startswith("http") else f"https://{target}"
+    url, domain = normalize_scan_target(target)
     chat_id = update.effective_chat.id
     preset = infer_scan_preset(target)
     scan_start = datetime.now(timezone.utc)
@@ -2761,7 +3464,11 @@ async def run_full_scan(target: str, update: Update, context: ContextTypes.DEFAU
             ("company_exposure", url, "business", "medium"),
         ]
     else:
-        plan = [(s, domain if s in ("recon", "osint") else url, "full", "medium") for s in FULL_SCAN_SKILLS]
+        plan = [(s, domain if s in ("recon", "osint", "entity_reputation") else url, "full", "medium") for s in FULL_SCAN_SKILLS]
+        # Launchpad/crypto sites (e.g. liquid.af): include blockchain investigation
+        _relations = _infer_crypto_relation(url, "", "")
+        if _relations and _relations[0][0] == CRYPTO_RELATION_LAUNCHPAD:
+            plan.append(("blockchain_investigation", url, "full", "medium"))
 
     await update.message.reply_text(
         f"Engaging target `{target}`\nPreset: `{preset}`\nSteps: {len(plan)}",
@@ -2771,6 +3478,9 @@ async def run_full_scan(target: str, update: Update, context: ContextTypes.DEFAU
     brain = load_brain()
     all_raw_outputs: list[str] = []
     all_results: dict[str, str] = {}
+    # Infer crypto relation from URL so blockchain_investigation gets correct site type
+    _relations = _infer_crypto_relation(url, "", "")
+    _crypto_relation = _relations[0][0] if _relations else None
     for idx, (skill, t, scan_type, wordlist) in enumerate(plan, start=1):
         phase_label = f"{idx}/{len(plan)} {skill}:{scan_type}"
         _set_runtime("running", target=target, phase=phase_label)
@@ -2786,6 +3496,12 @@ async def run_full_scan(target: str, update: Update, context: ContextTypes.DEFAU
                 recon_raw = all_results.get("recon:techstack") or all_results.get("recon:full")
                 if recon_raw and skill_context:
                     skill_context["recon_json"] = recon_raw
+        elif skill == "blockchain_investigation" and _crypto_relation:
+            skill_context = {"crypto_relation": _crypto_relation}
+        elif skill == "entity_reputation":
+            osint_raw = all_results.get("osint:full") or all_results.get("osint:dns") or ""
+            if osint_raw:
+                skill_context = {"osint_json": osint_raw}
         raw = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: _run_skill_with_timeout(skill, t, scan_type, wordlist, "top100", None, skill_context),
@@ -2806,6 +3522,7 @@ async def run_full_scan(target: str, update: Update, context: ContextTypes.DEFAU
             await update.message.reply_text(f"✅ {key} done in {elapsed:.1f}s — {count} findings", parse_mode="Markdown")
         except Exception:
             await update.message.reply_text(f"✅ {key} done in {elapsed:.1f}s")
+        await asyncio.sleep(0.3)  # inter-step delay to reduce target rate-limit risk
 
     # Save raw data to file and send as downloadable document
     results_file = _save_full_results(all_raw_outputs, target)
@@ -2817,6 +3534,15 @@ async def run_full_scan(target: str, update: Update, context: ContextTypes.DEFAU
             )
         except Exception as exc:
             log.warning(f"Could not send results file: {exc}")
+    diagram_path = _save_flow_diagram_if_present(all_results, target)
+    if diagram_path:
+        try:
+            await context.bot.send_document(
+                chat_id=chat_id, document=diagram_path,
+                caption="Blockchain flow diagram",
+            )
+        except Exception as exc:
+            log.warning(f"Could not send flow diagram: {exc}")
 
     brain["scan_history"].append({
         "target": target, "date": datetime.now(timezone.utc).isoformat(), "scope": "full",
@@ -2829,6 +3555,9 @@ async def run_full_scan(target: str, update: Update, context: ContextTypes.DEFAU
         f"Coverage: {quality['coverage_score']}% | Confidence: {quality['confidence_score']}%\n"
         f"Timed out: {quality['timed_out_steps']} | Errors: {quality['error_steps']} | Findings: {quality['total_findings']}"
     )
+    data_status = build_data_status(all_results)
+    quality_msg += f"\n{data_status}"
+    quality_msg += "\n_All findings from live tools; no placeholder data._"
     if quality["not_fully_tested"]:
         quality_msg += "\nNot fully tested: " + ", ".join(quality["not_fully_tested"][:8])
     await update.message.reply_text(quality_msg, parse_mode="Markdown")
@@ -2855,8 +3584,7 @@ async def run_attack(target: str, objective: str, update: Update,
     surface, probes for vulnerabilities, attempts exploitation, and feeds
     all results to GPT-4o for intelligent next-step decisions.
     """
-    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
-    url = target if target.startswith("http") else f"https://{target}"
+    url, domain = normalize_scan_target(target)
     chat_id = update.effective_chat.id
     preset = infer_scan_preset(target, objective)
     attack_start = datetime.now(timezone.utc)
@@ -2871,8 +3599,9 @@ async def run_attack(target: str, objective: str, update: Update,
         parse_mode="Markdown",
     )
 
-    # ── Phase 1: Recon ──
+    # ── Phase 1: Recon (run in parallel for efficiency) ──
     all_results: dict[str, str] = {}
+    PHASE1_PARALLEL_CAP = 4  # max concurrent skills to avoid rate limits / resource spike
 
     async def _run_and_report(
         skill: str,
@@ -2882,6 +3611,8 @@ async def run_attack(target: str, objective: str, update: Update,
         phase_label: str = "",
         scan_type: str = "full",
         wordlist: str = "medium",
+        auth: dict | None = None,
+        skill_context: dict | None = None,
     ):
         step_name = f"{skill}:{scan_type}"
         _set_runtime("running", target=target, phase=f"{phase_label} {step_idx}/{step_total} {step_name}")
@@ -2889,7 +3620,8 @@ async def run_attack(target: str, objective: str, update: Update,
         await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
         step_t0 = datetime.now(timezone.utc)
         raw = await asyncio.get_event_loop().run_in_executor(
-            None, _run_skill_with_timeout, skill, t, scan_type, wordlist
+            None,
+            lambda: _run_skill_with_timeout(skill, t, scan_type, wordlist, "top100", auth, skill_context),
         )
         all_results[step_name] = raw
         elapsed = (datetime.now(timezone.utc) - step_t0).total_seconds()
@@ -2900,8 +3632,12 @@ async def run_attack(target: str, objective: str, update: Update,
                     f"⏭️ {step_name} timed out at {elapsed:.1f}s — skipped (partial coverage)."
                 )
                 return
-            count = len(data.get("findings", []) + data.get("header_findings", []) + data.get("ssl_findings", []))
-            await update.message.reply_text(f"✅ {step_name} done in {elapsed:.1f}s — {count} findings")
+            count = len(data.get("findings", [])) + len(data.get("header_findings", [])) + len(data.get("ssl_findings", []))
+            if "bubblemaps" in step_name and data.get("api_used"):
+                extra = f" — {data.get('top_holders_count', 0)} holders, {data.get('relationships_count', 0)} rels"
+            else:
+                extra = f" — {count} findings"
+            await update.message.reply_text(f"✅ {step_name} done in {elapsed:.1f}s{extra}")
         except Exception:
             await update.message.reply_text(f"✅ {step_name} done in {elapsed:.1f}s")
 
@@ -2912,9 +3648,40 @@ async def run_attack(target: str, objective: str, update: Update,
     phase3 = initial_plan["phase3"]
     total_steps = len(phase1) + len(phase2) + len(phase3)
     step_no = 0
-    for skill, t, stype, wl in phase1:
-        step_no += 1
-        await _run_and_report(skill, t, step_no, total_steps, "Phase 1", stype, wl)
+
+    # Phase 1: run recon skills in parallel (no dependencies between them)
+    if phase1:
+        step_no += len(phase1)
+        await update.message.reply_text(
+            f"Phase 1: Running {len(phase1)} skills in parallel (max {PHASE1_PARALLEL_CAP} concurrent)...",
+            parse_mode="Markdown",
+        )
+        phase1_start = datetime.now(timezone.utc)
+
+        async def _run_one_phase1(skill: str, t: str, stype: str, wl: str):
+            step_name = f"{skill}:{stype}"
+            raw = await asyncio.get_event_loop().run_in_executor(
+                None, _run_skill_with_timeout, skill, t, stype, wl, "top100", None, None
+            )
+            return (step_name, raw)
+
+        # Run in batches of PHASE1_PARALLEL_CAP to cap concurrency
+        for i in range(0, len(phase1), PHASE1_PARALLEL_CAP):
+            batch = phase1[i : i + PHASE1_PARALLEL_CAP]
+            results = await asyncio.gather(*[_run_one_phase1(s, t, st, wl) for s, t, st, wl in batch])
+            for step_name, raw in results:
+                all_results[step_name] = raw
+                try:
+                    data = json.loads(raw)
+                    if "error" in data and "timed out" in str(data.get("error", "")).lower():
+                        await update.message.reply_text(f"⏭️ {step_name} timed out — skipped")
+                    else:
+                        count = len(data.get("findings", []) + data.get("header_findings", []) + data.get("ssl_findings", []))
+                        await update.message.reply_text(f"✅ {step_name} — {count} findings")
+                except Exception:
+                    await update.message.reply_text(f"✅ {step_name} done")
+        phase1_elapsed = (datetime.now(timezone.utc) - phase1_start).total_seconds()
+        await update.message.reply_text(f"Phase 1 complete in {phase1_elapsed:.1f}s (parallel).")
 
     adaptive_plan = build_adaptive_attack_plan(domain, url, preset, mode, all_results)
     phase2 = adaptive_plan["phase2"]
@@ -2931,16 +3698,52 @@ async def run_attack(target: str, objective: str, update: Update,
 
     # ── Phase 2: Attack Surface Analysis ──
     await update.message.reply_text("Phase 2: Mapping attack surface...", parse_mode="Markdown")
-
+    auth = get_stored_auth(chat_id)
     for skill, t, stype, wl in phase2:
         step_no += 1
-        await _run_and_report(skill, t, step_no, total_steps, "Phase 2", stype, wl)
+        skill_context = None
+        if skill in ("dependency_audit", "logic_abuse"):
+            client_raw = all_results.get("client_surface:deep") or all_results.get("client_surface:full")
+            if client_raw:
+                skill_context = {"client_surface_json": client_raw}
+            if skill == "dependency_audit":
+                recon_raw = all_results.get("recon:techstack") or all_results.get("recon:full")
+                if recon_raw and skill_context:
+                    skill_context["recon_json"] = recon_raw
+        elif skill == "blockchain_investigation":
+            primary = _primary_crypto_relation(adaptive_plan["profiles"])
+            if primary:
+                skill_context = {"crypto_relation": primary}
+        elif skill == "entity_reputation":
+            osint_raw = all_results.get("osint:full") or all_results.get("osint:dns") or ""
+            if osint_raw:
+                skill_context = {"osint_json": osint_raw}
+        await _run_and_report(skill, t, step_no, total_steps, "Phase 2", stype, wl, auth, skill_context)
+        await asyncio.sleep(0.3)  # inter-skill delay to avoid rate limits on target
 
     # ── Phase 3: Vulnerability Probing ──
     await update.message.reply_text("Phase 3: Probing for vulnerabilities...", parse_mode="Markdown")
     for skill, t, stype, wl in phase3:
         step_no += 1
-        await _run_and_report(skill, t, step_no, total_steps, "Phase 3", stype, wl)
+        skill_context = None
+        if skill in ("dependency_audit", "logic_abuse"):
+            client_raw = all_results.get("client_surface:deep") or all_results.get("client_surface:full")
+            if client_raw:
+                skill_context = {"client_surface_json": client_raw}
+            if skill == "dependency_audit":
+                recon_raw = all_results.get("recon:techstack") or all_results.get("recon:full")
+                if recon_raw and skill_context:
+                    skill_context["recon_json"] = recon_raw
+        elif skill == "blockchain_investigation":
+            primary = _primary_crypto_relation(adaptive_plan["profiles"])
+            if primary:
+                skill_context = {"crypto_relation": primary}
+        elif skill == "entity_reputation":
+            osint_raw = all_results.get("osint:full") or all_results.get("osint:dns") or ""
+            if osint_raw:
+                skill_context = {"osint_json": osint_raw}
+        await _run_and_report(skill, t, step_no, total_steps, "Phase 3", stype, wl, auth, skill_context)
+        await asyncio.sleep(0.3)  # inter-skill delay to avoid rate limits on target
 
     # Save full results to file and send as document
     all_raw_outputs = [f"[{k}]\n{v}" for k, v in all_results.items()]
@@ -2957,6 +3760,17 @@ async def run_attack(target: str, objective: str, update: Update,
             )
         except Exception as exc:
             log.warning(f"Could not send results file: {exc}")
+    # Flow diagram if blockchain_investigation returned flow_graph
+    diagram_path = _save_flow_diagram_if_present(all_results, target)
+    if diagram_path:
+        await update.message.reply_text("Flow diagram generated.", parse_mode="Markdown")
+        try:
+            await context.bot.send_document(
+                chat_id=chat_id, document=diagram_path,
+                caption="Blockchain flow diagram",
+            )
+        except Exception as exc:
+            log.warning(f"Could not send flow diagram: {exc}")
 
     # ── Phase 4: AI Analysis ──
     await update.message.reply_text("Phase 4: Analyzing results...", parse_mode="Markdown")
@@ -3020,15 +3834,28 @@ async def run_attack(target: str, objective: str, update: Update,
         f"debug or operational endpoints, backup/config/storage leaks, public data-bearing APIs, and business-data routes. "
         f"Explicitly prioritize payment and financial impact: zero or manipulated payment acceptance, payment/order/wallet IDOR, refund abuse (run_payment_financial). Then IDOR, leaked secrets, business-logic flaws, race conditions. These are how users lose money and differentiate Diverg. "
         f"For crypto or trading platforms (e.g. axiom.trade, Solana terminals): also prioritize user leakage (other users' wallet/position/trade data), wallet/position IDOR, and client-side exposure of keys or balances. "
-        f"Do not let commodity SQLi/XSS dominate the report unless the evidence shows they are the highest-risk issue.\n\n"
+        + (
+            f"The target is classified as crypto type: {analysis_context.get('primary_crypto_relation', '')}. "
+            f"Interpret findings and potential crime for this type: launchpad → sniper/rug/LP/fees; exchange → KYC/withdrawal/insider leakage; dex → front-run/slippage; wallet → key/seed exposure; defi → oracle/rate abuse; nft → royalty/creator abuse. "
+            if analysis_context.get("primary_crypto_relation") else ""
+        )
+        + "\nDo not let commodity SQLi/XSS dominate the report unless the evidence shows they are the highest-risk issue.\n\n"
         f"In WHAT WE TESTED and TOP FINDINGS, reflect these finding buckets if present: "
         f"{', '.join(analysis_context.get('finding_buckets', {}).keys()) or 'general coverage only'}.\n"
         f"Use target profiles and attack-surface highlights from the correlated context to explain why some issues deserve priority.\n"
         f"In LIKELY ATTACK PATHS, prefer the ranked path hypotheses from the correlated context and explain why they are likely.\n"
         f"In DETECTION AND READINESS, use the correlated readiness score as a starting point, then adjust only if raw evidence clearly supports it.\n"
         f"If recommended_next_tests is present in the context, mention it in the report (e.g. RECOMMENDED NEXT TESTS or FOLLOW-UP) so the operator can run those checks.\n"
+        f"Include a DATA STATUS line: {analysis_context.get('data_status', '')} — this tells the reader what is live vs skipped (e.g. Blockchain skipped = no API key; only report on-chain findings when Blockchain: live).\n"
         f"If breach_exposure is present (domain in HIBP/IntelX etc.), include a BREACH / DATA EXPOSURE note and state clearly: "
         f"We cannot determine whether data was sold on the dark web; consider threat intel or breach monitoring for your domain/emails.\n\n"
+        + (
+            f"If entity_reputation is present (owner/company external research): use it to assess potential foul play, backdooring, or past crime. "
+            f"Report any links to lawsuits, regulatory action (FTC/SEC), convictions, data breaches, or fraud. "
+            f"State clearly these are public-record/reputation signals, not legal conclusions. "
+            f"Include an OWNER / ENTITY HISTORY or FOUL-PLAY RESEARCH section when findings exist.\n\n"
+            if analysis_context.get("entity_reputation") else ""
+        )
         + (
             "THREAT READINESS MODE IS ENABLED. Include additional defensive sections:\n"
             "- MITRE ATT&CK style tactic/technique tags for major findings where applicable\n"
@@ -3051,6 +3878,12 @@ async def run_attack(target: str, objective: str, update: Update,
     analysis_reply = _normalize_report_text(analysis_reply)
     for chunk in _split_msg(analysis_reply):
         await update.message.reply_text(chunk)
+
+    data_status = build_data_status(all_results)
+    await update.message.reply_text(
+        data_status + "\n_All findings from live tools; no placeholder data._",
+        parse_mode="Markdown",
+    )
 
     if analysis_tool_outputs:
         analysis_file = _save_full_results(analysis_tool_outputs, target)
@@ -3193,20 +4026,22 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     threat_mode = "on" if is_threat_readiness_enabled() else "off"
 
     identity = brain.get("identity", {})
-    sys_update = identity.get("last_system_update", "")
+    sys_update = identity.get("last_system_update", "") or DIVERG_SYSTEM_VERSION
     await update.message.reply_text(
         f"*Diverg*\n\n"
         f"Pentester AI. I hack, I build tools, I get results.\n\n"
         f"Brain: {kc} learned, {sc} engagements, {tc} custom tools\n"
         f"Mode: {mode}\n"
         f"Threat readiness: {threat_mode}\n"
-        f"System updated: {sys_update or 'current'}\n"
+        f"System updated: {sys_update}\n"
         f"Cost: ${usage.get('estimated_cost_usd', 0):.4f}\n\n"
         f"*Engage:*\n"
-        f"/attack `<url>` `<objective>` -- full autonomous attack\n"
-        f"/scan `<url>` -- scan without exploiting\n\n"
+        f"/attack `<url>` `<objective>` — full autonomous attack\n"
+        f"/scan `<url>` — full scan (web + blockchain if launchpad)\n"
+        f"/chain `<wallet_or_token>` [chain] [prompt] — blockchain-only (wallet/token + optional prompt; no web)\n"
+        f"/web `<url>` — web-only (recon, API, auth, vulns; no blockchain)\n\n"
         f"*Individual:*\n"
-        f"/recon /webvuln /headers /auth /api /osint /crypto\n"
+        f"/recon /webvuln /headers /auth /api /osint /crypto /blockchain /reputation\n"
         f"/setauth cookies=... or bearer_token=... — use with /attack for authenticated scans\n\n"
         f"*Forge:*\n"
         f"/buildtool `<name>` -- I code a new weapon\n"
@@ -3618,9 +4453,75 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         return
     if not context.args:
-        await update.message.reply_text("Usage: /scan <url>")
+        await update.message.reply_text("Usage: /scan <url or domain>\nExample: /scan liquid.af or /scan https://liquid.af")
         return
-    await run_full_scan(context.args[0], update, context)
+    await run_full_scan(context.args[0].strip(), update, context)
+
+
+async def cmd_chain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Blockchain-only: wallet or token + optional chain and prompt. No web scan."""
+    if not is_authorized(update):
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /chain <wallet_or_token> [chain] [prompt]\n"
+            "Example: /chain 7xK9...mN2p solana find connected wallets\n"
+            "Example: /chain 0x123... eth trace funds\n"
+            "Runs blockchain_investigation + Bubblemaps only. No web scan."
+        )
+        return
+    address = context.args[0].strip()
+    chain = "solana"
+    prompt_parts = []
+    if len(context.args) >= 2 and context.args[1].lower() in CHAIN_IDS:
+        chain = context.args[1].lower()
+        if chain == "eth":
+            chain = "ethereum"
+        elif chain == "avax":
+            chain = "avalanche"
+        elif chain == "bnb":
+            chain = "bsc"
+        prompt_parts = context.args[2:]
+    else:
+        prompt_parts = context.args[1:]
+    prompt = " ".join(prompt_parts).strip() if prompt_parts else ""
+    await run_blockchain_scan(address, update, context, chain=chain, prompt=prompt)
+
+
+async def cmd_web(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Web-only scan: URL or domain. No blockchain. Focus on website/API/recon."""
+    if not is_authorized(update):
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /web <url or domain>\nExample: /web https://example.com\nRuns web/recon/API/auth only. No blockchain."
+        )
+        return
+    await run_web_scan(context.args[0].strip(), update, context)
+
+
+async def cmd_bubblemaps(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Bubblemaps (bubblemaps.io): token holder map, clusters, relationships. Fact-only when BUBBLEMAPS_API_KEY set."""
+    if not is_authorized(update):
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /bubblemaps <token_address> [chain]\n"
+            "Example: /bubblemaps 7xK9...mN2p solana\n"
+            "Chains: solana, eth, base, bsc, polygon, avalanche, tron, ton, apechain, sonic, monad"
+        )
+        return
+    token = context.args[0].strip()
+    chain = context.args[1].strip() if len(context.args) > 1 else "solana"
+    await update.message.reply_text(f"Running *Bubblemaps* for token `{token[:20]}...` on {chain}...", parse_mode="Markdown")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+    raw = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: _run_skill_with_timeout("bubblemaps", token, scan_type="full", context={"token_address": token, "chain": chain}),
+    )
+    summary = format_scan_results("bubblemaps", raw, token)
+    for chunk in _split_msg(summary):
+        await update.message.reply_text(chunk, parse_mode="Markdown")
 
 
 async def cmd_skill(skill_name, update, context):
@@ -3651,11 +4552,17 @@ async def cmd_auth(u, c): await cmd_skill("auth_test", u, c)
 async def cmd_api(u, c): await cmd_skill("api_test", u, c)
 async def cmd_osint(u, c): await cmd_skill("osint", u, c)
 async def cmd_crypto(u, c): await cmd_skill("crypto_security", u, c)
+async def cmd_blockchain(u, c): await cmd_skill("blockchain_investigation", u, c)
+async def cmd_reputation(u, c): await cmd_skill("entity_reputation", u, c)
 
 
 URL_PATTERN = re.compile(
     r'(https?://[^\s<>\"\']+|(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+(?:com|net|org|io|dev|co|app|xyz|info|biz|me|us|uk|de|fr|ai|tech|site|online|cloud|pro|gov|edu|mil|trade)(?:/[^\s<>\"\']*)?)',
     re.IGNORECASE,
+)
+# Wallet or token address: ETH 0x + 40 hex, or Solana/base58 32–44 chars
+WALLET_OR_TOKEN_PATTERN = re.compile(
+    r'(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})',
 )
 
 SCAN_TRIGGERS = [
@@ -3700,6 +4607,40 @@ def _save_full_results(tool_outputs: list[str], target_hint: str) -> Path | None
     return path
 
 
+def _save_flow_diagram_if_present(all_results: dict[str, str], target_hint: str) -> Path | None:
+    """Only when on-chain data was actually used: render flow diagram from flow_graph and save. Never use placeholder data."""
+    for key, raw in all_results.items():
+        if "blockchain_investigation" not in key:
+            continue
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not data.get("on_chain_used"):
+            continue
+        fg = data.get("flow_graph") or (data.get("crime_report") or {}).get("flow_graph")
+        if not fg or not fg.get("nodes"):
+            continue
+        try:
+            import blockchain_flow_diagram
+            render_flow_diagram_html = blockchain_flow_diagram.render_flow_diagram_html
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe = re.sub(r"[^a-z0-9_.-]", "_", target_hint.lower())[:40]
+            out_path = RESULTS_DIR / f"{ts}_{safe}_flow_diagram.html"
+            render_flow_diagram_html(
+                fg,
+                title="Wallet flow",
+                target_label=target_hint,
+                output_path=out_path,
+                logo_src="../content/neuro-logo.png",
+            )
+            return out_path
+        except Exception as e:
+            log.warning("Flow diagram save failed: %s", e)
+        break
+    return None
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_authorized(update):
         return
@@ -3708,9 +4649,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     chat_id = update.effective_chat.id
     user_text = update.message.text.strip()
+    lower = user_text.lower()
 
     urls = URL_PATTERN.findall(user_text)
-    has_action = any(t in user_text.lower() for t in ATTACK_TRIGGERS + SCAN_TRIGGERS)
+    has_action = any(t in lower for t in ATTACK_TRIGGERS + SCAN_TRIGGERS)
+
+    # Web-only: "web scan" / "website scan" + URL → run web scan only, no blockchain
+    if ("web scan" in lower or "website scan" in lower or "web only" in lower) and urls:
+        await run_web_scan(urls[0], update, context)
+        return
+    if ("web scan" in lower or "website scan" in lower) and re.search(r"[\w.-]+\.(com|net|org|io|trade|app|dev)\b", user_text, re.I):
+        m = re.search(r"([\w.-]+\.(?:com|net|org|io|trade|app|dev)(?:/[^\s]*)?)", user_text, re.I)
+        if m:
+            target_web = m.group(1)
+            if not target_web.startswith("http"):
+                target_web = "https://" + target_web
+            await run_web_scan(target_web, update, context)
+            return
+
+    # Blockchain-only: "blockchain scan" / "chain scan" / "chain investigation" + wallet/token → run chain only
+    if ("blockchain scan" in lower or "chain scan" in lower or "chain investigation" in lower or "blockchain only" in lower):
+        addrs = WALLET_OR_TOKEN_PATTERN.findall(user_text)
+        if addrs:
+            await run_blockchain_scan(addrs[0], update, context, chain="solana", prompt=user_text[:200])
+            return
+        await update.message.reply_text(
+            "For *blockchain-only* investigation, use: /chain <wallet_or_token> [chain] [prompt]\n"
+            "Example: /chain 7xK9...mN2p solana find connected wallets",
+            parse_mode="Markdown",
+        )
+        return
+
     # Extract domain-like target even without protocol (e.g. axiom.trade)
     target_from_text = urls[0] if urls else None
     if not target_from_text and re.search(r"[\w.-]+\.(com|net|org|io|trade|app|dev)\b", user_text, re.I):
@@ -3796,10 +4765,10 @@ def main() -> None:
         ("usage", cmd_usage), ("teach", cmd_teach), ("note", cmd_note),
         ("notes", cmd_notes), ("brain", cmd_brain), ("forget", cmd_forget),
         ("mode", cmd_mode), ("threatmode", cmd_threatmode), ("health", cmd_health), ("lastscan", cmd_lastscan),
-        ("attack", cmd_attack), ("scan", cmd_scan),
+        ("attack", cmd_attack), ("scan", cmd_scan), ("chain", cmd_chain), ("web", cmd_web),
         ("recon", cmd_recon), ("webvuln", cmd_webvuln),
         ("headers", cmd_headers), ("auth", cmd_auth), ("api", cmd_api),
-        ("osint", cmd_osint), ("crypto", cmd_crypto), ("buildtool", cmd_buildtool), ("run", cmd_run),
+        ("osint", cmd_osint), ("crypto", cmd_crypto), ("blockchain", cmd_blockchain), ("bubblemaps", cmd_bubblemaps), ("reputation", cmd_reputation), ("buildtool", cmd_buildtool), ("run", cmd_run),
         ("exec", cmd_exec), ("tools", cmd_tools),
     ]:
         app.add_handler(CommandHandler(cmd, fn))

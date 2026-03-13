@@ -28,5 +28,12 @@ Thumbs.db
 *.swp
 *.swo
 
+# Scan outputs and runtime data (keep private — do not commit)
+results/
+data/
+reports/
+*.brain.json
+brain.json
+
 # Optional: uncomment to ignore results (scan outputs)
 # results/*.txt

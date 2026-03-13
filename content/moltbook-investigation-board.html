@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Moltbook — Investigation Board</title>
+  <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1419;
+      color: #e7e9ea;
+      padding: 24px;
+      line-height: 1.45;
+    }
+    .board {
+      width: 1200px;
+      height: 628px;
+      margin: 0 auto 32px;
+      background: linear-gradient(160deg, #161b22 0%, #0d1117 100%);
+      border: 2px solid #30363d;
+      border-radius: 8px;
+      padding: 24px 36px;
+      position: relative;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+    .logo-wrap {
+      text-align: center;
+      margin-bottom: 12px;
+    }
+    .logo-wrap img {
+      height: 38px;
+      width: auto;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    .case-badge {
+      font-family: 'Special Elite', cursive;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      color: #58a6ff;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+    }
+    .board-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #30363d;
+    }
+    .card {
+      background: #1c2128;
+      color: #e7e9ea;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 10px 14px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      position: relative;
+    }
+    .card.highlight { border-color: #58a6ff; background: #0d1117; }
+    .card-label {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #8b949e;
+      margin-bottom: 4px;
+    }
+    .card strong { color: #fff; }
+    .accent { color: #58a6ff; font-weight: 600; }
+    .evidence-num {
+      display: inline-block;
+      background: #58a6ff;
+      color: #0d1117;
+      font-size: 9px;
+      font-weight: 600;
+      padding: 2px 6px;
+      margin-right: 8px;
+      border-radius: 4px;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .list-compact { font-size: 11px; color: #8b949e; margin-top: 6px; }
+    .list-compact span { color: #e7e9ea; }
+    .verdict-row {
+      display: flex;
+      align-items: center;
+      padding: 8px 12px;
+      background: rgba(88, 166, 255, 0.06);
+      border-left: 3px solid #58a6ff;
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+    .verdict-row .cause { flex: 0 0 200px; color: #8b949e; }
+    .verdict-row .effect { flex: 1; color: #e7e9ea; }
+    .foot-note {
+      position: absolute;
+      bottom: 16px;
+      right: 36px;
+      font-size: 9px;
+      color: #6e7681;
+    }
+    .bullet { color: #58a6ff; margin-right: 6px; }
+  </style>
+</head>
+<body>
+
+  <!-- THREAD 1: Case file / target -->
+  <section class="board" id="board-1">
+    <div class="logo-wrap"><img src="neuro-logo.png" alt="Diverg" /></div>
+    <div class="case-badge">Confidential — Security Assessment</div>
+    <h2 class="board-title">CASE FILE: MOLTBOOK</h2>
+    <div class="card highlight">
+      <div class="card-label">Subject</div>
+      <strong>moltbook.com</strong> — Domain under investigation. Registrant: <strong>Proxy Protection LLC</strong> (US). Registrar: DreamHost. Created 2026-01-27 · Expires 2027-01-27. DNSSEC unsigned.
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-label">Infrastructure & DNS</div>
+        Nameservers: albert.ns.cloudflare.com, angela.ns.cloudflare.com. Email: Google Workspace (SPF/MX). Stack: AWS CloudFront, Next.js, React, webpack, Node.js.
+      </div>
+      <div class="card">
+        <div class="card-label">Subdomains (crt.sh)</div>
+        <strong>www.moltbook.com</strong> → 99.86.212.38 · <strong>cdrcb.com.moltbook.com</strong> (IP N/A). Same infra can extend attack surface.
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-label">Assessment type</div>
+      Deep-audit scan · Crypto/trading surface · User exploitation risk review. Preset: deep-audit. Target profiles: admin-surface, debug-surface, data-exposure-surface, identity-surface, framework-specific.
+    </div>
+    <p class="foot-note">Diverg assessment · 2026-03-11</p>
+  </section>
+
+  <!-- THREAD 2: Exposed surfaces -->
+  <section class="board" id="board-2">
+    <div class="logo-wrap"><img src="neuro-logo.png" alt="Diverg" /></div>
+    <div class="case-badge">Evidence</div>
+    <h2 class="board-title">Exposed surfaces — public reach</h2>
+    <p class="list-compact" style="margin-bottom: 10px;">Admin, dashboard, DB tool path, config/log paths, and health endpoint are reachable from the internet. Impact: unauthorized access attempts, credential attacks, sensitive workflow exposure.</p>
+    <div class="grid-3">
+      <div class="card">
+        <span class="evidence-num">1</span>
+        <strong>/admin</strong> → 200
+        <div class="list-compact"><span>Admin panel</span> · text/html · full HTML returned. Auth not enforced at HTTP layer.</div>
+      </div>
+      <div class="card">
+        <span class="evidence-num">2</span>
+        <strong>/dashboard</strong> → 200
+        <div class="list-compact"><span>Dashboard</span> · text/html · management route returned content. Publicly reachable.</div>
+      </div>
+      <div class="card">
+        <span class="evidence-num">3</span>
+        <strong>/phpMyAdmin/</strong> → 308
+        <div class="list-compact"><span>Path exists</span> · redirect. DB admin vector; if exposed = full DB access (credentials, PII).</div>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <span class="evidence-num">4</span>
+        <strong>/health</strong> → 200 · <code>{"status":"OK"}</code>
+        <div class="list-compact">Operational/debug endpoint · application/json · public. Reveals stack and availability to attackers.</div>
+      </div>
+      <div class="card">
+        <span class="evidence-num">5</span>
+        <strong>/app.config</strong> → 403 · <strong>/log/production.log</strong> → 403
+        <div class="list-compact">Paths exist (forbidden). One misconfig away from config/secrets or log (user actions, IPs) leak.</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-label">Additional</div>
+      <strong>/login</strong> → 200 (identity surface). Restrict admin behind strong auth, IP allowlists, or VPN; remove debug from public.
+    </div>
+    <p class="foot-note">company_exposure:operational · api_test:discovery · recon:sensitive</p>
+  </section>
+
+  <!-- THREAD 3: Weak crypto -->
+  <section class="board" id="board-3">
+    <div class="logo-wrap"><img src="neuro-logo.png" alt="Diverg" /></div>
+    <div class="case-badge">Evidence</div>
+    <h2 class="board-title">Weak crypto — session & token risk</h2>
+    <div class="card">
+      <div class="card-label">Finding</div>
+      <span class="accent">Math.random()</span> used in frontend JS — predictable, not cryptographically secure. If used for tokens, session IDs, CSRF nonces, or security-sensitive values → predictable output.
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-label">Affected assets (full URLs)</div>
+        https://moltbook.com/_next/static/chunks/<strong>785528a67640bd6e.js</strong><br>
+        https://moltbook.com/_next/static/chunks/<strong>b236f1f448afb5e0.js</strong>
+      </div>
+      <div class="card">
+        <div class="card-label">User impact</div>
+        Predictable or weak crypto can lead to session prediction, token forgery, or password cracking. Session hijack, account takeover, or abuse of recovery/token flows.
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-label">Remediation</div>
+      Use <strong>crypto.getRandomValues()</strong> for any security-sensitive randomness. Remove Math.random() from auth/session/token flows. Avoid MD5/DES/RC4/ECB for security-sensitive data.
+    </div>
+    <p class="foot-note">crypto_security:full</p>
+  </section>
+
+  <!-- THREAD 4: Secret in bundle -->
+  <section class="board" id="board-4">
+    <div class="logo-wrap"><img src="neuro-logo.png" alt="Diverg" /></div>
+    <div class="case-badge">Evidence — Critical</div>
+    <h2 class="board-title">Possible secret in shipped frontend</h2>
+    <div class="card highlight">
+      <div class="card-label">Pattern flagged</div>
+      <span class="accent">SECRET:!0,r...tion</span> (redacted in report) in client-side JavaScript. Category: Sensitive Data Exposure.
+    </div>
+    <div class="card">
+      <div class="card-label">Location</div>
+      <strong>https://moltbook.com/_next/static/chunks/785528a67640bd6e.js</strong> — Source: src. Verify manually; do not expose raw value in public reports.
+    </div>
+    <div class="card">
+      <div class="card-label">User / platform impact</div>
+      Leaked credentials can lead to account takeover, data breach, or financial loss. If this is a real credential or backdoor token, anyone who loads the page can extract it → API abuse, impersonation, or backdoor-style access to user data.
+    </div>
+    <div class="card">
+      <div class="card-label">Remediation</div>
+      Remove secrets from client-side code. Use backend-only keys and env vars. Verify build pipeline does not bundle env or feature flags that act as secrets.
+    </div>
+    <p class="foot-note">high_value_flaws:full</p>
+  </section>
+
+  <!-- THREAD 5: Client-side vectors -->
+  <section class="board" id="board-5">
+    <div class="logo-wrap"><img src="neuro-logo.png" alt="Diverg" /></div>
+    <div class="case-badge">Evidence</div>
+    <h2 class="board-title">Client-side exploitation vectors</h2>
+    <div class="grid-3">
+      <div class="card">
+        <span class="evidence-num">1</span>
+        <strong>innerHTML</strong> sinks
+        <div class="list-compact">Chunks: 694aaced0024becc.js, 785528a67640bd6e.js. If user-controlled or 3rd-party data reaches sink → XSS or code execution.</div>
+      </div>
+      <div class="card">
+        <span class="evidence-num">2</span>
+        <strong>postMessage</strong> listeners
+        <div class="list-compact">Chunks: 694aaced0024becc.js, a6dad97d9634a72d.js, 785528a67640bd6e.js. Origin validation not confirmed → cross-origin data theft or command injection. Always validate event.origin (allowlist).</div>
+      </div>
+      <div class="card">
+        <span class="evidence-num">3</span>
+        <strong>GTM in CSP</strong>
+        <div class="list-compact">script-src includes https://www.googletagmanager.com. Trusted 3rd-party can run script in same origin → supply-chain / exfil risk if GTM compromised.</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-label">User impact</div>
+      Session cookie theft, form data exfil, phishing redirects, or malicious script injection. Missing origin check on postMessage can lead to cross-origin data theft. Sanitize and CSP for innerHTML; avoid eval/new Function with user input.
+    </div>
+    <p class="foot-note">client_surface:deep · headers_ssl:full</p>
+  </section>
+
+  <!-- THREAD 6: Data leak & APIs -->
+  <section class="board" id="board-6">
+    <div class="logo-wrap"><img src="neuro-logo.png" alt="Diverg" /></div>
+    <div class="case-badge">Evidence</div>
+    <h2 class="board-title">Info leak & user-facing APIs</h2>
+    <div class="card">
+      <div class="card-label">Verbose error / path disclosure (CONFIRMED)</div>
+      Request to <strong>/api/user/../../../etc/passwd</strong> returned 404 but response matched <span class="accent">internal/stack/path</span> pattern (e.g. framework paths, structure). Attackers learn stack and can chain into further exploitation. Return generic error pages; disable stack traces and path disclosure.
+    </div>
+    <div class="card">
+      <div class="card-label">APIs extracted from client JS (auth & activity)</div>
+      <strong>/api/v1/auth/me</strong> · <strong>/api/v1/activity/recent</strong> · <strong>/api/v1/homepage</strong> · <strong>/api/v1/observers</strong> · <strong>/api/v1/posts</strong>
+      <div class="list-compact">Used for auth, activity, social features. If any IDOR or auth bypass exists → one user's data exposed or account taken over. Test for auth bypass and parameter abuse; ensure API docs and auth coverage match frontend.</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Header leakage</div>
+      Server: CloudFront · X-Powered-By: Next.js. Reduces info leakage by removing or genericizing these headers.
+    </div>
+    <p class="foot-note">data_leak_risks:full · client_surface:deep · headers_ssl</p>
+  </section>
+
+  <!-- THREAD 7: Verdict / summary -->
+  <section class="board" id="board-7">
+    <div class="logo-wrap"><img src="neuro-logo.png" alt="Diverg" /></div>
+    <div class="case-badge">Case summary</div>
+    <h2 class="board-title">User exploitation risk — verdict</h2>
+    <p class="list-compact" style="margin-bottom: 10px;">How Moltbook’s current setup can lead to user harm (conditions present; not proof of intent):</p>
+    <div class="verdict-row"><span class="cause">Weak crypto (Math.random)</span><span class="effect">→ Session/token prediction → account takeover, token forgery</span></div>
+    <div class="verdict-row"><span class="cause">Secret in bundle</span><span class="effect">→ Backdoor/API abuse → account takeover, data breach, financial loss</span></div>
+    <div class="verdict-row"><span class="cause">Exposed admin/dashboard</span><span class="effect">→ Unauthorized access → abuse of user data or accounts, credential attacks</span></div>
+    <div class="verdict-row"><span class="cause">phpMyAdmin / config / log paths</span><span class="effect">→ One misconfig from full DB/config or production log exposure</span></div>
+    <div class="verdict-row"><span class="cause">innerHTML + postMessage + GTM</span><span class="effect">→ XSS, cross-origin theft, supply-chain exfil (session, form data, phishing)</span></div>
+    <div class="verdict-row"><span class="cause">Verbose errors + API surface</span><span class="effect">→ Faster targeting of auth & user endpoints (auth/me, activity, observers, posts)</span></div>
+    <div class="card" style="margin-top: 10px;">
+      <div class="card-label">Conclusion</div>
+      Conditions for <strong>user exploitation</strong> are present: weak crypto, possible secret in frontend, exposed admin/dashboard, dangerous client patterns, verbose errors. Lock down admin, remove secrets from frontend, fix crypto and origin checks. Next.js version unknown — monitor for CVEs.
+    </div>
+    <p class="foot-note">Diverg deep-audit · moltbook.com</p>
+  </section>
+
+</body>
+</html>
