@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -107,66 +108,79 @@ def run(
     headers = {"X-ApiKey": api_key}
 
     report = BubblemapsReport(chain=chain_id, token_address=token_address)
-    try:
-        r = SESSION.get(url, params=params, headers=headers, timeout=TIMEOUT)
-        if r.status_code == 429:
-            report.error = "Rate limited (daily query-seconds). Retry after midnight UTC."
-            return json.dumps(asdict(report), indent=2)
-        if r.status_code == 404:
-            report.error = "No holders found for this token (404)."
-            return json.dumps(asdict(report), indent=2)
-        if r.status_code != 200:
-            report.error = f"API HTTP {r.status_code}: {r.text[:200]}"
-            return json.dumps(asdict(report), indent=2)
+    for attempt in range(2):
+        try:
+            r = SESSION.get(url, params=params, headers=headers, timeout=TIMEOUT)
+            if r.status_code == 429:
+                if attempt == 0:
+                    time.sleep(2.0)
+                    continue
+                report.error = "Rate limited (daily query-seconds). Retry after midnight UTC."
+                return json.dumps(asdict(report), indent=2)
+            if r.status_code == 404:
+                report.error = "No holders found for this token (404)."
+                return json.dumps(asdict(report), indent=2)
+            if r.status_code != 200:
+                report.error = f"API HTTP {r.status_code}: {r.text[:200]}"
+                return json.dumps(asdict(report), indent=2)
 
-        data = r.json()
-        report.api_used = True
-        report.metadata = data.get("metadata")
-        report.decentralization_score = data.get("decentralization_score")
+            data = r.json()
+            report.api_used = True
+            report.metadata = data.get("metadata")
+            report.decentralization_score = data.get("decentralization_score")
 
-        meta = data.get("metadata") or {}
-        identified = meta.get("identified_supply") or {}
-        report.share_in_cexs = identified.get("share_in_cexs")
-        report.share_in_dexs = identified.get("share_in_dexs")
-        report.share_in_other_contracts = identified.get("share_in_other_contracts")
+            meta = data.get("metadata") or {}
+            identified = meta.get("identified_supply") or {}
+            report.share_in_cexs = identified.get("share_in_cexs")
+            report.share_in_dexs = identified.get("share_in_dexs")
+            report.share_in_other_contracts = identified.get("share_in_other_contracts")
 
-        nodes = data.get("nodes")
-        if nodes:
-            top = nodes.get("top_holders") or []
-            report.top_holders_count = len(top)
-            for h in top[:15]:
-                addr = h.get("address", "")
-                details = h.get("address_details") or {}
-                holder_data = h.get("holder_data") or {}
-                report.top_holders_preview.append({
-                    "address": addr,
-                    "label": details.get("label"),
-                    "is_cex": details.get("is_cex"),
-                    "is_dex": details.get("is_dex"),
-                    "share": holder_data.get("share"),
-                    "rank": holder_data.get("rank"),
+            nodes = data.get("nodes")
+            if nodes:
+                top = nodes.get("top_holders") or []
+                report.top_holders_count = len(top)
+                for h in top[:15]:
+                    addr = h.get("address", "")
+                    details = h.get("address_details") or {}
+                    holder_data = h.get("holder_data") or {}
+                    report.top_holders_preview.append({
+                        "address": addr,
+                        "label": details.get("label"),
+                        "is_cex": details.get("is_cex"),
+                        "is_dex": details.get("is_dex"),
+                        "share": holder_data.get("share"),
+                        "rank": holder_data.get("rank"),
+                    })
+            rels = data.get("relationships") or []
+            report.relationships_count = len(rels)
+            for rel in rels[:20]:
+                report.relationships_preview.append({
+                    "from": rel.get("from_address"),
+                    "to": rel.get("to_address"),
+                    "total_transfers": (rel.get("data") or {}).get("total_transfers"),
+                    "total_value": (rel.get("data") or {}).get("total_value"),
                 })
-        rels = data.get("relationships") or []
-        report.relationships_count = len(rels)
-        for rel in rels[:20]:
-            report.relationships_preview.append({
-                "from": rel.get("from_address"),
-                "to": rel.get("to_address"),
-                "total_transfers": (rel.get("data") or {}).get("total_transfers"),
-                "total_value": (rel.get("data") or {}).get("total_value"),
-            })
-        clusters = data.get("clusters") or []
-        report.clusters_count = len(clusters)
-        for cl in clusters[:10]:
-            report.clusters_preview.append({
-                "share": cl.get("share"),
-                "holder_count": cl.get("holder_count"),
-                "holders_sample": (cl.get("holders") or [])[:5],
-            })
-    except requests.RequestException as e:
-        report.error = f"Request failed: {e}"
-    except Exception as e:
-        report.error = str(e)
+            clusters = data.get("clusters") or []
+            report.clusters_count = len(clusters)
+            for cl in clusters[:10]:
+                report.clusters_preview.append({
+                    "share": cl.get("share"),
+                    "holder_count": cl.get("holder_count"),
+                    "holders_sample": (cl.get("holders") or [])[:5],
+                })
+            return json.dumps(asdict(report), indent=2)
+        except requests.RequestException as e:
+            report.error = f"Request failed: {e}"
+            if attempt == 0:
+                time.sleep(1.5)
+                continue
+            return json.dumps(asdict(report), indent=2)
+        except Exception as e:
+            report.error = str(e)
+            if attempt == 0:
+                time.sleep(1.0)
+                continue
+            return json.dumps(asdict(report), indent=2)
 
     return json.dumps(asdict(report), indent=2)
 

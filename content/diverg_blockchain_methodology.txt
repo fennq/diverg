@@ -1,0 +1,162 @@
+DIVERG BLOCKCHAIN INVESTIGATION METHODOLOGY — FULL REFERENCE
+===========================================================
+Diverg's standard for on-chain investigations. Court-ready, one-click verifiable, fact-only. Use this for every chain investigation.
+
+OBJECTIVE
+---------
+Trace funds, link wallets to entities, expose timing fraud (announcement vs on-chain), and surface evidence that survives scrutiny. Lead with verdict; support with chronological flow and explorer links. Do it systematically with timestamp/CEX awareness so reports are court-ready and one-click verifiable.
+
+1. STARTING POINT & DATA SOURCES
+--------------------------------
+- Combine on-chain data with OSINT: transaction flows, wallet clusters, mixing patterns, exchange deposits.
+- Cross-reference: social (X, Discord, Telegram), court records, breach/leak DBs (LeakPeek, Snusbase, Intelligence X), WHOIS, archives (Wayback, Archive Today). Monitor Telegram/Discord where actors brag or leak; screen-shares and chat logs can lead to real names and arrests.
+- Build a profile: who controls this address, when did they move funds, where did it go. CEX = compliance exposure (freeze, subpoena, KYC).
+- Reference cases: $243M Genesis — funds split across 15+ exchanges, converted BTC/LTC/ETH/Monero; Jambler traces to dormant addresses with historic exchange activity; test txs and timing linked to known threat actors.
+
+2. WALLET & FLOW TRACING (DIVERG STANDARD)
+------------------------------------------
+- Follow the money in chronological order. Timestamps are critical: block_time (UTC) for every transfer; report YYYY-MM-DD or full UTC so readers can verify.
+- When reading on-chain wallets:
+  * Identify first funder / deployer / LP provider; tag them as primary.
+  * Trace outflows: same wallet sending to multiple addresses = split; to known CEX deposit = compliance choke point. "Funds to CEX can be frozen or subpoenaed."
+  * Trace inflows: who funded this wallet and when (reveals timing vs public announcements).
+- Wallet clustering: same entity often uses multiple addresses; link via shared counterparties, funding source, or timing patterns. Methods: shared gas funding sources, synchronized transaction patterns, common endpoints (Binance, Coinbase), smart contract / bytecode comparison to identify reused deployer wallets. Systematic clustering is key.
+- CEX and mixers: tag every address that is a known exchange deposit or mixer (e.g. Jambler, Tornado). Funds to CEX = can be frozen, subpoenaed; timing of deposit vs withdrawal matters. Few entities regularly use mixers "in size" — demix (identify pre-mix and post-mix addresses) and trace back to flagged sources. When funds pass through a mixer, trace addresses before and after mixing to establish transaction continuity.
+- Dormant wallets: addresses inactive for years then suddenly moving large sums are high signal. Timeline alignment: dormant → large deposit to mixer → final destination in same window = strong link.
+- Accidental address reuse: link dirty funds to clean funds when the same address is reused across illicit and legitimate activity; forensic-level analysis.
+- Real-time evidence: document wallet movements during live interactions (e.g. group chat, screen-share) to establish control of multiple addresses by same actor.
+
+3. TIMESTAMP DISCIPLINE (CRITICAL)
+----------------------------------
+- Order all transfers by block_time (asc for story, desc for latest-first). Never report flows in random order.
+- Correlation checks:
+  * Announcement date vs first LP add / first buy / first dump. If "launch" is announced after insiders already bought = pump setup.
+  * Statement date vs transaction date. If someone claims "we didn't sell" but on-chain shows sell before statement = lie. Highlight timestamp discrepancies (announcements vs actual tx timing); spike in volume at specific UTC can link to public dissemination.
+- In reports: always show date (YYYY-MM-DD or full UTC) next to key events so readers can verify.
+- Exchange swaps / bridge events: record timestamp of swap and, if possible, link to CEX deposit on the other side (same time window = likely same actor).
+
+4. CEX ROUTING & COMPLIANCE EXPOSURE
+------------------------------------
+- When stolen or suspicious funds hit a centralized exchange: that's a compliance event. Exchanges can freeze, KYC can reveal identity. Flag "stolen funds routed to CEX" and "partial payments / escrow exploit attempts" as bad-faith tactics; trace each leg with timestamps.
+- In flow graphs: label nodes as "CEX", "Mixer", "OTC", or "Unknown". Prioritize CEX paths in narrative ("funds routed to Binance").
+- Partial payments / escrow abuse: when bad actors try to launder via partial payments or target escrow mechanisms, document each leg; social pressure while funds are at CEX = exposure to compliance review.
+- Multiple CEX/mixer hops = obfuscation; still trace each hop with dates.
+
+5. TOOLS (DIVERG CAPABILITIES)
+------------------------------
+- Wallet/flow: Solscan (Solana), Etherscan (Ethereum), Arkham (labels, counterparties, flow). Blockchair for Bitcoin.
+- Entity/labels: Arkham Intelligence for CEX/mixer/entity tags; use batch label and counterparty APIs.
+- Cross-chain: Cielo (EVM, Bitcoin, Solana, Tron); TRM Labs / MetaSleuth (graphs, relationships); bridge explorers Range, Socketscan, Pulsy for multi-chain traces; Dune for aggregate patterns.
+- OSINT: LeakPeek, Snusbase, Intelligence X (breach/DB); OSINT Industries (email, username, phone); Spur (IP); Cavalier (infostealer); TelegramDB, Discord.ID; Wayback/Archive Today; Mugetsu (historical X usernames).
+- Visualization: flow charts and diagrams; PnL on addresses where relevant.
+
+6. OUTPUT (REPORT STYLE)
+------------------------
+- Lead with verdict: risk level and one-line reason. "It likely doesn't appear to be X as claimed, though it comes from questionable sources."
+- Chronological flow: "On YYYY-MM-DD wallet A sent X to B; on YYYY-MM-DD B deposited to CEX." Every key event gets a date.
+- Explicit links: explorer links (Solscan/Arkham/Etherscan) for every key address and major tx so others can verify in one click. No evidence without a link when data is live.
+- No fluff: fact-only. If API key missing, say "data skipped (no key)" so report is not misleading. Never present placeholder as fact.
+
+6b. WALLET INVESTIGATION NARRATIVE (USE THIS STRUCTURE)
+-------------------------------------------------------
+When the operator asks to investigate a wallet (potential crime, where money went, what launches, who it might be connected to), structure the report so it makes sense end-to-end:
+
+(1) POTENTIAL CRIME / RISK
+    One-line verdict and red flags. What kind of activity this wallet is tied to (sniper, rug, scam, CEX off-ramp, etc.).
+
+(2) WHERE MONEY IS CONNECTED
+    Tell the story in plain language: "Funds moved from this wallet to [address/label], then to [address/label], then to [address/label]." Use the chronological_narrative and flow_graph. If a downstream wallet is a CEX or mixer, say so ("then to Binance deposit", "then to Tornado Cash"). Include dates (YYYY-MM-DD) and explorer links so the reader can follow the chain. This is the "wallet had funds sent to another wallet to another wallet" part.
+
+(3) LAUNCHES / TOKENS CONNECTED
+    Which token launches or tokens this wallet is connected to: deployer of X tokens, LP provider, early buyer/sniper across N launches, tokens discovered. So the reader sees what launches and tokens this address is tied to.
+
+(4) CONNECTION TO INDIVIDUALS (X / WEB)
+    When X search or web search found this wallet (or an address in the flow) mentioned by someone, say it clearly: "This wallet was mentioned by @username on X (link)." or "Funds flowed to [address]; that address was discussed by @user on X (link)." Link wallets to real-world handles so "where it could possibly be connected to the individual" is explicit. Use author_username and tweet url from run_x_search; use web search snippets when they tie an address to a person or project.
+
+7. DIVERG ADVANTAGES (AUTOMATION)
+---------------------------------
+- Always sort transfers by block_time; never report flows in random order.
+- Always tag CEX/mixer when Arkham (or known list) says so; surface in narrative and flow graph node type.
+- Run multi-hop: not just deployer but deployer's counterparties (and optionally 1-hop further) for full flow.
+- Correlate announcement vs on-chain: if we have "launch date" or "announcement", compare to first tx timestamps and call out discrepancies.
+- Emit explorer URLs for every key address and major tx so evidence is one click away.
+- Use Bubblemaps for token holder clusters and concentration; combine with transfer timeline for dump detection.
+- Detect and call out: partial payments, escrow abuse, dormant-wallet sudden moves, mixer usage "in size" (demix when possible).
+- Populate a dedicated red_flags section from findings and alerts so the operator sees patterns at a glance.
+
+8. RED FLAGS & PATTERNS (CALL OUT IN REPORTS)
+---------------------------------------------
+- Same wallet sniping every launch (insider/front-running).
+- LP removed or drained shortly after launch (rug).
+- Mint/freeze authority still active (honeypot).
+- Stated fee vs on-chain fee mismatch.
+- Announcement after insiders already bought (pump setup).
+- Funds to CEX after theft (compliance exposure; note exchange and timestamp).
+- Many small transfers to same counterparty (partial payments / laundering pattern).
+- Escrow or "recovery" schemes used to extract more from victims.
+- Dormant address suddenly moving large sums (especially after long period).
+- Mixer usage "in size" by few entities (demix to find flagged sources).
+
+9. INVESTIGATION THREAD PATTERNS (REPORT STRUCTURE)
+---------------------------------------------------
+Mirror these in structure and depth for consistent, court-ready output.
+
+THREAD OPENING:
+- "An investigation into [topic]..." or "Tracing [incident] back from the original [exploiter/theft] address..."
+- Lead with what the report will prove or reveal (alleged identity, laundering path, scammer profile).
+
+ADDRESSES AND CLUSTERS:
+- List main counterparties by full address or short form (0x7ab, 0xf3f). "Main counterparties of 0xf3f: [list]."
+- Tag clusters explicitly: "This cluster is tied to Roobet, Binance, Gamdom, ChangeNOW, Shuffle, Alphapo, BC Game, & Metawin accounts."
+- When one address is "first EVM address used" by an actor, trace its source (e.g. "withdrawals on Solana from four casinos").
+
+CONSOLIDATION AND VICTIM LINKING:
+- "Graphing out this theft lead to a consolidation address with 25+ other victims tied to 'coinbase-hold.eth'." — One address receiving from many victims = consolidation; name/label it and state victim count.
+- Consolidation addresses are key for social-engineering and scam campaigns; trace back to theft addresses and forward to CEX/mixer.
+
+DEMIX (MIXER TRACING):
+- State exact amounts and dates: "With the 6 X 0.1 ETH withdrawals from Tornado Cash on July 10th we demixed to find 6 X 0.1 ETH matching deposits made the day before."
+- Verify demix with parallel activity: "Demix is accurate as 0xc68 was also doing tests with 0x304 multisig on July 9th with SHIB."
+- Use exact timestamps and tx hashes: "0xc68 was funded with 1 ETH from Tornado cash on July 8th at 3:03 PM UTC [tx hash]. The matching 1 ETH deposit was made 9 hrs before [tx hash]."
+- Note when mixing breaks: "Both 0xc687 & 0xc891 transferred to each other on July 9th breaking the privacy benefits Tornado provides."
+- When tracing hits a wall: "Tracing ends here as the BTC appears to come from an unknown service."
+
+INCIDENT SUMMARY (STEP-BY-STEP):
+- Use numbered steps with date at top. Example: "On August 19, 2024 the threat actors targeted a single Genesis creditor by: 1) Calling as Google Support via spoofed number... 2) Calling after as Gemini support... 3) Social engineered victim into... 4) Got victim to use AnyDesk..."
+- For major txs: "59.34 BTC - Aug 19 at 1:48 am UTC" then tx hash on next line. Always amount + date + UTC + hash.
+
+LAUNDERING PATH:
+- Numbered flow: "The laundering path: 1) Transfer $X to theft address 2) Bridge $X from Solana to Ethereum via deBridge 3) Deposit to Tornado 4) Transfer to two exchanges." Then list theft address(es).
+- "Using multiple payment addresses for 21 devs we mapped out a cluster" — payment addresses across many entities → cluster mapping.
+
+OSINT AND RECOVERED CONTENT:
+- Collaborate with other researchers; cite them when we use their data.
+- Phishing site + address + date: "Public address X was set as the drainer fee receiver on [site] in Jan 2025."
+- Use "now deleted TG account" / "now deleted Telegram channel" when content was removed; still cite it and the identifier (e.g. TG ID, channel).
+- Same ID across platforms: "Posts in the GMX group from the same TG ID."
+- Timing cross-check: "Posts were around the same time 0xe4d3 was trading on-chain."
+
+VICTIM AND SOURCE OUTREACH:
+- Victim outreach, date, and attack vector in one line: "Victim DM on Oct 7, 2024 after receiving a call from..."
+- Direct contact with affected party for confirmation: "One of [the casinos] clarified the funds came from an input validation exploit."
+- "They provided a UK phone number" → "Public record reveals the name [X] is likely tied to this number."
+
+BEHAVIORAL AND REAL-TIME EVIDENCE:
+- Platform (Discord), action (screenshare), amount, date: "Days after the theft they flexed Ledger Live via Discord screenshare showing $3.1M received on October 8th, 2024."
+- One-hop link + deleted content: "Deleted Telegram channel in bio shared screenshots of a wallet address only one hop from the $6.5M theft."
+- Subculture terms + recorded evidence when relevant.
+
+EXCHANGE AND TON TIMING:
+- "When reviewing the TON address which owns [actor]'s Telegram number you can see it was funded from multiple exchanges. Perform a timing analysis to trace through the exchange and find the funding address."
+- "That address is tied to multiple other Coinbase withdrawals indicating more potential victims from impersonation scams."
+
+DATA BREACHES AND IDENTITY:
+- Name the breach: "Multiple databreaches have publicly exposed [actor]'s information such as the Flipd/OG User breaches leaking email and New York IPs which link to other breaches containing alleged full name."
+
+TLDR AND UPDATES:
+- End long reports with: "TLDR: [one sentence timeline and conclusion]."
+- Post updates when relevant: "Update: [actor] just deleted their Telegram account."
+
+BOUNTIES AND LIMITS:
+- When we identify KYC exchange deposits, note it (e.g. bounty-eligible).
+- When evidence is weak: "KYC verified accounts can be easily purchased online for any exchange — treat as lead, not proof."

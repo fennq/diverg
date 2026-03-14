@@ -1,6 +1,13 @@
 """
 Blockchain investigation skill — detect potential crime on-chain and on launchpads.
 
+Methodology aligned with Diverg blockchain standard (see content/diverg_blockchain_methodology.txt):
+- Timestamps: transfers ordered by block_time; report dates (YYYY-MM-DD) for every key event.
+- CEX/mixer tagging: label exchange/mixer counterparties; funds to CEX = compliance exposure.
+- Multi-hop: primary wallet + counterparties (and optional 1-hop further) for full flow.
+- Announcement vs on-chain: correlate launch/announcement date with first LP/buy/dump.
+- Evidence links: Solscan/Arkham/Etherscan URLs for addresses and txs where possible.
+
 For platforms like liquid.af (launchpad / token creation):
 - Sniper detection: same wallet(s) buying at launch across many tokens (insider/front-running).
 - Liquidity pull: LP removed or drained after launch (rug pull).
@@ -98,7 +105,7 @@ class BlockchainInvestigationReport:
     linked_wallets: list[dict] = field(default_factory=list)  # [{"address", "label", "source": "counterparty"|"holder"}, ...]
     counterparties: list[dict] = field(default_factory=list)  # [{"address", "name"}, ...] from Arkham
     deployer_address: str | None = None  # set in run() for crime report
-    # Flow graph for ZachXBT-style diagram: nodes (id, label, type), edges (from, to, amount, unit, date_str, count)
+    # Flow graph for Diverg report diagram: nodes (id, label, type), edges (from, to, amount, unit, date_str, count)
     flow_graph: dict | None = None  # {"nodes": [...], "edges": [...]}
 
 
@@ -154,18 +161,27 @@ def _solscan_get(
     params: dict,
     api_key: str,
 ) -> dict | None:
+    """GET Solscan API with one retry on 429 to keep flow going."""
     url = f"{SOLSCAN_BASE.rstrip('/')}/{path.lstrip('/')}"
     headers = {"token": api_key}
-    try:
-        r = session.get(url, params=params, headers=headers, timeout=TIMEOUT)
-        if r.status_code == 401:
+    for attempt in range(2):
+        try:
+            r = session.get(url, params=params, headers=headers, timeout=TIMEOUT)
+            if r.status_code == 401:
+                return None
+            if r.status_code == 429:
+                if attempt == 0:
+                    time.sleep(2.0)
+                    continue
+                return None
+            if r.ok:
+                return r.json()
             return None
-        if r.status_code == 429:
+        except Exception:
+            if attempt == 0:
+                time.sleep(1.0)
+                continue
             return None
-        if r.ok:
-            return r.json()
-    except Exception:
-        pass
     return None
 
 
@@ -505,6 +521,26 @@ def _compute_risk_score(report: BlockchainInvestigationReport) -> float:
     return min(100.0, round(score, 1))
 
 
+def _explorer_url_address(address: str, chain: str = "solana") -> str:
+    """Explorer URL for an address so evidence is one-click verifiable (Diverg standard)."""
+    if not (address or "").strip():
+        return ""
+    addr = address.strip()
+    if (chain or "solana").lower() in ("eth", "ethereum"):
+        return f"https://etherscan.io/address/{addr}"
+    return f"https://solscan.io/account/{addr}"
+
+
+def _explorer_url_tx(tx_hash: str, chain: str = "solana") -> str:
+    """Explorer URL for a transaction."""
+    if not (tx_hash or "").strip():
+        return ""
+    h = tx_hash.strip()
+    if (chain or "solana").lower() in ("eth", "ethereum"):
+        return f"https://etherscan.io/tx/{h}"
+    return f"https://solscan.io/tx/{h}"
+
+
 def _normalize_transfer_to_edge(t: dict, token_symbol: str = "TOKEN", chain: str = "solana") -> dict | None:
     """Normalize Solscan or Etherscan transfer item to {from, to, amount, unit, block_time, date_str}."""
     from datetime import datetime, timezone
@@ -563,13 +599,17 @@ def _build_flow_graph(
         if not addr:
             continue
         label = report.wallet_labels.get(addr) or next((c.get("name", "") for c in report.counterparties if c.get("address") == addr), "")
+        label_lower = (label or "").lower()
         if addr == deployer:
             ntype = "primary"
-        elif addr in counterparty_addrs:
-            ntype = "counterparty"
-        elif addr.lower() in KNOWN_CEX_MIXER_ADDRESSES:
-            ntype = "counterparty"
-            if not label:
+        elif addr in counterparty_addrs or addr.lower() in KNOWN_CEX_MIXER_ADDRESSES:
+            if "mixer" in label_lower or "jambler" in label_lower or "tumbler" in label_lower:
+                ntype = "mixer"
+            elif any(x in label_lower for x in ("exchange", "cex", "binance", "coinbase", "kraken", "bybit", "okx", "kucoin")):
+                ntype = "cex"
+            else:
+                ntype = "counterparty"
+            if not label and addr.lower() in KNOWN_CEX_MIXER_ADDRESSES:
                 label = "CEX/mixer (known)"
         else:
             ntype = "wallet"
@@ -588,18 +628,51 @@ def _build_flow_graph(
             "amount": round(total, 6), "unit": unit, "date_str": date_str,
             "count": count,
         })
+    # Chronological order (earliest date first) for narrative/flow readability
+    def _edge_sort_key(e):
+        d = e.get("date_str") or ""
+        return (d, e.get("from", ""), e.get("to", ""))
+    edges_out.sort(key=_edge_sort_key)
     return {"nodes": list(nodes_map.values()), "edges": edges_out[:80]}
 
 
 def _build_crime_report(report: BlockchainInvestigationReport) -> dict:
-    """Structured crime report for export: summary, risk, deployer, tokens, findings with evidence, flow, linked wallets, flow_graph for diagram."""
+    """Structured crime report for export: verdict first (Diverg style), then summary, risk, deployer, tokens, findings, flow, red_flags, linked wallets, flow_graph, explorer_links, chronological_narrative."""
+    chain = (report.chain or "solana").lower()[:10]
     deployer_addr = report.deployer_address
+    # Verdict first: one-line risk + main reason (how Zach presents findings)
+    risk = report.risk_score
+    if risk >= 70:
+        verdict_level = "High risk"
+    elif risk >= 40:
+        verdict_level = "Elevated risk"
+    else:
+        verdict_level = "Moderate/low risk"
+    verdict_reasons = []
+    if report.sniper_alerts:
+        verdict_reasons.append("sniper/insider pattern")
+    if report.liquidity_alerts:
+        verdict_reasons.append("liquidity/rug signals")
+    cex_any = any(
+        c.get("name") and ("exchange" in str(c.get("name", "")).lower() or "cex" in str(c.get("name", "")).lower() or "binance" in str(c.get("name", "")).lower() or "coinbase" in str(c.get("name", "")).lower())
+        for c in report.counterparties
+    )
+    if cex_any:
+        verdict_reasons.append("CEX routing (compliance exposure)")
+    high_findings = [f for f in report.findings if f.severity == "High"]
+    if high_findings:
+        verdict_reasons.append(f"{len(high_findings)} high-severity findings")
+    if not verdict_reasons:
+        verdict_reasons.append("on-chain and counterparty context")
+    verdict_one_line = f"{verdict_level} ({report.risk_score}/100). Main factors: {', '.join(verdict_reasons[:3])}."
     deployer_section = {
         "address": deployer_addr,
         "label": report.wallet_labels.get(deployer_addr, "") if deployer_addr else "",
         "counterparties": [c.get("name", c.get("address", "")) for c in report.counterparties[:10]],
         "outflows_noted": any("outflow" in f.title.lower() for f in report.findings),
     }
+    if deployer_addr:
+        deployer_section["explorer_url"] = _explorer_url_address(deployer_addr, chain)
     tokens_section = {
         "count": len(report.tokens_discovered or []),
         "mints": (report.tokens_discovered or [])[:10],
@@ -612,9 +685,44 @@ def _build_crime_report(report: BlockchainInvestigationReport) -> dict:
     flow_highlights = []
     if report.counterparties:
         flow_highlights.append("Deployer counterparties (30d): " + ", ".join([c.get("name", c.get("address", "?"))[:30] for c in report.counterparties[:5]]))
+        cex_like = [c for c in report.counterparties if c.get("name") and ("exchange" in str(c.get("name", "")).lower() or "cex" in str(c.get("name", "")).lower() or "binance" in str(c.get("name", "")).lower() or "coinbase" in str(c.get("name", "")).lower() or "kraken" in str(c.get("name", "")).lower())]
+        if cex_like:
+            flow_highlights.append("CEX/compliance exposure: deployer transacted with " + ", ".join([c.get("name", "?")[:25] for c in cex_like[:3]]) + ". Funds to CEX can be frozen or subpoenaed; include timestamps for each leg.")
     for f in report.findings:
         if "outflow" in f.title.lower() or "counterpart" in f.title.lower():
             flow_highlights.append(f.title + ": " + f.evidence[:200])
+    # Chronological narrative (Diverg style): "On YYYY-MM-DD A sent X to B; ..." from flow graph edges (already sorted by date)
+    chronological_narrative = []
+    if report.flow_graph and report.flow_graph.get("edges"):
+        for e in report.flow_graph["edges"][:20]:
+            date_str = e.get("date_str") or "date unknown"
+            amount = e.get("amount")
+            unit = e.get("unit", "TOKEN")
+            fr = (e.get("from") or "")[:8] + "..." if len(e.get("from") or "") > 12 else (e.get("from") or "?")
+            to = (e.get("to") or "")[:8] + "..." if len(e.get("to") or "") > 12 else (e.get("to") or "?")
+            chronological_narrative.append(f"On {date_str}: {fr} → {to} ({amount} {unit})")
+    # Explorer links for every key address (one-click verification)
+    explorer_links = []
+    seen = set()
+    if deployer_addr and deployer_addr not in seen:
+        seen.add(deployer_addr)
+        explorer_links.append({"address": deployer_addr, "label": report.wallet_labels.get(deployer_addr, "deployer"), "url": _explorer_url_address(deployer_addr, chain)})
+    for c in report.counterparties[:15]:
+        addr = (c.get("address") or "").strip()
+        if addr and addr not in seen:
+            seen.add(addr)
+            explorer_links.append({"address": addr, "label": c.get("name", "counterparty"), "url": _explorer_url_address(addr, chain)})
+    for w in report.linked_wallets[:15]:
+        addr = (w.get("address") or "").strip()
+        if addr and addr not in seen:
+            seen.add(addr)
+            explorer_links.append({"address": addr, "label": w.get("label", "linked"), "url": _explorer_url_address(addr, chain)})
+    if report.flow_graph and report.flow_graph.get("nodes"):
+        for n in report.flow_graph["nodes"]:
+            addr = (n.get("id") or "").strip()
+            if addr and addr not in seen:
+                seen.add(addr)
+                explorer_links.append({"address": addr, "label": n.get("label", "wallet"), "url": _explorer_url_address(addr, chain)})
     linked = list(report.linked_wallets)[:30]
     relation_label = f"Crypto relation: {report.crypto_relation}. " if report.crypto_relation else ""
     summary = (
@@ -628,6 +736,32 @@ def _build_crime_report(report: BlockchainInvestigationReport) -> dict:
         summary += "Liquidity/rug signals present. "
     if report.counterparties:
         summary += "Deployer counterparties identified. "
+    cex_names = [c.get("name", "") for c in report.counterparties if c.get("name") and ("exchange" in str(c.get("name", "")).lower() or "cex" in str(c.get("name", "")).lower() or "binance" in str(c.get("name", "")).lower() or "coinbase" in str(c.get("name", "")).lower())]
+    if cex_names:
+        summary += "CEX routing present (compliance exposure). "
+    # Red flags section (Diverg: call out patterns at a glance)
+    red_flags = []
+    if report.sniper_alerts:
+        red_flags.append("Same wallet(s) sniping multiple launches (insider/front-running)")
+    for a in report.liquidity_alerts:
+        if "remove" in str(a).lower() or "REMOVE_LIQ" in str(a) or "drain" in str(a).lower():
+            red_flags.append("LP removed or drained shortly after launch (rug)")
+            break
+    for f in report.findings:
+        t = (f.title or "").lower()
+        if "mint authority" in t or "freeze authority" in t:
+            red_flags.append("Mint/freeze authority still active (honeypot risk)")
+            break
+    if report.fee_comparison and report.fee_comparison.get("on_chain_pct") is not None and report.fee_comparison.get("stated_pct") is not None:
+        red_flags.append("Stated fee vs on-chain fee comparison available (check for mismatch)")
+    if cex_any:
+        red_flags.append("Funds to CEX (compliance exposure; note exchange and timestamp per leg)")
+    for f in report.findings:
+        if "partial" in (f.title or "").lower() or "escrow" in (f.title or "").lower():
+            red_flags.append("Partial payments or escrow-related pattern")
+            break
+    if not red_flags:
+        red_flags.append("No high-signal red flags in current data; review findings and flow.")
     # Data sources: 100% truthful attribution — no placeholder data passed as real
     data_sources = {
         "on_chain_used": report.on_chain_used,
@@ -637,12 +771,16 @@ def _build_crime_report(report: BlockchainInvestigationReport) -> dict:
         "flow_graph_from_live_data_only": report.flow_graph is not None,
     }
     out = {
+        "verdict": verdict_one_line,
         "summary": summary.strip(),
         "risk_score": report.risk_score,
         "deployer_section": deployer_section,
         "tokens_section": tokens_section,
         "findings_with_evidence": findings_with_evidence[:50],
         "flow_highlights": flow_highlights[:15],
+        "chronological_narrative": chronological_narrative[:25],
+        "red_flags": red_flags[:20],
+        "explorer_links": explorer_links[:40],
         "linked_wallets": linked,
         "data_sources": data_sources,
     }
@@ -1044,7 +1182,7 @@ def run(
             continue
         if not any(lw.get("address") == addr for lw in report.linked_wallets):
             report.linked_wallets.append({"address": addr, "label": label or "", "source": "holder"})
-    # Build flow graph for ZachXBT-style diagram (nodes + edges from transfers)
+    # Build flow graph for Diverg report diagram (nodes + edges from transfers)
     if report.on_chain_used and flow_edges:
         try:
             report.flow_graph = _build_flow_graph(report, flow_edges, report.chain)

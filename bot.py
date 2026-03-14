@@ -562,8 +562,15 @@ def build_system_prompt() -> str:
             for t in tools
         )
 
+    diverg_methodology_block = ""
+    _methodology_path = BASE_DIR / "content" / "diverg_blockchain_methodology.txt"
+    if _methodology_path.exists():
+        try:
+            diverg_methodology_block = "\n\nDIVERG BLOCKCHAIN INVESTIGATION METHODOLOGY (FULL REFERENCE — follow this for every chain investigation):\n" + _methodology_path.read_text(encoding="utf-8", errors="replace").strip()
+        except Exception:
+            pass
+
     evolution_block = ""
-    stats = brain.get("stats", {})
     gaps = brain.get("detected_gaps", [])
     if stats.get("total_scans", 0) > 0:
         evolution_block = f"\n\nMY GROWTH:\n- Total scans: {stats.get('total_scans', 0)}\n"
@@ -721,6 +728,29 @@ def build_system_prompt() -> str:
           auto-detected from URL and content. Use on crypto/launchpad targets.
           Pass deployer_address or token_addresses when known.
 
+        BLOCKCHAIN METHODOLOGY (follow for every chain investigation):
+          You must apply industry-standard on-chain investigation discipline so
+          findings match and exceed the quality of top-tier on-chain investigators.
+          (1) Timestamps: always report transfers in chronological order (block_time);
+          include date (YYYY-MM-DD or full UTC) for every key event so timing can be
+          verified. (2) CEX/mixer tagging: when Arkham or our data labels an address
+          as exchange or mixer, surface it in the narrative and flow—funds to CEX
+          mean compliance exposure and possible freeze. (3) Multi-hop: trace not
+          only the primary wallet but counterparties (and optionally their
+          counterparties); many schemes hide one hop away. (4) Announcement vs
+          on-chain: if we have a launch or announcement date, compare to first
+          LP add / first buy / first dump; if insiders moved before announcement,
+          call it out as timing fraud.           (5) Evidence links: include explorer URLs
+          (Solscan/Arkham/Etherscan) for every key address and major tx so the
+          reader can verify in one click. (6) Fact-only: never present placeholder
+          or synthetic data as real; when APIs are missing, say so explicitly.
+          When summarizing blockchain_investigation output, lead with crime_report.verdict,
+          then use crime_report.red_flags, chronological_narrative (date-ordered flow),
+          and explorer_links (address URLs) so the operator gets verdict, patterns, timeline, and one-click verification.
+
+        WALLET INVESTIGATION — STRUCTURE YOUR REPLY SO IT MAKES SENSE:
+          When the operator asks to investigate a wallet (potential crime, where money went, what launches, who it's connected to), always structure your answer in four parts: (1) Potential crime / risk: verdict and red flags in one line. (2) Where money is connected: tell the story — "Funds moved from this wallet to [address/label], then to [address/label], then to [address/label]" with dates and explorer links; if a hop is CEX or mixer, say so. (3) Launches/tokens connected: which tokens or launches this wallet is tied to (deployer, LP, sniper across N tokens). (4) Connection to individuals: when X search or web found this wallet (or a downstream address) mentioned by someone, state it clearly — "This wallet was mentioned by @username on X (link)" or "Funds flowed to an address discussed by @user on X (link)". So the reader sees: wallet → wallet → wallet, and where that chain connects to a real person (X handle).
+
         BUBBLEMAPS (run_bubblemaps):
           On-chain intelligence from bubblemaps.io: token holder map, wallet clusters,
           transfer relationships, decentralization score, CEX/DEX/contract supply share.
@@ -728,7 +758,7 @@ def build_system_prompt() -> str:
           asks for token distribution, holder clusters, or Bubblemaps. Params: token_address, chain (solana, eth, base, bsc, etc.).
 
         FOCUS ONE PART AT A TIME:
-          Operator can request blockchain-only or web-only. Blockchain-only: wallet or token + optional prompt (e.g. find connected wallets, trace funds). Use /chain or run_blockchain_investigation with deployer_address + run_bubblemaps for token. Web-only: URL only, no chain. Use /web or run only web skills (recon, headers_ssl, api_test, company_exposure, etc.). Do not mix unless operator asks for full scan.
+          Operator can request blockchain-only or web-only. Blockchain-only: wallet or token + optional prompt. Use /chain or run_blockchain_investigation with target_url 'https://post-rug.local' and deployer_address. For wallet or blockchain investigations always collate chain + web + X: call run_blockchain_investigation (with deployer_address), run_web_search(query=wallet + ' ' + prompt), and run_x_search(query=wallet) to crawl X for tweets mentioning the address and link wallets to X accounts; combine verdict, red_flags, flow, web results, and X mentions (author_username, tweet url) in one report.
 
         DISCOVER (run_discover_surface):
           Lightweight discovery on a target; returns surface_summary, profiles_detected,
@@ -867,7 +897,7 @@ def build_system_prompt() -> str:
         - No emoji unless the operator explicitly asks for them
         - Do not sound dramatic; be clear and factual
         - If nothing critical is found, say that directly
-        {SECURITY_KNOWLEDGE}{knowledge_block}{prefs_block}{clients_block}{techniques_block}{custom_tools_block}{evolution_block}{threat_block}
+        {SECURITY_KNOWLEDGE}{diverg_methodology_block}{knowledge_block}{prefs_block}{clients_block}{techniques_block}{custom_tools_block}{evolution_block}{threat_block}
     """)
 
 
@@ -1292,18 +1322,55 @@ TOOL_FUNCTIONS = [
         "function": {
             "name": "run_blockchain_investigation",
             "description": (
-                "Blockchain investigation (launchpads like liquid.af): detects potential crime — sniper (same wallet buying at launch across many tokens), "
-                "liquidity pull/rug (holder concentration, LP removal), fee extraction (fee/tax mentions), deployer history (serial launcher). "
-                "Uses Solscan (SOLSCAN_PRO_API_KEY) and optionally Arkham (ARKHAM_API_KEY) for on-chain checks. Use when target is a launchpad or token-creation platform."
+                "Blockchain investigation: potential crime, where money is connected (wallet→wallet→wallet), what launches/tokens it's tied to, and connection to individuals. "
+                "Returns verdict, red_flags, chronological flow, counterparties, explorer links. For wallet-only use target_url 'https://post-rug.local' and deployer_address. "
+                "Always combine with run_web_search and run_x_search so the report can link the flow to X accounts (e.g. 'funds went to an address mentioned by @user on X')."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "target_url": {"type": "string", "description": "Base URL of launchpad or crypto platform (e.g. https://liquid.af)"},
-                    "deployer_address": {"type": "string", "description": "Optional deployer/treasury address for transfer history, LP-remove check, and labels"},
-                    "chain": {"type": "string", "description": "Chain: solana (default, uses Solscan) or ethereum (uses Etherscan)"},
+                    "target_url": {"type": "string", "description": "Launchpad URL (e.g. https://liquid.af) or 'https://post-rug.local' for wallet-only"},
+                    "deployer_address": {"type": "string", "description": "Wallet address to investigate (use with post-rug.local for wallet-only)"},
+                    "chain": {"type": "string", "description": "Chain: solana (default) or ethereum"},
                 },
                 "required": ["target_url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_web_search",
+            "description": (
+                "Public web search (DuckDuckGo). Returns title, snippet, and URL for each result. "
+                "Use to find web mentions of a wallet address, token, or project. Collate with run_blockchain_investigation for full investigation."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query (e.g. wallet address + ' scam', or token name + ' rug')"},
+                    "max_results": {"type": "integer", "description": "Optional max results (default 15, max 30)"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_x_search",
+            "description": (
+                "Search X (Twitter) for tweets matching a query — e.g. a wallet address to find who posted about it and link wallets to X accounts. "
+                "Uses X API v2 when X_API_BEARER_TOKEN is set, or Nitter scrape when NITTER_BASE_URL is set. "
+                "Returns tweet text, author_username, url (x.com/username/status/id), created_at. Use with run_blockchain_investigation and run_web_search to collate chain + web + X."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query (e.g. wallet address, or '0x123... scam')"},
+                    "max_results": {"type": "integer", "description": "Optional max results (default 20, max 50 for API)"},
+                },
+                "required": ["query"],
             },
         },
     },
@@ -1569,6 +1636,26 @@ def _execute_tool_call(name: str, args: dict, chat_id: int | None = None) -> str
             if relations:
                 ctx["crypto_relation"] = relations[0][0]
             return _run_skill_with_timeout("blockchain_investigation", url, scan_type="full", context=ctx)
+        elif name == "run_web_search":
+            query = (args.get("query") or "").strip()
+            if not query:
+                return json.dumps({"error": "query required", "result_count": 0, "results": []})
+            max_results = args.get("max_results")
+            try:
+                import web_search
+                return web_search.run(query=query, max_results=max_results or 15)
+            except Exception as e:
+                return json.dumps({"error": str(e), "query": query, "result_count": 0, "results": []})
+        elif name == "run_x_search":
+            query = (args.get("query") or "").strip()
+            if not query:
+                return json.dumps({"source": "none", "error": "query required", "result_count": 0, "results": []})
+            max_results = args.get("max_results") or 20
+            try:
+                import x_search
+                return x_search.run(query=query, max_results=max_results)
+            except Exception as e:
+                return json.dumps({"source": "none", "error": str(e), "query": query, "result_count": 0, "results": []})
         elif name == "run_discover_surface":
             target = args.get("target", "").strip()
             domain = target.replace("https://", "").replace("http://", "").split("/")[0]
@@ -1911,14 +1998,19 @@ def format_scan_results(skill_name: str, raw_json: str, target: str) -> str:
             lines.append(f"*Recommended manual searches:* {len(data['recommended_queries'])} (see raw output)")
 
     if skill_name == "blockchain_investigation":
+        cr = data.get("crime_report") or {}
+        # Verdict first (Diverg report style)
+        if cr.get("verdict"):
+            lines.append(f"*Verdict:* {cr['verdict']}")
         if data.get("crypto_relation"):
             lines.append(f"*Crypto relation:* {data['crypto_relation']}")
         if data.get("risk_score") is not None:
             lines.append(f"*Risk score:* {data['risk_score']}/100")
         if data.get("crime_report"):
-            cr = data["crime_report"]
             if cr.get("summary"):
-                lines.append(f"*Crime report:* {cr['summary'][:200]}...")
+                lines.append(f"*Summary:* {cr['summary'][:200]}...")
+            if cr.get("red_flags"):
+                lines.append(f"*Red flags:* {'; '.join(cr['red_flags'][:5])}")
             if cr.get("linked_wallets"):
                 lines.append(f"*Linked wallets:* {len(cr['linked_wallets'])}")
         if data.get("chain"):
@@ -1949,6 +2041,10 @@ def format_scan_results(skill_name: str, raw_json: str, target: str) -> str:
             lines.append(f"*Flow graph:* {nodes_n} nodes, {edges_n} edges (diagram from live data)")
         else:
             lines.append("*Flow graph:* only from live API data when keys set; no placeholder data")
+        if cr.get("chronological_narrative"):
+            lines.append(f"*Chronological narrative:* {len(cr['chronological_narrative'])} events (date-ordered flow)")
+        if cr.get("explorer_links"):
+            lines.append(f"*Explorer links:* {len(cr['explorer_links'])} addresses (one-click verification)")
 
     if skill_name == "bubblemaps":
         if data.get("api_used"):
@@ -1969,6 +2065,32 @@ def format_scan_results(skill_name: str, raw_json: str, target: str) -> str:
             lines.append("*Bubblemaps:* skipped (no BUBBLEMAPS_API_KEY or API error)")
         if data.get("error"):
             lines.append(f"*Note:* {data['error'][:120]}")
+
+    if skill_name == "x_search":
+        lines.append("*X (Twitter) search* — tweets mentioning this wallet (link wallets to X accounts)")
+        lines.append(f"*Source:* {data.get('source', 'none')} | *Results:* {data.get('result_count', 0)}")
+        for r in (data.get("results") or [])[:10]:
+            author = r.get("author_username") or "?"
+            url = r.get("url") or ""
+            text = (r.get("text") or "")[:100] + ("..." if len(r.get("text") or "") > 100 else "")
+            if url:
+                lines.append(f"  @{author}: {text}")
+                lines.append(f"    {url}")
+            else:
+                lines.append(f"  @{author}: {text}")
+        if data.get("error") and data.get("result_count", 0) == 0:
+            lines.append(f"*Note:* {data['error'][:150]}")
+
+    if skill_name == "web_search":
+        lines.append("*Web search* — public mentions of this wallet")
+        lines.append(f"*Results:* {data.get('result_count', 0)}")
+        for r in (data.get("results") or [])[:8]:
+            title = (r.get("title") or "")[:80]
+            url = r.get("url") or ""
+            if title or url:
+                lines.append(f"  {title}")
+                if url:
+                    lines.append(f"    {url}")
 
     # De-duplicate noisy repeated findings (same title+severity+category).
     grouped: dict[tuple, dict] = {}
@@ -3243,8 +3365,8 @@ async def run_blockchain_scan(
         return
     _set_runtime("running", target=address, phase="chain")
     await update.message.reply_text(
-        f"Running *blockchain-only* investigation on `{address[:16]}...` (chain: {chain}). "
-        "No web scan — chain intel only.",
+        f"Running *blockchain* investigation on `{address[:16]}...` (chain: {chain}). "
+        "Chain + X search (link wallets to accounts) + web search.",
         parse_mode="Markdown",
     )
     await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
@@ -3291,6 +3413,40 @@ async def run_blockchain_scan(
                 await update.message.reply_text("✅ Bubblemaps skipped (no API key or error)")
         except Exception:
             await update.message.reply_text("✅ Bubblemaps done")
+    # 3) X search — crawl X for tweets mentioning this wallet to link addresses to X accounts
+    try:
+        import x_search
+        raw_x = x_search.run(query=address, max_results=25)
+        x_data = json.loads(raw_x)
+        if x_data.get("result_count", 0) > 0 and x_data.get("results"):
+            all_results["x_search:wallet"] = raw_x
+            await update.message.reply_text(
+                f"✅ X search done — {x_data['result_count']} tweets mentioning wallet (source: {x_data.get('source', 'x')})",
+                parse_mode="Markdown",
+            )
+        else:
+            if x_data.get("source") and x_data["source"] != "none":
+                all_results["x_search:wallet"] = raw_x
+            await update.message.reply_text("✅ X search done — no public tweets found for this address")
+    except Exception as e:
+        log.warning(f"X search during /chain: {e}")
+        await update.message.reply_text("⚠️ X search skipped (check X_API_BEARER_TOKEN in .env)")
+    await asyncio.sleep(1.5)  # stagger X and web to avoid bursting both APIs
+    # 4) Web search — public web mentions of wallet (+ prompt if provided)
+    if address:
+        try:
+            import web_search
+            web_query = f"{address} {prompt}".strip() if prompt else address
+            raw_web = web_search.run(query=web_query[:500], max_results=15)
+            web_data = json.loads(raw_web)
+            if web_data.get("result_count", 0) > 0:
+                all_results["web_search:wallet"] = raw_web
+                await update.message.reply_text(f"✅ Web search done — {web_data['result_count']} results", parse_mode="Markdown")
+            else:
+                all_results["web_search:wallet"] = raw_web
+                await update.message.reply_text("✅ Web search done")
+        except Exception as e:
+            log.warning(f"Web search during /chain: {e}")
     # Summary + data status
     data_status = build_data_status(all_results)
     summary_bc = format_scan_results("blockchain_investigation", raw_bc, address)
@@ -3300,7 +3456,16 @@ async def run_blockchain_scan(
         summary_bm = format_scan_results("bubblemaps", all_results["bubblemaps:full"], address)
         for chunk in _split_msg(summary_bm):
             await update.message.reply_text(chunk, parse_mode="Markdown")
-    await update.message.reply_text(f"{data_status}\n_Blockchain-only; no web scan._", parse_mode="Markdown")
+    if all_results.get("x_search:wallet"):
+        summary_x = format_scan_results("x_search", all_results["x_search:wallet"], address)
+        for chunk in _split_msg(summary_x):
+            await update.message.reply_text(chunk, parse_mode="Markdown")
+    if all_results.get("web_search:wallet"):
+        summary_web = format_scan_results("web_search", all_results["web_search:wallet"], address)
+        for chunk in _split_msg(summary_web):
+            await update.message.reply_text(chunk, parse_mode="Markdown")
+    scope_note = "Chain + X + web." if (all_results.get("x_search:wallet") or all_results.get("web_search:wallet")) else "Blockchain-only; no web/X scan."
+    await update.message.reply_text(f"{data_status}\n_{scope_note}_", parse_mode="Markdown")
     raw_outputs = [f"[{k}]\n{all_results[k]}" for k in all_results]
     results_file = _save_full_results(raw_outputs, f"chain_{address[:16]}")
     if results_file:
@@ -4050,7 +4215,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"/mode `<standard|stealth|deep|build|rapid>` -- switch behavior\n\n"
         f"/threatmode `<on|off>` -- ATT&CK + SOC readiness reporting\n\n"
         f"*Ops:*\n"
-        f"/health /lastscan\n\n"
+        f"/health /lastscan\n"
+        f"/research — Diverg blockchain methodology status (built into reports)\n\n"
         f"*Brain:*\n"
         f"/teach /brain /think /usage /clear\n\n"
         f"Or just tell me a target and what you want. Example:\n"
@@ -4237,6 +4403,27 @@ async def cmd_brain(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             lines.append(f"  - {g}")
     for chunk in _split_msg("\n".join(lines)):
         await update.message.reply_text(chunk, parse_mode="Markdown")
+
+
+async def cmd_research(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Confirm Diverg blockchain methodology is built in."""
+    if not is_authorized(update):
+        return
+    methodology_path = BASE_DIR / "content" / "diverg_blockchain_methodology.txt"
+    lines = [
+        "*Diverg blockchain investigation methodology* is built into every chain report.",
+        "",
+        "• _Verdict first_ — one-line risk + main reason",
+        "• _Red flags_ — sniper pattern, LP rug, CEX routing, fee mismatch, escrow/partial payments",
+        "• _Chronological flow_ — transfers by block_time; YYYY-MM-DD on every key event",
+        "• _CEX/mixer tagging_ — counterparties labeled; funds to CEX = compliance exposure",
+        "• _Explorer links_ — Solscan/Arkham/Etherscan URL for every key address (one-click verify)",
+        "• _Multi-hop_ — deployer + counterparties (and 1-hop further) for full flow",
+        "• _Announcement vs on-chain_ — correlate launch/statement date with first LP/buy/dump",
+        "",
+        "Reference: content/diverg_blockchain_methodology.txt. Use /chain or run_blockchain_investigation.",
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def cmd_usage(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -4766,6 +4953,7 @@ def main() -> None:
         ("notes", cmd_notes), ("brain", cmd_brain), ("forget", cmd_forget),
         ("mode", cmd_mode), ("threatmode", cmd_threatmode), ("health", cmd_health), ("lastscan", cmd_lastscan),
         ("attack", cmd_attack), ("scan", cmd_scan), ("chain", cmd_chain), ("web", cmd_web),
+        ("research", cmd_research),
         ("recon", cmd_recon), ("webvuln", cmd_webvuln),
         ("headers", cmd_headers), ("auth", cmd_auth), ("api", cmd_api),
         ("osint", cmd_osint), ("crypto", cmd_crypto), ("blockchain", cmd_blockchain), ("bubblemaps", cmd_bubblemaps), ("reputation", cmd_reputation), ("buildtool", cmd_buildtool), ("run", cmd_run),

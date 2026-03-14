@@ -1,0 +1,41 @@
+DIVERG — TECH IMPROVEMENT IDEAS
+================================
+Concrete next steps to improve the stack. Pick by priority.
+
+BLOCKCHAIN INVESTIGATION
+------------------------
+• Deeper transfer history: increase transfer page size / pages (e.g. 50–100 per token or deployer) for flow graph; optional "flow_trace" mode with 2–3 hops from counterparties.
+• Tx hash in flow edges: store and emit explorer link per major transfer (Solscan/Etherscan tx URL) so every edge is one-click verifiable.
+• Mixer/CEX tag list: maintain or pull known mixer/OTC addresses (Tornado, Jambler, ChipMixer, etc.) and tag nodes in flow_graph; show "Mixer" / "CEX" in diagram and narrative.
+• Demix heuristics: when we see same-amount deposits/withdrawals around same time (e.g. 6 x 0.1 ETH), flag possible mixer demix and suggest matching pre-mix address.
+• Consolidation detection: detect "one address receiving from many" (e.g. 25+ distinct senders in 30d) and label as consolidation address; add to crime_report.
+• Announcement vs on-chain: if operator or OSINT provides "launch date" / "announcement date", compare to first LP add / first buy / first dump and add a finding when insiders moved before announcement.
+
+AUTOMATION & SCALE
+------------------
+• Batch launchpad scan: run blockchain_investigation on a list of URLs or deployer addresses; output ranked by risk_score (e.g. top 10 riskiest).
+• Alerting: when risk_score > threshold (e.g. 70), send Telegram alert or webhook with verdict + link to report.
+• Scheduled runs: cron or worker that runs discovery + blockchain_investigation on new launches (e.g. from a feed or API) and stores results.
+
+OSINT & CROSS-SURFACE
+---------------------
+• Token metadata → links: from token metadata (website, Twitter, Telegram), run whois / same-IP / same-server checks and add to report.
+• Breach/DB lookup: optional integration with LeakPeek, Snusbase, or IntelX for email/username/phone when we have a lead (e.g. from Telegram/Discord); flag in report.
+• Telegram/Discord: optional scrape or search for wallet address mentions in public groups; correlate with deployer or theft addresses.
+
+REPORTING & OUTPUT
+------------------
+• Export formats: crime_report to Markdown file and JSON file (with explorer_links, verdict, red_flags, chronological_narrative) for sharing or compliance.
+• TLDR line: append a one-sentence TLDR to crime_report (e.g. "In Jan 2025 after exploiting a casino and phishing victims, actor X gambled 6 figs into $20M using high leverage.").
+• Diagram branding: ensure flow diagram HTML uses Diverg logo and "Diverg Sec" only (no third-party naming).
+
+RELIABILITY & DATA QUALITY
+--------------------------
+• API retries: exponential backoff for Solscan/Arkham/Etherscan when 429 or 5xx; respect rate limits.
+• Data truthfulness: every section of crime_report that uses live API data should state "from Solscan/Arkham (live)" vs "skipped (no key)" so reports are never misleading.
+• Unit tests: add tests for _build_crime_report (verdict, red_flags, explorer_links), _build_flow_graph (sort order, node types), and risk_score aggregation.
+
+SECURITY & HARDENING
+--------------------
+• Validate all inputs: deployer_address, token_addresses, chain — format and length checks before calling external APIs.
+• No secrets in logs: ensure API keys and PII are never logged; redact in error messages.

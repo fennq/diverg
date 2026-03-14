@@ -152,7 +152,7 @@ We use both platforms to maximise **attribution**, **money flow**, and **on-chai
 - **Crime report:** Structured object with `summary`, `risk_score`, `deployer_section`, `tokens_section`, `findings_with_evidence`, `flow_highlights`, `linked_wallets`. Export as JSON (in the skill output) or build Markdown for threads/compliance.
 - **Linked wallets:** Deployer’s Arkham counterparties (address + label, source `counterparty`) plus labeled holders/snipers (source `holder`). Surfaces CEX off-ramp and related addresses in one list.
 
-See `content/crime-identifier-strategy.md` for how this compares to manual investigators (e.g. ZachXBT) and the roadmap.
+See `content/crime-identifier-strategy.md` for how this compares to manual investigators and the roadmap.
 
 ## Post-rug one-shot mode
 
@@ -196,7 +196,7 @@ For **Ethereum** launchpads, pass **chain=ethereum** in context or via the run_b
 
 ---
 
-## Investigation coverage: what we have vs full ZachXBT-style
+## Investigation coverage: what we have vs full Diverg-style depth
 
 After **two scans on liquid.af** (or any launchpad), Diverg currently provides:
 
@@ -205,9 +205,9 @@ After **two scans on liquid.af** (or any launchpad), Diverg currently provides:
 | **Sniper, LP, fee, deployer, risk score, crime report** | Core crime signals and structured export. |
 | **Linked wallets + counterparties** | Who deployer transacts with (CEX, entities). |
 | **Flow graph (nodes + edges)** | Addresses and transfers with amount/date; feeds the diagram. |
-| **ZachXBT-style flow diagram** | Auto-generated HTML: primary (red), counterparty (green), wallet (blue), edges with amount + date. |
+| **Diverg flow diagram** | Auto-generated HTML: primary (red), counterparty (green), wallet (blue), edges with amount + date. |
 
-To get **full coverage** comparable to a deep ZachXBT-style investigation, consider adding:
+To get **full coverage** comparable to a deep investigation, consider adding:
 
 | Gap | How to close it |
 |-----|------------------|
@@ -229,7 +229,7 @@ When **blockchain_investigation** runs with Solscan/Arkham (or Etherscan), it no
 
 After a **full scan** or **attack** that includes blockchain_investigation, Diverg:
 
-1. Renders a **ZachXBT-style HTML diagram**: directed graph, primary node with red ring and “Primary / Deployer” annotation, counterparties with green ring, wallets with blue ring, edges labeled with amount and date.
+1. Renders a **Diverg HTML diagram**: directed graph, primary node with red ring and “Primary / Deployer” annotation, counterparties with green ring, wallets with blue ring, edges labeled with amount and date.
 2. Saves it under `results/` as `{timestamp}_{target}_flow_diagram.html` and sends it as a document in Telegram.
 
 You can also generate the diagram from any saved crime report that contains `flow_graph` by calling `render_flow_diagram_html(flow_graph, title=..., output_path=...)` from `skills/blockchain_flow_diagram.py`.
@@ -246,6 +246,6 @@ You can also generate the diagram from any saved crime report that contains `flo
 | **Multi-chain**     | `chain=solana` (Solscan) or `chain=ethereum` (Etherscan); same sniper/heuristic pattern. |
 | **Deployer**        | Many tokens per deployer; Arkham label. |
 | **Intel**           | Solscan: transfers, holders, defi activities. Arkham: wallet labels. |
-| **Flow diagram**    | Nodes (primary/counterparty/wallet) and edges (amount, unit, date); ZachXBT-style HTML auto-generated after scan/attack. |
+| **Flow diagram**    | Nodes (primary/counterparty/wallet) and edges (amount, unit, date); Diverg HTML auto-generated after scan/attack. |
 
 Diverg **adapts to the platform** and **chain**, and focuses the investigation on **potential crime**: sniper across launches, LP pull, fee extraction vs on-chain, and deployer/wallet intel using Solscan, Etherscan, and (optionally) Arkham.
