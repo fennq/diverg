@@ -37,7 +37,7 @@ sys.path.insert(0, str(SKILLS_DIR / "telegram_report"))
 # ---------------------------------------------------------------------------
 
 SCAN_PROFILES = {
-    "full": ["osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "company_exposure", "web_vulns", "auth_test", "api_test", "high_value_flaws", "race_condition", "payment_financial"],
+    "full": ["osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "company_exposure", "web_vulns", "auth_test", "api_test", "high_value_flaws", "workflow_probe", "race_condition", "payment_financial"],
     "quick": ["headers_ssl", "recon", "osint", "company_exposure"],
     "recon": ["osint", "recon"],
     "web": ["web_vulns", "headers_ssl", "auth_test", "company_exposure"],
@@ -62,6 +62,7 @@ SKILL_TARGET_TYPE = {
     "company_exposure": "url",
     "high_value_flaws": "url",
     "race_condition": "url",
+    "workflow_probe": "url",
     "payment_financial": "url",
     "crypto_security": "url",
     "data_leak_risks": "url",
@@ -86,6 +87,7 @@ SKILL_DESCRIPTIONS = {
     "company_exposure": "admin, debug, docs, exports, storage, support, staging, and enterprise platforms",
     "high_value_flaws": "IDOR, secret exposure in frontend assets, business-logic and payment tampering",
     "race_condition": "concurrent-request testing for double success, duplicate processing, limit bypass",
+    "workflow_probe": "Diverg-proprietary: business-flow order/state abuse — confirm without pay, zero-amount, skip steps",
     "payment_financial": "zero/manipulated payment, payment and wallet IDOR, refund abuse — how users lose money",
     "crypto_security": "JWT alg:none/weak, weak TLS 1.0/1.1, weak crypto in frontend JS",
     "data_leak_risks": "verbose errors, cache misconfig, PII/token in responses and client-side — small leaks that become huge",
@@ -208,6 +210,9 @@ def run_skill(skill_name: str, target: str, target_url: str) -> dict:
         elif skill_name == "race_condition":
             import race_condition
             raw = race_condition.run(target_url, scan_type="full")
+        elif skill_name == "workflow_probe":
+            import workflow_probe
+            raw = workflow_probe.run(target_url, scan_type="full")
         elif skill_name == "payment_financial":
             import payment_financial
             raw = payment_financial.run(target_url, scan_type="full")

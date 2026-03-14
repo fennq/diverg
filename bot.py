@@ -685,6 +685,15 @@ def build_system_prompt() -> str:
           internal URLs), and business-logic probes (price/amount/quantity tampering
           on order and payment-like endpoints). Use for maximum true value to clients.
 
+        ATTACK PATHS (run_attack_paths) — DIVERG-PROPRIETARY:
+          Correlates prior scan findings into ranked exploit chains (entry → privilege → data, etc.).
+          Run after run_full_attack; pass prior_results_json = the full output of that run. Returns
+          how an attacker would chain issues to reach impact. Use to prioritize and explain risk.
+
+        WORKFLOW PROBE (run_workflow_probe) — DIVERG-PROPRIETARY:
+          Business-flow bugs: confirm order without payment, zero-amount checkout, skip steps.
+          Run on targets with checkout/order/payment. Finds logic bugs others miss.
+
         RACE CONDITION (run_race_condition):
           Concurrent requests to action endpoints; detects double success or duplicate transaction IDs.
 
@@ -1419,7 +1428,8 @@ TOOL_FUNCTIONS = [
                 "that match the site (e.g. payment tools only if checkout/billing found, API tools if API surface found). "
                 "Use for a complete assessment when the operator gives a target; do not run every tool blindly — this flow "
                 "adapts automatically to the target. Optional: pass cookies or bearer_token for authenticated scans (post-login); "
-                "or the operator can set auth once with /setauth and it will be used for this run."
+                "or the operator can set auth once with /setauth and it will be used for this run. "
+                "If the target requires login or MFA, ask the operator to complete it manually (e.g. in browser), then paste session via /setauth and continue."
             ),
             "parameters": {
                 "type": "object",
@@ -1430,6 +1440,42 @@ TOOL_FUNCTIONS = [
                     "bearer_token": {"type": "string", "description": "Optional Bearer token for authenticated scan"},
                 },
                 "required": ["target"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_attack_paths",
+            "description": (
+                "Diverg-proprietary: correlate prior scan findings into ranked exploit chains (entry → privilege → data, etc.). "
+                "Run AFTER run_full_attack or other tools; pass prior_results_json = the JSON object of that run's results. "
+                "Returns attack paths with exploitability score and impact. Use to show how an attacker would chain issues to reach impact."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_url": {"type": "string", "description": "Target URL or domain that was scanned"},
+                    "prior_results_json": {"type": "string", "description": "JSON string of prior skill results (e.g. full output from run_full_attack) to correlate into chains"},
+                },
+                "required": ["target_url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_workflow_probe",
+            "description": (
+                "Diverg-proprietary: probe business-flow bugs — confirm order without payment, zero-amount checkout, skip steps. "
+                "Run on targets with checkout/order/payment flows. Finds logic bugs others miss."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_url": {"type": "string", "description": "Authorized target URL (e.g. https://example.com)"},
+                },
+                "required": ["target_url"],
             },
         },
     },
@@ -1468,7 +1514,7 @@ TOOL_FUNCTIONS = [
 
 
 SKILL_TIMEOUT = 120  # generous cap; each skill exits in ~58s so we never hit this
-CHAT_ATTACK_SKILLS = ["recon", "headers_ssl", "web_vulns", "api_test", "company_exposure", "high_value_flaws", "race_condition", "payment_financial", "crypto_security", "data_leak_risks", "blockchain_investigation", "entity_reputation"]
+CHAT_ATTACK_SKILLS = ["recon", "headers_ssl", "web_vulns", "api_test", "company_exposure", "high_value_flaws", "race_condition", "payment_financial", "crypto_security", "data_leak_risks", "workflow_probe", "blockchain_investigation", "entity_reputation"]
 
 # Short-lived cache for recon/headers/osint to avoid duplicate work (same host within TTL)
 SKILL_RESULT_CACHE_TTL_SEC = 300  # 5 minutes
@@ -1734,7 +1780,39 @@ def _execute_tool_call(name: str, args: dict, chat_id: int | None = None) -> str
             })
             save_brain(brain)
             cleanup_after_scan()
-            return json.dumps({k: json.loads(v) if v.startswith("{") else v for k, v in results.items()}, indent=1)[:50000]
+            # Diverg-proprietary: correlate findings into attack paths
+            try:
+                prior_for_paths = {}
+                for k, v in results.items():
+                    if k.startswith("meta:"):
+                        continue
+                    if isinstance(v, str) and v.strip().startswith("{"):
+                        try:
+                            prior_for_paths[k] = json.loads(v)
+                        except Exception:
+                            pass
+                if prior_for_paths:
+                    sys.path.insert(0, str(Path(__file__).parent / "skills"))
+                    from attack_paths.attack_paths import run as attack_paths_run
+                    paths_out = attack_paths_run(url, prior_results=prior_for_paths)
+                    results["attack_paths:full"] = paths_out
+            except Exception as ap_exc:
+                results["attack_paths:full"] = json.dumps({"error": str(ap_exc), "note": "Attack path correlation skipped."})
+            return json.dumps({k: json.loads(v) if isinstance(v, str) and v.strip().startswith("{") else v for k, v in results.items()}, indent=1)[:50000]
+        elif name == "run_attack_paths":
+            target_url = args.get("target_url") or args.get("target", "")
+            prior_json = args.get("prior_results_json") or ""
+            sys.path.insert(0, str(Path(__file__).parent / "skills"))
+            from attack_paths.attack_paths import run as attack_paths_run
+            return attack_paths_run(target_url, prior_results_json=prior_json)
+        elif name == "run_workflow_probe":
+            target_url = (args.get("target_url") or "").strip()
+            if not target_url:
+                return json.dumps({"error": "target_url required", "findings": []}, indent=2)
+            url = target_url if target_url.startswith("http") else f"https://{target_url}"
+            sys.path.insert(0, str(Path(__file__).parent / "skills"))
+            from workflow_probe.workflow_probe import run as workflow_probe_run
+            return workflow_probe_run(url)
         elif name == "build_and_save_tool":
             path = save_custom_tool(args["tool_name"], args["code"], args["description"])
             return f"Tool saved: {path.name}"
@@ -1919,6 +1997,11 @@ def run_scan_skill(
             url = target if target.startswith("http") else f"https://{target}"
             client_json = (context or {}).get("client_surface_json")
             return logic_abuse.run(url, scan_type=scan_type, extracted_endpoints=None, client_surface_json=client_json)
+        elif skill_name == "workflow_probe":
+            sys.path.insert(0, str(Path(__file__).parent / "skills"))
+            from workflow_probe.workflow_probe import run as workflow_probe_run
+            url = target if target.startswith("http") else f"https://{target}"
+            return workflow_probe_run(url, scan_type=scan_type, context=context)
         elif skill_name == "blockchain_investigation":
             import blockchain_investigation
             url = target if target.startswith("http") else f"https://{target}"
@@ -1972,6 +2055,9 @@ def format_scan_results(skill_name: str, raw_json: str, target: str) -> str:
     if data.get("technologies"):
         tech_preview = ", ".join(t.get("name", "?") for t in data["technologies"][:8])
         lines.append(f"*Tech Stack:* {tech_preview}")
+
+    if data.get("favicon_hash"):
+        lines.append(f"*Favicon hash:* `{data['favicon_hash']}` (use in Shodan for fingerprinting)")
 
     if data.get("endpoints_found"):
         eps = data["endpoints_found"]
@@ -2065,6 +2151,23 @@ def format_scan_results(skill_name: str, raw_json: str, target: str) -> str:
             lines.append("*Bubblemaps:* skipped (no BUBBLEMAPS_API_KEY or API error)")
         if data.get("error"):
             lines.append(f"*Note:* {data['error'][:120]}")
+
+    if "attack_paths" in skill_name:
+        lines.append("*Attack paths* — Diverg: correlated exploit chains from scan findings")
+        lines.append(f"*Findings used:* {data.get('findings_count', 0)} | *Chains:* {len(data.get('paths', []))}")
+        for i, p in enumerate((data.get("paths") or [])[:8], 1):
+            lines.append(f"  {i}. [{p.get('exploitability_score', 0)}] {p.get('chain_type', '')}")
+            lines.append(f"     Impact: {p.get('impact_summary', '')[:100]}")
+        if data.get("note"):
+            lines.append(f"*Note:* {data['note'][:150]}")
+
+    if "workflow_probe" in skill_name:
+        lines.append("*Workflow probe* — Diverg: business-flow order/state abuse")
+        lines.append(f"*Endpoints probed:* {data.get('endpoints_probed', 0)} | *Findings:* {len(data.get('findings', []))}")
+        for f in (data.get("findings") or [])[:6]:
+            lines.append(f"  • {f.get('title', '')[:80]}")
+            if f.get("url"):
+                lines.append(f"    {f['url'][:80]}")
 
     if skill_name == "x_search":
         lines.append("*X (Twitter) search* — tweets mentioning this wallet (link wallets to X accounts)")

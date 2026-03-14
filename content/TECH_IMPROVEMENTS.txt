@@ -35,6 +35,12 @@ RELIABILITY & DATA QUALITY
 • Data truthfulness: every section of crime_report that uses live API data should state "from Solscan/Arkham (live)" vs "skipped (no key)" so reports are never misleading.
 • Unit tests: add tests for _build_crime_report (verdict, red_flags, explorer_links), _build_flow_graph (sort order, node types), and risk_score aggregation.
 
+OPERATOR FLOW (LOGIN / MFA / ROUNDS)
+-------------------------------------
+• Pause for manual login/MFA: when the target requires authentication or MFA, the operator completes login (click, type, scroll, submit, MFA) outside the bot; then continues the assessment (e.g. /setauth with cookies or bearer token). Document in runbooks: "If target requires MFA, complete it manually then paste session into /setauth and re-run or continue."
+• Mid-scan reflection: every 2 tool-call rounds, optionally inject a strategy step — "Given findings so far, what should we try next?" — to re-plan from current evidence.
+• Early exit when leads exhausted: if the last N (e.g. 2) tool calls added no new findings, suggest summarizing and exiting to save time and tokens.
+
 SECURITY & HARDENING
 --------------------
 • Validate all inputs: deployer_address, token_addresses, chain — format and length checks before calling external APIs.

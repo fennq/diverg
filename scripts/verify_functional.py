@@ -2,12 +2,14 @@
 """
 Verify Diverg bot and efficiency features are functional.
 Run from project root: python scripts/verify_functional.py
+Use project venv if available: ./venv/bin/python scripts/verify_functional.py
 
 Checks:
 - Cache key normalization and get/set
 - Cache hit path in _run_skill_with_timeout
 - build_adaptive_attack_plan
 - One real skill run via _run_skill_with_timeout (recon; may see DNS errors in isolated envs)
+- Fact/accuracy tests: only report what we have evidence for (tests/test_facts_and_accuracy.py)
 """
 
 from __future__ import annotations
@@ -82,10 +84,25 @@ def main() -> int:
         failed.append(f"Real skill: {e}")
         print(f"[FAIL] Real skill run: {e}")
 
+    # 5. Fact/accuracy tests — we only bring facts; no invented counts or verdicts
+    try:
+        sys.path.insert(0, str(ROOT / "skills"))
+        from tests.test_facts_and_accuracy import run_all as run_accuracy_tests
+        accuracy_failed = run_accuracy_tests()
+        if accuracy_failed:
+            for name in accuracy_failed:
+                failed.append(f"Accuracy:{name}")
+            print(f"[FAIL] Fact/accuracy: {len(accuracy_failed)} test(s) failed")
+        else:
+            print("[OK] Fact/accuracy tests (evidence-only outputs)")
+    except Exception as e:
+        failed.append(f"Fact/accuracy: {e}")
+        print(f"[FAIL] Fact/accuracy: {e}")
+
     if failed:
         print(f"\n{len(failed)} check(s) failed.")
         return 1
-    print("\nAll functional checks passed.")
+    print("\nAll functional and fact/accuracy checks passed.")
     return 0
 
 

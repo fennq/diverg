@@ -7,6 +7,7 @@ security assessments.
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import json
 import re
 import socket
@@ -85,7 +86,25 @@ class ReconReport:
     technologies: list[TechResult] = field(default_factory=list)
     sensitive_files: list[SensitiveFileResult] = field(default_factory=list)
     waf: Optional[WAFResult] = None
+    favicon_hash: str = ""  # MD5 of /favicon.ico for Shodan/signature lookup
     errors: list[str] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Favicon hash (for Shodan / fingerprint lookup)
+# ---------------------------------------------------------------------------
+
+def get_favicon_hash(target: str) -> str:
+    """Fetch /favicon.ico and return MD5 hex digest; empty if fetch fails. Use hash in Shodan for fingerprinting."""
+    try:
+        base = target if target.startswith("http") else f"https://{target}"
+        url = base.rstrip("/") + "/favicon.ico"
+        resp = SESSION.get(url, timeout=5, allow_redirects=True)
+        if resp.status_code != 200 or not resp.content:
+            return ""
+        return hashlib.md5(resp.content).hexdigest()
+    except Exception:
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -1086,6 +1105,12 @@ def run(
             report.waf = detect_waf(target)
         except Exception as exc:
             report.errors.append(f"WAF detection error: {exc}")
+
+    if scan_type in ("full", "favicon") and not _over_budget():
+        try:
+            report.favicon_hash = get_favicon_hash(target)
+        except Exception as exc:
+            report.errors.append(f"Favicon hash error: {exc}")
 
     if scan_type in ("full", "sensitive") and not _over_budget():
         try:

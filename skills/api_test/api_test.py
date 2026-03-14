@@ -623,6 +623,47 @@ def test_cors(endpoints: list[Endpoint]) -> list[Finding]:
 
 
 # ---------------------------------------------------------------------------
+# Host header injection (reflection / poisoning)
+# ---------------------------------------------------------------------------
+
+HOST_INJECTION_MARKER = "evil.host.header.injection"
+
+def test_host_header_injection(endpoints: list[Endpoint]) -> list[Finding]:
+    """Send Host / X-Forwarded-Host with a distinct value; if reflected in response, report Host header injection."""
+    findings: list[Finding] = []
+    for ep in endpoints[:10]:
+        try:
+            for header_name, header_val in [
+                ("Host", HOST_INJECTION_MARKER),
+                ("X-Forwarded-Host", HOST_INJECTION_MARKER),
+                ("X-Host", HOST_INJECTION_MARKER),
+            ]:
+                resp = SESSION.get(
+                    ep.url,
+                    headers={header_name: header_val},
+                    timeout=8,
+                    allow_redirects=False,
+                )
+                text = (resp.text or "").lower()
+                location = (resp.headers.get("Location") or "").lower()
+                link = (resp.headers.get("Link") or "").lower()
+                if HOST_INJECTION_MARKER.lower() in text or HOST_INJECTION_MARKER.lower() in location or HOST_INJECTION_MARKER.lower() in link:
+                    findings.append(Finding(
+                        title=f"Host header injection — {header_name} reflected in response",
+                        severity="Medium",
+                        url=ep.url,
+                        category="OWASP-A01 Broken Access Control (Host injection)",
+                        evidence=f"Sent {header_name}: {header_val}; value appears in response body, Location, or Link.",
+                        impact="Attacker can poison cache or trigger redirects to a controlled host (phishing, SSRF).",
+                        remediation="Do not use Host / X-Forwarded-Host for redirects or links. Use a configured canonical host.",
+                    ))
+                    return findings
+        except requests.RequestException:
+            continue
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # Authentication bypass checks (enhanced)
 # ---------------------------------------------------------------------------
 
@@ -1615,6 +1656,12 @@ def run(target_url: str, scan_type: str = "full", wordlist: str = "medium") -> s
             report.findings.extend(test_cors(report.endpoints_found[:20]))
         except Exception as exc:
             report.errors.append(f"CORS testing error: {exc}")
+
+    if scan_type in ("full", "host_header") and not _over_budget():
+        try:
+            report.findings.extend(test_host_header_injection(report.endpoints_found[:15]))
+        except Exception as exc:
+            report.errors.append(f"Host header injection testing error: {exc}")
 
     if scan_type in ("full", "auth_bypass") and not _over_budget():
         try:

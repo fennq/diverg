@@ -1,0 +1,37 @@
+DIVERG — FACTS AND ACCURACY
+===========================
+We only bring facts and accuracy to the table. All outputs are grounded in evidence from APIs and tools; we do not invent counts, verdicts, or links.
+
+PRINCIPLES
+----------
+1. Report only what we have evidence for. If an API returns no data or an error, we say so (e.g. "X search skipped", "On-chain: skipped (no API key)").
+2. Verdict and red flags come from the blockchain_investigation crime_report only when on-chain or platform data supports them. No placeholder verdicts.
+3. Counts (result_count, nodes, edges, findings) are taken directly from the skill/API response. We never fabricate numbers.
+4. Explorer links (Solscan, Arkham, Etherscan) are generated from real addresses and tx IDs returned by the APIs.
+5. X and web search results are displayed as returned (author_username, url, title, snippet). We do not add or infer results that were not in the response.
+
+HOW WE ENSURE ACCURACY
+----------------------
+- Skills return structured JSON with fixed shapes. Empty or error responses use explicit fields (e.g. result_count: 0, source: "none", error: "...").
+- format_scan_results (bot) only renders fields that exist in the payload. It never invents verdict, red_flags, or result counts.
+- Flow diagrams are generated only when flow_graph and on_chain_used are present from the blockchain skill — no placeholder diagrams.
+
+TESTING
+-------
+- tests/test_facts_and_accuracy.py: runs fact-only and shape checks:
+  * Empty query → result_count 0 and no fabricated results (x_search, web_search).
+  * JSON output shapes: required keys and result item structure.
+  * format_scan_results does not show verdict/red_flags when absent in payload; shows error when payload has error.
+  * Summary text uses actual result_count from data.
+- scripts/verify_functional.py: cache, attack plan, and skill execution smoke tests.
+
+Run fact/accuracy tests (from project root, with venv):
+  ./venv/bin/python tests/test_facts_and_accuracy.py
+
+Run full functional verification:
+  ./venv/bin/python scripts/verify_functional.py
+
+REFERENCE
+---------
+- content/diverg_blockchain_methodology.txt: court-ready, one-click verifiable, fact-only methodology.
+- content/INVESTIGATION_CAPABILITIES.txt: what we support (chain, web, X) and how we collate.
