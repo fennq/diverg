@@ -35,12 +35,5 @@ reports/
 *.brain.json
 brain.json
 
-# Exploit catalog and discovered exploits (keep private — do not push to GitHub)
-content/exploit_catalog.json
-content/EXPLOITS_AND_PREVENTION.md
-content/DISCOVERED_EXPLOITS.md
-content/AUTHORIZED_TEST_TARGETS.md
-content/TRIAL_RUNS.md
-
 # Optional: uncomment to ignore results (scan outputs)
 # results/*.txt
