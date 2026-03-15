@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SKILLS_DIR = Path(__file__).parent / "skills"
+CONTENT_DIR = Path(__file__).parent / "content"
 
 sys.path.insert(0, str(SKILLS_DIR))
 sys.path.insert(0, str(SKILLS_DIR / "recon"))
@@ -37,7 +38,11 @@ sys.path.insert(0, str(SKILLS_DIR / "telegram_report"))
 # ---------------------------------------------------------------------------
 
 SCAN_PROFILES = {
-    "full": ["osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "company_exposure", "web_vulns", "auth_test", "api_test", "high_value_flaws", "workflow_probe", "race_condition", "payment_financial"],
+    "full": [
+        "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "company_exposure",
+        "web_vulns", "auth_test", "api_test", "high_value_flaws", "workflow_probe", "race_condition",
+        "payment_financial", "client_surface", "dependency_audit", "logic_abuse", "entity_reputation",
+    ],
     "quick": ["headers_ssl", "recon", "osint", "company_exposure"],
     "recon": ["osint", "recon"],
     "web": ["web_vulns", "headers_ssl", "auth_test", "company_exposure"],
@@ -69,6 +74,10 @@ SKILL_TARGET_TYPE = {
     "web_vulns": "url",
     "auth_test": "url",
     "api_test": "url",
+    "client_surface": "url",
+    "dependency_audit": "url",
+    "logic_abuse": "url",
+    "entity_reputation": "domain",
 }
 ENGAGEMENT_TRACKS = {
     "surface": ["osint", "recon", "headers_ssl", "company_exposure"],
@@ -94,6 +103,10 @@ SKILL_DESCRIPTIONS = {
     "web_vulns": "web-layer flaw checks such as injection, traversal, SSRF, and file exposure",
     "auth_test": "login, identity, JWT, session, credential hygiene, and enumeration exposure",
     "api_test": "endpoint discovery, methods, auth gaps, schema exposure, and API abuse patterns",
+    "client_surface": "frontend JS intel, source maps, API extraction, dangerous sinks, extracted_endpoints",
+    "dependency_audit": "detected stack/versions, CVE watchlist, upgrade recommendations",
+    "logic_abuse": "numeric/bounds abuse (amount, limit, offset), overflow, success-like response to tampered params",
+    "entity_reputation": "domain owner/entity foul-play research, fraud/lawsuit/breach/reputation searches",
 }
 
 # Canonical finding schema — all skills normalize to this shape for dedup and correlation
@@ -142,8 +155,8 @@ def normalize_finding(raw: dict, source_skill: str, context_key: str = "findings
     out["severity"] = str(raw.get("severity", "Info"))
     out["url"] = str(raw.get("url", "")).strip()
     out["category"] = str(raw.get("category", "Assessment")).strip()
-    out["evidence"] = str(raw.get("evidence") or raw.get("detail") or raw.get("value") or raw.get("recommendation") or "").strip() or "See source output."
-    out["impact"] = str(raw.get("impact", out["impact"])).strip()
+    out["evidence"] = str(raw.get("evidence") or raw.get("detail") or raw.get("value") or raw.get("recommendation") or raw.get("snippet") or "").strip() or "See source output."
+    out["impact"] = str(raw.get("impact") or raw.get("relevance_hint") or out["impact"]).strip()
     out["remediation"] = str(raw.get("remediation") or raw.get("recommendation") or out["remediation"]).strip()
     return out
 
@@ -166,6 +179,70 @@ def dedupe_findings(findings: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Exploit catalog — map findings to known exploits and prevention
+# ---------------------------------------------------------------------------
+
+_EXPLOIT_CATALOG_CACHE: list[dict] | None = None
+
+
+def _load_exploit_catalog() -> list[dict]:
+    """Load exploit catalog from content/exploit_catalog.json (cached)."""
+    global _EXPLOIT_CATALOG_CACHE
+    if _EXPLOIT_CATALOG_CACHE is not None:
+        return _EXPLOIT_CATALOG_CACHE
+    path = CONTENT_DIR / "exploit_catalog.json"
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        _EXPLOIT_CATALOG_CACHE = data.get("exploits", [])
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        _EXPLOIT_CATALOG_CACHE = []
+    return _EXPLOIT_CATALOG_CACHE
+
+
+def _enrich_finding_with_exploit(finding: dict, catalog: list[dict]) -> None:
+    """If finding title/category match an exploit, add exploit_ref (name, owasp, cwe, prevention)."""
+    title = (finding.get("title") or "").lower()
+    category = (finding.get("category") or "").lower()
+    # For Transport/Browser Security, require title match so SSL/connection issues don't get clickjacking
+    require_title = "transport" in category and "browser" in category
+    best = None
+    best_score = 0
+    for ex in catalog:
+        title_kw = [k.lower() for k in ex.get("keywords_title", [])]
+        cat_kw = [k.lower() for k in ex.get("keywords_category", [])]
+        title_match = any(k in title for k in title_kw) if title_kw else False
+        cat_match = any(k in category for k in cat_kw) if cat_kw else False
+        if require_title and not title_match:
+            continue
+        if not (title_match or cat_match):
+            continue
+        score = (2 if title_match else 0) + (1 if cat_match else 0)
+        if score > best_score:
+            best_score = score
+            best = ex
+    if best:
+        finding["exploit_ref"] = {
+            "name": best.get("name", ""),
+            "owasp": best.get("owasp", ""),
+            "cwe": best.get("cwe", ""),
+            "prevention": best.get("prevention", ""),
+        }
+        if not (finding.get("remediation") or "").strip():
+            finding["remediation"] = best.get("prevention", finding.get("remediation", ""))
+
+
+def enrich_findings_with_exploits(findings: list[dict]) -> list[dict]:
+    """Attach exploit_ref (name, owasp, cwe, prevention) to findings that match the catalog."""
+    catalog = _load_exploit_catalog()
+    if not catalog:
+        return findings
+    for f in findings:
+        _enrich_finding_with_exploit(f, catalog)
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # Banner
 # ---------------------------------------------------------------------------
 
@@ -184,12 +261,14 @@ BANNER = r"""
 # Skill runner
 # ---------------------------------------------------------------------------
 
-def run_skill(skill_name: str, target: str, target_url: str) -> dict:
-    """Import and execute a skill, returning its parsed JSON output."""
+def run_skill(skill_name: str, target: str, target_url: str, context: dict | None = None) -> dict:
+    """Import and execute a skill, returning its parsed JSON output. context: optional dict with client_surface_json, recon_json, osint_json for skills that use them."""
     print(f"\n{'='*60}")
     print(f"  Running: {skill_name}")
     print(f"  Target:  {target}")
     print(f"{'='*60}")
+
+    ctx = context or {}
 
     try:
         if skill_name == "recon":
@@ -231,6 +310,27 @@ def run_skill(skill_name: str, target: str, target_url: str) -> dict:
         elif skill_name == "osint":
             import osint
             raw = osint.run(target, scan_type="full")
+        elif skill_name == "client_surface":
+            import client_surface
+            raw = client_surface.run(target_url, scan_type="full")
+        elif skill_name == "dependency_audit":
+            import dependency_audit
+            raw = dependency_audit.run(
+                target_url,
+                scan_type="full",
+                client_surface_json=ctx.get("client_surface_json"),
+                recon_json=ctx.get("recon_json"),
+            )
+        elif skill_name == "logic_abuse":
+            import logic_abuse
+            raw = logic_abuse.run(
+                target_url,
+                scan_type="full",
+                client_surface_json=ctx.get("client_surface_json"),
+            )
+        elif skill_name == "entity_reputation":
+            import entity_reputation
+            raw = entity_reputation.run(target, scan_type="full", osint_json=ctx.get("osint_json"))
         else:
             return {"error": f"Unknown skill: {skill_name}"}
 
@@ -295,7 +395,8 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
                     "remediation": "Review if this endpoint should require authentication.",
                 }, skill_name, "findings"))
 
-    return dedupe_findings(all_findings)
+    deduped = dedupe_findings(all_findings)
+    return enrich_findings_with_exploits(deduped)
 
 
 def aggregate_company_surfaces(results: dict[str, dict]) -> list[dict]:
@@ -1023,6 +1124,98 @@ async def run_via_openclaw(target: str, scope: str, report_type: str) -> None:
 # ---------------------------------------------------------------------------
 # Direct execution (no OpenClaw dependency)
 # ---------------------------------------------------------------------------
+
+# Web-only profile for API/extension: full web scan, no blockchain.
+# Phase 1: all skills that do not need context from other skills.
+# Phase 2: dependency_audit, logic_abuse, entity_reputation (run with context from phase 1).
+WEB_SCAN_PHASE1 = [
+    "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks",
+    "company_exposure", "web_vulns", "auth_test", "api_test", "high_value_flaws",
+    "workflow_probe", "race_condition", "payment_financial", "client_surface",
+]
+WEB_SCAN_PHASE2 = ["dependency_audit", "logic_abuse", "entity_reputation"]
+WEB_SCAN_PROFILE = WEB_SCAN_PHASE1 + WEB_SCAN_PHASE2
+
+
+def run_web_scan(target: str, scope: str = "full") -> dict:
+    """
+    Run full web-only scan (no blockchain) and return aggregated result for API/extension.
+    Runs phase 1 (all independent skills including client_surface), then phase 2
+    (dependency_audit, logic_abuse, entity_reputation) with context from phase 1.
+    Returns dict with target_url, findings, summary, scanned_at, skills_run.
+    """
+    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
+    target_url = target if target.startswith("http") else f"https://{target}"
+
+    skills_phase1 = WEB_SCAN_PHASE1 if scope == "full" else SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])
+    skills_phase2 = WEB_SCAN_PHASE2 if scope == "full" else []
+
+    results: dict[str, dict] = {}
+
+    # Phase 1: run all skills that do not need context
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_phase1))) as pool:
+        future_to_skill = {
+            pool.submit(run_skill, skill_name, domain, target_url): skill_name
+            for skill_name in skills_phase1
+        }
+        for future in concurrent.futures.as_completed(future_to_skill):
+            skill_name = future_to_skill[future]
+            try:
+                results[skill_name] = future.result(timeout=SKILL_TIMEOUT_SECONDS)
+            except concurrent.futures.TimeoutError:
+                future.cancel()
+                results[skill_name] = {
+                    "error": f"Skill timed out after {SKILL_TIMEOUT_SECONDS}s",
+                    "skill": skill_name,
+                }
+            except Exception as exc:
+                results[skill_name] = {"error": str(exc), "skill": skill_name}
+
+    # Phase 2: run context-dependent skills with context from phase 1
+    if skills_phase2:
+        ctx = {
+            "client_surface_json": json.dumps(results["client_surface"]) if results.get("client_surface") and "error" not in results.get("client_surface", {}) else None,
+            "recon_json": json.dumps(results["recon"]) if results.get("recon") and "error" not in results.get("recon", {}) else None,
+            "osint_json": json.dumps(results["osint"]) if results.get("osint") and "error" not in results.get("osint", {}) else None,
+        }
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_phase2))) as pool:
+            future_to_skill = {
+                pool.submit(run_skill, skill_name, domain, target_url, ctx): skill_name
+                for skill_name in skills_phase2
+            }
+            for future in concurrent.futures.as_completed(future_to_skill):
+                skill_name = future_to_skill[future]
+                try:
+                    results[skill_name] = future.result(timeout=SKILL_TIMEOUT_SECONDS)
+                except concurrent.futures.TimeoutError:
+                    future.cancel()
+                    results[skill_name] = {
+                        "error": f"Skill timed out after {SKILL_TIMEOUT_SECONDS}s",
+                        "skill": skill_name,
+                    }
+                except Exception as exc:
+                    results[skill_name] = {"error": str(exc), "skill": skill_name}
+
+    findings = aggregate_findings(results)
+    company_surfaces = aggregate_company_surfaces(results)
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    return {
+        "target_url": target_url,
+        "findings": findings,
+        "company_surfaces": company_surfaces,
+        "scanned_at": timestamp,
+        "skills_run": list(results.keys()),
+        "summary": {
+            "total_findings": len(findings),
+            "critical": sum(1 for f in findings if f.get("severity") == "Critical"),
+            "high": sum(1 for f in findings if f.get("severity") == "High"),
+            "medium": sum(1 for f in findings if f.get("severity") == "Medium"),
+            "low": sum(1 for f in findings if f.get("severity") == "Low"),
+            "info": sum(1 for f in findings if f.get("severity") == "Info"),
+        },
+    }
+
 
 def run_direct(target: str, scope: str, report_type: str) -> None:
     skills_to_run = SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])

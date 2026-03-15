@@ -134,7 +134,7 @@ def check_headers(target_url: str) -> list[HeaderFinding]:
 
         if "Strict-Transport-Security" in headers:
             hsts = headers["Strict-Transport-Security"]
-            if "includeSubDomains" not in hsts:
+            if "includeSubDomains" not in hsts and "includeSubdomains" not in hsts:
                 findings.append(HeaderFinding(
                     header="Strict-Transport-Security",
                     status="misconfigured",

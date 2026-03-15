@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Diverg — Security testing platform</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+    .hero {
+      min-height: 60vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: url('bg-waves.png') center/cover no-repeat;
+      opacity: 0.15;
+      z-index: 0;
+    }
+    .hero-content { position: relative; z-index: 1; text-align: center; }
+    .logo { width: 120px; height: auto; margin-bottom: 1.5rem; }
+    h1 { font-size: 2rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .tagline { color: var(--muted); font-size: 1.1rem; max-width: 480px; margin: 0 auto 2rem; }
+    .features {
+      max-width: 720px;
+      margin: 0 auto 3rem;
+      padding: 0 1rem;
+    }
+    .features h2 { font-size: 1.25rem; margin-bottom: 1rem; color: var(--muted); font-weight: 500; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      text-align: left;
+    }
+    .card strong { display: block; margin-bottom: 0.25rem; color: var(--accent); }
+    .card span { font-size: 0.9rem; color: var(--muted); }
+    footer {
+      text-align: center;
+      padding: 2rem;
+      color: var(--muted);
+      font-size: 0.875rem;
+      border-top: 1px solid var(--border);
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <section class="hero">
+    <div class="hero-content">
+      <img src="logo.png" alt="Diverg" class="logo" />
+      <h1>Diverg</h1>
+      <p class="tagline">Security testing platform — recon, vulnerability scanning, and blockchain-aware investigation. Findings delivered via Telegram.</p>
+    </div>
+  </section>
+  <section class="features">
+    <h2>What it does</h2>
+    <div class="grid">
+      <div class="card"><strong>Web</strong><span>Recon, headers/SSL, web vulns, auth and API testing, OSINT.</span></div>
+      <div class="card"><strong>Blockchain</strong><span>Wallet and token investigation, flow diagrams, Bubblemaps.</span></div>
+      <div class="card"><strong>Delivery</strong><span>Telegram bot for reports; dashboard coming.</span></div>
+    </div>
+  </section>
+  <footer>
+    Use only for <strong>authorized</strong> security testing. Get written permission and define scope.
+  </footer>
+</body>
+</html>

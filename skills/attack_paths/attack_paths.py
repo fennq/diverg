@@ -146,6 +146,15 @@ CHAIN_TEMPLATES = [
     [ROLE_PIVOT, ROLE_DATA],
 ]
 
+# Which skills to run to get findings for each role (for gap analysis)
+ROLE_TO_SKILLS = {
+    ROLE_ENTRY: ["recon", "api_test", "web_vulns", "headers_ssl"],
+    ROLE_PRIVILEGE: ["auth_test", "api_test", "web_vulns"],
+    ROLE_PIVOT: ["api_test", "web_vulns"],
+    ROLE_DATA: ["api_test", "data_leak_risks", "company_exposure"],
+    ROLE_FINANCIAL: ["workflow_probe", "payment_financial", "race_condition", "api_test"],
+}
+
 
 @dataclass
 class PathStep:
@@ -165,8 +174,55 @@ class AttackPath:
     evidence_refs: list[str]
 
 
-def _build_paths(findings: list[dict]) -> list[AttackPath]:
-    """Build attack paths from classified findings."""
+def _compute_gap_analysis(by_role: dict[str, list[dict]]) -> list[dict]:
+    """Return gaps: chain templates that are one role short, with suggested skills to run."""
+    gaps: list[dict] = []
+    for template in CHAIN_TEMPLATES:
+        missing = [r for r in template if not by_role.get(r)]
+        if len(missing) != 1:
+            continue
+        role = missing[0]
+        chain_desc = " → ".join(template)
+        skills = ROLE_TO_SKILLS.get(role, ["api_test", "web_vulns"])
+        gaps.append({
+            "missing_role": role,
+            "chain_template": chain_desc,
+            "suggested_skills": skills,
+            "reason": f"One more finding (role: {role}) would complete chain: {chain_desc}.",
+        })
+    return gaps[:10]
+
+
+def _suggested_next_actions(
+    paths: list[AttackPath],
+    gaps: list[dict],
+    role_counts: dict[str, int],
+    has_workflow_urls: bool,
+) -> list[dict]:
+    """Produce actionable next steps for the operator."""
+    actions: list[dict] = []
+    if gaps:
+        # Prioritize filling high-impact gaps (financial, data)
+        for g in sorted(gaps, key=lambda x: (ROLE_FINANCIAL in x["chain_template"], ROLE_DATA in x["chain_template"]), reverse=True)[:3]:
+            actions.append({
+                "action": f"Run {', '.join(g['suggested_skills'][:2])}",
+                "reason": g["reason"],
+            })
+    if paths and not has_workflow_urls and any(ROLE_FINANCIAL in p.chain_type for p in paths):
+        actions.append({
+            "action": "Run workflow_probe with context from api_test (endpoints)",
+            "reason": "Financial paths exist; validate checkout/order flows and zero-amount acceptance.",
+        })
+    if role_counts.get(ROLE_ENTRY) and not role_counts.get(ROLE_PRIVILEGE):
+        actions.append({
+            "action": "Run auth_test and api_test (IDOR, mass assignment)",
+            "reason": "Entry points found; privilege escalation checks could complete entry→privilege→data chains.",
+        })
+    return actions[:6]
+
+
+def _build_paths(findings: list[dict], max_variants_per_template: int = 2) -> list[AttackPath]:
+    """Build attack paths from classified findings; optionally multiple variants per template."""
     by_role: dict[str, list[dict]] = {r: [] for r in [ROLE_ENTRY, ROLE_PRIVILEGE, ROLE_PIVOT, ROLE_DATA, ROLE_FINANCIAL]}
     for f in findings:
         for r in _classify_finding(f):
@@ -179,49 +235,49 @@ def _build_paths(findings: list[dict]) -> list[AttackPath]:
     for template in CHAIN_TEMPLATES:
         if not all(by_role[r] for r in template):
             continue
-        # One path per template using first finding per role (then we could expand to combinations)
-        steps_list: list[PathStep] = []
-        refs: list[str] = []
-        for role in template:
-            cand = by_role[role][0]
-            steps_list.append(PathStep(
-                role=role,
-                finding_title=(cand.get("title") or "")[:120],
-                finding_url=(cand.get("url") or "")[:500],
-                source_skill=cand.get("_source_skill", ""),
-                severity=cand.get("severity", "Info"),
+        # Build up to max_variants_per_template paths per template (different finding per role)
+        for variant_idx in range(min(max_variants_per_template, max(len(by_role[r]) for r in template) or 1)):
+            steps_list: list[PathStep] = []
+            refs: list[str] = []
+            for role in template:
+                cands = by_role[role]
+                cand = cands[min(variant_idx, len(cands) - 1)]
+                steps_list.append(PathStep(
+                    role=role,
+                    finding_title=(cand.get("title") or "")[:120],
+                    finding_url=(cand.get("url") or "")[:500],
+                    source_skill=cand.get("_source_skill", ""),
+                    severity=cand.get("severity", "Info"),
+                ))
+                refs.append(f"{cand.get('title','')} [{cand.get('_source_skill','')}]")
+
+            sig = tuple((s.role, s.finding_title[:60]) for s in steps_list)
+            if sig in seen_signatures:
+                continue
+            seen_signatures.add(sig)
+
+            sev_score = {"Critical": 25, "High": 18, "Medium": 10, "Low": 5, "Info": 2}
+            score = min(100, sum(sev_score.get(s.severity, 2) for s in steps_list) + 10 * len(steps_list))
+
+            if ROLE_FINANCIAL in template:
+                impact_summary = "Financial impact: payment/refund/order abuse possible."
+            elif ROLE_DATA in template:
+                impact_summary = "Data impact: sensitive data or credentials reachable."
+            elif ROLE_PIVOT in template:
+                impact_summary = "Pivot impact: internal systems or metadata reachable."
+            else:
+                impact_summary = f"Chain: {' → '.join(template)}."
+
+            paths.append(AttackPath(
+                chain_type=" → ".join(template),
+                steps=steps_list,
+                exploitability_score=score,
+                impact_summary=impact_summary,
+                evidence_refs=refs[:5],
             ))
-            refs.append(f"{cand.get('title','')} [{cand.get('_source_skill','')}]")
-
-        sig = tuple((s.role, s.finding_title[:60]) for s in steps_list)
-        if sig in seen_signatures:
-            continue
-        seen_signatures.add(sig)
-
-        # Exploitability: higher if Critical/High in chain, and if chain is long (more steps = more realistic)
-        sev_score = {"Critical": 25, "High": 18, "Medium": 10, "Low": 5, "Info": 2}
-        score = min(100, sum(sev_score.get(s.severity, 2) for s in steps_list) + 10 * len(steps_list))
-
-        impact = " → ".join(template)
-        if ROLE_FINANCIAL in template:
-            impact_summary = "Financial impact: payment/refund/order abuse possible."
-        elif ROLE_DATA in template:
-            impact_summary = "Data impact: sensitive data or credentials reachable."
-        elif ROLE_PIVOT in template:
-            impact_summary = "Pivot impact: internal systems or metadata reachable."
-        else:
-            impact_summary = f"Chain: {impact}."
-
-        paths.append(AttackPath(
-            chain_type=" → ".join(template),
-            steps=steps_list,
-            exploitability_score=score,
-            impact_summary=impact_summary,
-            evidence_refs=refs[:5],
-        ))
 
     paths.sort(key=lambda p: (-p.exploitability_score, -len(p.steps)))
-    return paths[:15]
+    return paths[:20]
 
 
 @dataclass
@@ -262,6 +318,8 @@ def run(
             "findings_count": 0,
             "paths": [],
             "role_counts": {},
+            "gap_analysis": [],
+            "suggested_next_actions": [{"action": "Run run_full_attack (or recon, api_test, web_vulns, auth_test, workflow_probe)", "reason": "No prior results; run scans first to build attack paths from findings."}],
             "note": "No prior results provided. Run run_full_attack or other tools first, then pass their results to build attack paths. This skill correlates findings across tools to show how an attacker would chain issues to reach impact.",
         }, indent=2)
 
@@ -272,14 +330,29 @@ def run(
             "findings_count": 0,
             "paths": [],
             "role_counts": {},
+            "gap_analysis": [],
+            "suggested_next_actions": [],
             "note": "No findings found in prior results. Run more tools (web_vulns, api_test, auth_test, high_value_flaws, payment_financial, etc.) then pass results again.",
         }, indent=2)
+
+    by_role: dict[str, list[dict]] = {r: [] for r in [ROLE_ENTRY, ROLE_PRIVILEGE, ROLE_PIVOT, ROLE_DATA, ROLE_FINANCIAL]}
+    for f in findings:
+        for r in _classify_finding(f):
+            if r in by_role:
+                by_role[r].append(f)
 
     paths = _build_paths(findings)
     role_counts: dict[str, int] = {}
     for f in findings:
         for r in _classify_finding(f):
             role_counts[r] = role_counts.get(r, 0) + 1
+
+    gap_analysis = _compute_gap_analysis(by_role)
+    has_workflow_urls = any(
+        u for u in (f.get("url") or "" for f in findings)
+        if u and any(h in u.lower() for h in ("confirm", "checkout", "order", "complete", "place"))
+    )
+    suggested_next_actions = _suggested_next_actions(paths, gap_analysis, role_counts, bool(has_workflow_urls))
 
     def path_to_dict(p: AttackPath) -> dict:
         return {
@@ -298,7 +371,9 @@ def run(
         "findings_count": len(findings),
         "paths": [path_to_dict(p) for p in paths],
         "role_counts": role_counts,
-        "note": "Diverg attack-path correlation: chains built from your scan findings. Prioritize paths with high exploitability_score and financial/data impact.",
+        "gap_analysis": gap_analysis,
+        "suggested_next_actions": suggested_next_actions,
+        "note": "Diverg attack-path correlation: chains built from your scan findings. Use gap_analysis and suggested_next_actions to prioritize follow-up; prioritize paths with high exploitability_score and financial/data impact.",
     }
     return json.dumps(report, indent=2)
 
