@@ -34,6 +34,6 @@ data/
 reports/
 *.brain.json
 brain.json
-
-# Optional: uncomment to ignore results (scan outputs)
-# results/*.txt
+content/*-results.json
+content/*-scan-results.json
+content/*proof-results.json
