@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup">
+    <h1>Diverg</h1>
+    <p class="sub">Security scan (API scope) + PoC simulate</p>
+    <div class="field">
+      <label>URL to scan</label>
+      <input type="text" id="url" placeholder="https://example.com" />
+    </div>
+    <div class="actions">
+      <button id="scanCurrent" type="button">Use current tab</button>
+      <button id="scan" type="button">Scan</button>
+    </div>
+    <div id="status" class="status"></div>
+    <div class="links">
+      <a href="results.html" target="_blank" id="viewResults">View detailed report</a>
+      <a href="options.html" target="_blank">Options</a>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

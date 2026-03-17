@@ -56,11 +56,25 @@ DANGEROUS_SINKS = [
 ]
 # postMessage (origin validation bugs)
 POST_MESSAGE_RE = re.compile(r"postMessage\s*\(|addEventListener\s*\(\s*['\"]message['\"]", re.I)
-# Storage with sensitive keys (we only report presence, not value)
+# Storage with sensitive keys — must be actual .setItem/.getItem (not in comment)
 STORAGE_SENSITIVE_RE = re.compile(
-    r"(?:localStorage|sessionStorage)\.(?:setItem|getItem)\s*\(\s*['\"`]?(?:token|auth|apiKey|secret|password|wallet|privateKey)['\"`]?",
+    r"(?:localStorage|sessionStorage)\.(?:setItem|getItem)\s*\(\s*['\"`]?(?:token|auth|apiKey|api_key|secret|password|wallet|privateKey)['\"`]?",
     re.I,
 )
+# Public keys (allowlist — do not report as sensitive). Stripe pk_, Google maps, etc.
+PUBLIC_KEY_PREFIXES = ("pk_live_", "pk_test_", "pk_", "AIza")  # AIza = Google; pk_ can be Stripe publishable
+
+# Third-party script trust: origins we do not report (benign CDNs / known-good). Report only when we see dangerous access.
+THIRD_PARTY_ALLOWLIST = (
+    "stripe.com", "js.stripe.com", "googleapis.com", "gstatic.com", "google.com",
+    "cloudflare.com", "cdnjs.cloudflare.com", "unpkg.com", "cdn.jsdelivr.net",
+    "facebook.net", "connect.facebook.net", "analytics.js", "googletagmanager.com",
+    "doubleclick.net", "google-analytics.com", "hotjar.com", "intercom.io",
+)
+# Patterns that indicate script can access sensitive context (only report when we see these)
+THIRD_PARTY_ACCESS_COOKIE = re.compile(r"document\.cookie\b", re.I)
+THIRD_PARTY_ACCESS_STORAGE = re.compile(r"(?:localStorage|sessionStorage)\.(?:getItem|setItem)\s*\(", re.I)
+THIRD_PARTY_ACCESS_MESSAGE = re.compile(r"addEventListener\s*\(\s*['\"]message['\"]", re.I)
 # Third-party fetch/axios URL (full URL, not same-origin) — exfil risk if combined with sensitive data
 THIRD_PARTY_FETCH_RE = re.compile(
     r"(?:fetch|axios\.(?:get|post|put|patch))\s*\(\s*['\"]https?://([^/'\"]+)",
@@ -98,6 +112,61 @@ class Finding:
     evidence: str
     impact: str
     remediation: str
+    confidence: str = "suspected"  # confirmed | suspected — zero FP: only confirmed when we have usage correlation
+
+
+def _strip_js_comments(js: str) -> str:
+    """Remove single-line and multi-line comments to avoid matching inside comments (zero FP)."""
+    out = []
+    i = 0
+    n = len(js)
+    in_single = False
+    in_multi = False
+    in_string = None
+    escape = False
+    while i < n:
+        if escape:
+            escape = False
+            out.append(js[i])
+            i += 1
+            continue
+        if in_string:
+            if js[i] == "\\" and in_string in ('"', "'", "`"):
+                escape = True
+                out.append(js[i])
+                i += 1
+                continue
+            if js[i] == in_string:
+                in_string = None
+            out.append(js[i])
+            i += 1
+            continue
+        if in_single:
+            if js[i] == "\n":
+                in_single = False
+                out.append(js[i])
+            i += 1
+            continue
+        if in_multi:
+            if js[i:i+2] == "*/":
+                in_multi = False
+                i += 2
+                continue
+            i += 1
+            continue
+        if js[i:i+2] == "//":
+            in_single = True
+            i += 2
+            continue
+        if js[i:i+2] == "/*":
+            in_multi = True
+            i += 2
+            continue
+        if js[i] in ('"', "'", "`") and (i == 0 or js[i-1] != "\\"):
+            in_string = js[i]
+        out.append(js[i])
+        i += 1
+    return "".join(out)
 
 
 @dataclass
@@ -189,7 +258,16 @@ def _extract_versions(js_content: str, source_url: str) -> list[dict]:
     return out
 
 
+def _has_public_key_literal(js_content: str) -> bool:
+    """True if content contains common public-key literals (allowlist — avoid FP)."""
+    return any(
+        f'"{p}' in js_content or f"'{p}" in js_content or f"`{p}" in js_content
+        for p in PUBLIC_KEY_PREFIXES
+    )
+
+
 def _check_dangerous_sinks(js_content: str, source_label: str, source_url: str) -> list[Finding]:
+    """Uses comment-stripped content when called from run() so matches are in executable code only."""
     findings: list[Finding] = []
     for pattern, name, sev in DANGEROUS_SINKS:
         if pattern.search(js_content):
@@ -198,9 +276,10 @@ def _check_dangerous_sinks(js_content: str, source_label: str, source_url: str) 
                 severity=sev,
                 url=source_url,
                 category="Client-Side Security",
-                evidence="Pattern matched in JS. If user-controlled data reaches this sink, XSS or code execution is possible.",
+                evidence="Pattern matched in executable JS (comments stripped). If user-controlled data reaches this sink, XSS or code execution is possible.",
                 impact="Attackers may achieve XSS or execute script if they control input that flows to this sink.",
                 remediation="Avoid eval/new Function with user input. Sanitize and CSP for innerHTML/document.write.",
+                confidence="confirmed",
             ))
             break
     if POST_MESSAGE_RE.search(js_content):
@@ -209,32 +288,38 @@ def _check_dangerous_sinks(js_content: str, source_label: str, source_url: str) 
             severity="Low",
             url=source_url,
             category="Client-Side Security",
-            evidence="postMessage or addEventListener('message') found. Verify origin validation to prevent cross-origin abuse.",
+            evidence="postMessage or addEventListener('message') found in executable code. Verify origin validation to prevent cross-origin abuse.",
             impact="Missing origin check can lead to cross-origin data theft or command injection.",
             remediation="Always validate event.origin (allowlist) before processing postMessage.",
+            confidence="confirmed",
         ))
     if STORAGE_SENSITIVE_RE.search(js_content):
+        has_public = _has_public_key_literal(js_content)
+        if has_public:
+            sev, conf, note = "Low", "suspected", " File also contains possible public key (pk_/AIza) — verify if storage key is sensitive."
+        else:
+            sev, conf, note = "Medium", "suspected", " Match in executable code (comments stripped). Verify secrets are not stored in client."
         findings.append(Finding(
             title=f"Sensitive key in storage access in {source_label} [REVIEW]",
-            severity="Medium",
+            severity=sev,
             url=source_url,
             category="Client-Side Security",
-            evidence="localStorage/sessionStorage used with token/auth/apiKey/secret/password/wallet. Verify secrets are not stored in client.",
+            evidence=f"localStorage/sessionStorage .setItem/.getItem with token/auth/apiKey/secret/password/wallet.{note}",
             impact="Secrets in client storage are readable by any script on the page (XSS) or extensions.",
             remediation="Do not store secrets in localStorage/sessionStorage. Use httpOnly cookies or backend-only storage.",
+            confidence=conf,
         ))
     return findings
 
 
 def _check_third_party_exfil(js_content: str, js_url: str, base_domain: str) -> list[Finding]:
-    """Flag when sensitive-looking data may be sent to third-party domains (exfil / data-risk)."""
+    """Flag when sensitive-looking data may be sent to third-party domains. Uses comment-stripped content."""
     findings: list[Finding] = []
     base_domain_clean = base_domain.lower().replace("www.", "").split(":")[0]
     for m in THIRD_PARTY_FETCH_RE.finditer(js_content):
         host = (m.group(1) or "").lower().split(":")[0].replace("www.", "")
         if not host or host == base_domain_clean:
             continue
-        # Look in a window around the match for sensitive param names
         start = max(0, m.start() - 300)
         end = min(len(js_content), m.end() + 300)
         window = js_content[start:end]
@@ -244,16 +329,17 @@ def _check_third_party_exfil(js_content: str, js_url: str, base_domain: str) -> 
                 severity="Medium",
                 url=js_url,
                 category="Data Exfiltration Risk",
-                evidence=f"fetch/axios to https://{host} with email/token/wallet/user-like params nearby. Verify this is intended and compliant; could enable data theft or misuse.",
-                impact="PII or credentials sent to third party could be logged, resold, or abused. We cannot determine intent — verify data flows and contracts.",
-                remediation="Audit all outbound requests; ensure third parties are trusted and data handling is compliant. Do not send tokens or PII to untrusted domains.",
+                evidence=f"fetch/axios to https://{host} with email/token/wallet/user-like params nearby in executable code. Verify intended and compliant.",
+                impact="PII or credentials sent to third party could be logged, resold, or abused. Verify data flows and contracts.",
+                remediation="Audit all outbound requests; ensure third parties are trusted. Do not send tokens or PII to untrusted domains.",
+                confidence="suspected",
             ))
             break
     return findings
 
 
 def _check_crypto_trust(js_content: str, source_label: str, source_url: str) -> list[Finding]:
-    """Flag client-side key/seed/signing patterns — high risk for theft or backdoor if abused."""
+    """Flag client-side key/seed/signing in executable code only (comment-stripped)."""
     findings: list[Finding] = []
     for pattern, name in CRYPTO_TRUST_PATTERNS:
         if pattern.search(js_content):
@@ -262,11 +348,48 @@ def _check_crypto_trust(js_content: str, source_label: str, source_url: str) -> 
                 severity="High",
                 url=source_url,
                 category="Crypto / Trust",
-                evidence=f"Pattern matched in client JS. Client-side key handling or signing can enable theft or backdoor if keys are exfiltrated or logic is malicious.",
-                impact="If keys or signing are handled in frontend, XSS or a malicious script could drain wallets or sign unauthorized transactions. Verify custody and intent.",
+                evidence=f"Pattern matched in executable JS (comments stripped). Client-side key/signing can enable theft if keys are exfiltrated. Verify custody and intent.",
+                impact="If keys or signing are handled in frontend, XSS or a malicious script could drain wallets or sign unauthorized transactions.",
                 remediation="Prefer backend signing and key custody. If client-side is required, use hardened enclaves and minimal exposure; audit for exfil paths.",
+                confidence="suspected",
             ))
             break
+    return findings
+
+
+def _third_party_script_findings(js_url: str, js_content_stripped: str, base_origin: str, source_label: str) -> list[Finding]:
+    """Only report when third-party script has actual cookie/storage/postMessage access (zero FP)."""
+    findings: list[Finding] = []
+    try:
+        script_origin = urlparse(js_url).netloc.lower().replace("www.", "").split(":")[0]
+        base_domain = urlparse(base_origin).netloc.lower().replace("www.", "").split(":")[0]
+        if not script_origin or script_origin == base_domain:
+            return findings
+        if any(allowed in script_origin for allowed in THIRD_PARTY_ALLOWLIST):
+            return findings
+    except Exception:
+        return findings
+
+    access = []
+    if THIRD_PARTY_ACCESS_COOKIE.search(js_content_stripped):
+        access.append("document.cookie")
+    if THIRD_PARTY_ACCESS_STORAGE.search(js_content_stripped):
+        access.append("localStorage/sessionStorage")
+    if THIRD_PARTY_ACCESS_MESSAGE.search(js_content_stripped):
+        access.append("postMessage listener")
+    if not access:
+        return findings
+
+    findings.append(Finding(
+        title=f"Third-party script can access sensitive context: {script_origin}",
+        severity="Medium",
+        url=js_url,
+        category="Third-Party Script Trust",
+        evidence=f"Script from {script_origin} (third-party) contains: {', '.join(access)}. Verify script is trusted and that cookie/storage scope or postMessage origin validation is sufficient.",
+        impact="Third-party script with cookie/storage/message access can read or exfiltrate session data if compromised or malicious. Origin allowlist reduces risk.",
+        remediation="Restrict cookie scope (path/domain); avoid storing secrets in storage reachable by third-party scripts. Load untrusted scripts in iframe with reduced access; validate postMessage event.origin.",
+        confidence="confirmed",
+    ))
     return findings
 
 
@@ -337,6 +460,7 @@ def run(target_url: str, scan_type: str = "full") -> str:
         content = _fetch_js_content(js_url, run_start)
         if not content:
             continue
+        content_stripped = _strip_js_comments(content)
         label = "JS"
         if "chunk" in js_url.lower():
             label = "chunk"
@@ -353,17 +477,22 @@ def run(target_url: str, scan_type: str = "full") -> str:
             key = (d["product"], d["version"])
             if not any((x["product"], x["version"]) == key for x in report.detected_versions):
                 report.detected_versions.append(d)
-        for f in _check_dangerous_sinks(content, label, js_url):
+        for f in _check_dangerous_sinks(content_stripped, label, js_url):
             key = (f.title, js_url)
             if key not in seen_sink_findings:
                 seen_sink_findings.add(key)
                 report.findings.append(f)
-        for f in _check_third_party_exfil(content, js_url, parsed.netloc):
+        for f in _check_third_party_exfil(content_stripped, js_url, parsed.netloc):
             key = (f.title, js_url)
             if key not in seen_sink_findings:
                 seen_sink_findings.add(key)
                 report.findings.append(f)
-        for f in _check_crypto_trust(content, label, js_url):
+        for f in _check_crypto_trust(content_stripped, label, js_url):
+            key = (f.title, js_url)
+            if key not in seen_sink_findings:
+                seen_sink_findings.add(key)
+                report.findings.append(f)
+        for f in _third_party_script_findings(js_url, content_stripped, base, label):
             key = (f.title, js_url)
             if key not in seen_sink_findings:
                 seen_sink_findings.add(key)

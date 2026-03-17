@@ -98,6 +98,13 @@ def _classify_finding(f: dict) -> list[str]:
     return roles if roles else [ROLE_ENTRY]  # default: can be entry
 
 
+def _finding_has_evidence(f: dict) -> bool:
+    """True if finding has enough evidence to include in chains (zero FP: no vague steps)."""
+    url = (f.get("url") or "").strip()
+    evidence = (f.get("evidence") or "").strip()
+    return len(url) > 0 and len(evidence) > 20
+
+
 def _aggregate_findings_from_results(results: dict) -> list[dict]:
     """Extract a flat list of findings from skill results (same shape as orchestrator)."""
     out: list[dict] = []
@@ -222,9 +229,10 @@ def _suggested_next_actions(
 
 
 def _build_paths(findings: list[dict], max_variants_per_template: int = 2) -> list[AttackPath]:
-    """Build attack paths from classified findings; optionally multiple variants per template."""
+    """Build attack paths from classified findings. Only findings with url+evidence; high-impact chains need one High/Critical."""
+    evidence_only = [f for f in findings if _finding_has_evidence(f)]
     by_role: dict[str, list[dict]] = {r: [] for r in [ROLE_ENTRY, ROLE_PRIVILEGE, ROLE_PIVOT, ROLE_DATA, ROLE_FINANCIAL]}
-    for f in findings:
+    for f in evidence_only:
         for r in _classify_finding(f):
             if r in by_role:
                 by_role[r].append(f)
@@ -268,6 +276,9 @@ def _build_paths(findings: list[dict], max_variants_per_template: int = 2) -> li
             else:
                 impact_summary = f"Chain: {' → '.join(template)}."
 
+            if ROLE_FINANCIAL in template or ROLE_DATA in template:
+                if not any(s.severity in ("High", "Critical") for s in steps_list):
+                    continue
             paths.append(AttackPath(
                 chain_type=" → ".join(template),
                 steps=steps_list,
@@ -278,6 +289,15 @@ def _build_paths(findings: list[dict], max_variants_per_template: int = 2) -> li
 
     paths.sort(key=lambda p: (-p.exploitability_score, -len(p.steps)))
     return paths[:20]
+
+
+def _attack_story_narrative(p: AttackPath) -> str:
+    """Concrete attack story: Step 1 → Step 2 → Impact (zero FP: each step has title + url)."""
+    lines = []
+    for i, s in enumerate(p.steps, 1):
+        lines.append(f"Step {i}: {s.finding_title[:100]} at {s.finding_url[:120]}")
+    lines.append(f"Impact: {p.impact_summary}")
+    return " ".join(lines)
 
 
 @dataclass
@@ -359,6 +379,7 @@ def run(
             "chain_type": p.chain_type,
             "exploitability_score": p.exploitability_score,
             "impact_summary": p.impact_summary,
+            "attack_story": _attack_story_narrative(p),
             "steps": [
                 {"role": s.role, "finding_title": s.finding_title, "finding_url": s.finding_url, "source_skill": s.source_skill, "severity": s.severity}
                 for s in p.steps

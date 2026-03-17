@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Diverg Security Scan",
+  "version": "1.0.0",
+  "description": "Run Diverg scans and simulate PoC for findings",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["http://127.0.0.1:5000/*", "http://localhost:5000/*", "https://*/*", "http://*/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Diverg Scan"
+  },
+  "options_page": "options.html"
+}

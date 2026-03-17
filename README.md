@@ -86,6 +86,25 @@ python orchestrator.py --target example.com --scope recon
 
 ---
 
+## Chrome extension and HTTP API
+
+The **Diverg Chrome extension** (separate repo: `diverg-extension`) talks to this backend for full scans.
+
+**Start the API server** (from this repo):
+
+```bash
+python api_server.py [--port 5000]
+```
+
+- **POST /api/scan** — Body: `{"url": "https://...", "goal": "optional"}`. Runs full web scan; with `goal` (e.g. `"payment bypass"`, `"headers"`, `"full audit"`) only matching skills run. Returns JSON: `target_url`, `findings`, `scanned_at`, `summary`, `skills_run`. Findings may include **citations** (RAG: sources from exploit catalog and prevention docs).
+- **POST /api/scan/stream** — Same body. Returns **NDJSON** stream: `skill_start`, `skill_done`, then `done` with full `report`. Use for live progress in the extension.
+
+**RAG:** Reports are enriched with citations from `content/` (exploit catalog, prevention docs). Optional: set `OPENAI_API_KEY` so the RAG index uses embeddings for better relevance.
+
+See `content/API_STREAM_AND_GOAL.md` for stream event format and example client code.
+
+---
+
 ## Optional: OpenClaw
 
 If you use the [OpenClaw](https://github.com/openclaw/openclaw) SDK and run with `--use-openclaw`, the orchestrator can delegate to an OpenClaw multi-agent session. Set `OPENCLAW_AUTH_TOKEN` in `.env` and start OpenClaw (e.g. Docker). This is optional; Diverg works fully without it.
@@ -96,15 +115,18 @@ If you use the [OpenClaw](https://github.com/openclaw/openclaw) SDK and run with
 
 ```
 diverg/
-├── bot.py                 # Telegram bot entry
-├── orchestrator.py         # CLI entry
+├── api_server.py           # HTTP API for Chrome extension (POST /api/scan, /api/scan/stream)
+├── bot.py                  # Telegram bot entry
+├── orchestrator.py         # CLI entry; run_web_scan(goal=), run_web_scan_streaming()
+├── intent_skills.py        # Natural-language goal → skill list (for goal-based scans)
+├── rag/                    # RAG index + retrieve; citations on findings
 ├── config.json             # LLM, skills, rate limits
 ├── .env.example
 ├── requirements.txt
 ├── agents/                 # Optional OpenClaw-style agents
 ├── skills/                 # Recon, web vulns, headers/SSL, OSINT, blockchain, bubblemaps, etc.
 ├── scripts/
-└── content/                # Templates, diagrams, runbooks
+└── content/                # Templates, diagrams, runbooks, API_STREAM_AND_GOAL.md
 ```
 
 ---

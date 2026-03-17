@@ -18,6 +18,7 @@ import json
 import re
 import sys
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -42,6 +43,7 @@ class Surface:
     exposure_type: str
     platform: str = ""
     notes: str = ""
+    content_length: int = 0
 
 
 @dataclass
@@ -470,6 +472,7 @@ def _record_surface(
     note: str,
     platform: str = "",
 ):
+    content_length = len(resp.content) if resp.content else int(resp.headers.get("Content-Length") or 0)
     report.surfaces.append(
         Surface(
             category=category,
@@ -479,6 +482,7 @@ def _record_surface(
             exposure_type=exposure_type,
             platform=platform,
             notes=note,
+            content_length=content_length,
         )
     )
     finding = _finding_for_surface(category, label, url, resp, exposure_type, note, platform)
@@ -522,7 +526,24 @@ def scan_company_exposure(target_url: str, scan_type: str = "full") -> CompanyEx
             note = f"{note} | Alternate host: {host}"
             _record_surface(report, category, label, alt_url, resp, exposure_type, note, platform)
 
+    _tag_likely_spa_findings(report)
     return report
+
+
+def _tag_likely_spa_findings(report: CompanyExposureReport) -> None:
+    """If many 200 responses share the same content length, tag findings as possible SPA (verify if real backend)."""
+    lengths = [s.content_length for s in report.surfaces if s.status_code == 200 and s.content_length > 0]
+    if len(lengths) < 4:
+        return
+    most_common = Counter(lengths).most_common(1)[0]
+    common_length, count = most_common
+    if count < 4:
+        return
+    url_to_length = {s.url: s.content_length for s in report.surfaces if s.status_code == 200}
+    spa_note = " [Possible SPA: same response size as many other paths — verify if real backend.]"
+    for f in report.findings:
+        if f.url in url_to_length and url_to_length[f.url] == common_length:
+            f.evidence += spa_note
 
 
 def run(target_url: str, scan_type: str = "full") -> str:

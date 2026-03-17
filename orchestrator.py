@@ -43,6 +43,11 @@ SCAN_PROFILES = {
         "web_vulns", "auth_test", "api_test", "high_value_flaws", "workflow_probe", "race_condition",
         "payment_financial", "client_surface", "dependency_audit", "logic_abuse", "entity_reputation",
     ],
+    "crypto": [
+        "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "company_exposure",
+        "web_vulns", "auth_test", "api_test", "high_value_flaws", "workflow_probe", "race_condition",
+        "payment_financial", "client_surface", "chain_validation_abuse", "dependency_audit", "logic_abuse", "entity_reputation",
+    ],
     "quick": ["headers_ssl", "recon", "osint", "company_exposure"],
     "recon": ["osint", "recon"],
     "web": ["web_vulns", "headers_ssl", "auth_test", "company_exposure"],
@@ -78,6 +83,7 @@ SKILL_TARGET_TYPE = {
     "dependency_audit": "url",
     "logic_abuse": "url",
     "entity_reputation": "domain",
+    "chain_validation_abuse": "url",
 }
 ENGAGEMENT_TRACKS = {
     "surface": ["osint", "recon", "headers_ssl", "company_exposure"],
@@ -107,6 +113,7 @@ SKILL_DESCRIPTIONS = {
     "dependency_audit": "detected stack/versions, CVE watchlist, upgrade recommendations",
     "logic_abuse": "numeric/bounds abuse (amount, limit, offset), overflow, success-like response to tampered params",
     "entity_reputation": "domain owner/entity foul-play research, fraud/lawsuit/breach/reputation searches",
+    "chain_validation_abuse": "Injective-style: batch vs single path validation, account/subaccount ID substitution, parameter trust (see content/injective-style-exploit-routes.md)",
 }
 
 # Canonical finding schema — all skills normalize to this shape for dedup and correlation
@@ -158,6 +165,11 @@ def normalize_finding(raw: dict, source_skill: str, context_key: str = "findings
     out["evidence"] = str(raw.get("evidence") or raw.get("detail") or raw.get("value") or raw.get("recommendation") or raw.get("snippet") or "").strip() or "See source output."
     out["impact"] = str(raw.get("impact") or raw.get("relevance_hint") or out["impact"]).strip()
     out["remediation"] = str(raw.get("remediation") or raw.get("recommendation") or out["remediation"]).strip()
+    # Preserve zero-FP / workflow fields so reports and UI can show replay steps
+    if raw.get("verification_steps") is not None:
+        out["verification_steps"] = raw["verification_steps"]
+    if raw.get("confidence"):
+        out["confidence"] = str(raw["confidence"]).strip()
     return out
 
 
@@ -226,6 +238,7 @@ def _enrich_finding_with_exploit(finding: dict, catalog: list[dict]) -> None:
             "name": best.get("name", ""),
             "owasp": best.get("owasp", ""),
             "cwe": best.get("cwe", ""),
+            "exploitation": best.get("exploitation", ""),
             "prevention": best.get("prevention", ""),
         }
         if not (finding.get("remediation") or "").strip():
@@ -331,6 +344,14 @@ def run_skill(skill_name: str, target: str, target_url: str, context: dict | Non
         elif skill_name == "entity_reputation":
             import entity_reputation
             raw = entity_reputation.run(target, scan_type="full", osint_json=ctx.get("osint_json"))
+        elif skill_name == "chain_validation_abuse":
+            import chain_validation_abuse
+            raw = chain_validation_abuse.run(
+                target_url,
+                scan_type="full",
+                client_surface_json=ctx.get("client_surface_json"),
+                api_results_json=ctx.get("api_results_json"),
+            )
         else:
             return {"error": f"Unknown skill: {skill_name}"}
 
@@ -396,7 +417,15 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
                 }, skill_name, "findings"))
 
     deduped = dedupe_findings(all_findings)
-    return enrich_findings_with_exploits(deduped)
+    enriched = enrich_findings_with_exploits(deduped)
+    # RAG: attach citations from content/ (exploit catalog, prevention docs)
+    try:
+        from rag import build_index, enrich_findings_with_citations
+        build_index()
+        enrich_findings_with_citations(enriched)
+    except Exception:
+        pass
+    return enriched
 
 
 def aggregate_company_surfaces(results: dict[str, dict]) -> list[dict]:
@@ -1137,18 +1166,62 @@ WEB_SCAN_PHASE2 = ["dependency_audit", "logic_abuse", "entity_reputation"]
 WEB_SCAN_PROFILE = WEB_SCAN_PHASE1 + WEB_SCAN_PHASE2
 
 
-def run_web_scan(target: str, scope: str = "full") -> dict:
+def _is_crypto_site(target_url: str) -> bool:
+    """Quick crypto/DeFi detection so we can add chain_validation_abuse when relevant."""
+    try:
+        import crypto_site_detector
+        result = crypto_site_detector.detect_from_url(target_url, fetch=True)
+        return result.is_crypto and result.confidence >= 0.2
+    except Exception:
+        return False
+
+
+def _get_crypto_detection(target_url: str) -> dict:
+    """Return crypto detection result for API/report. Keys: is_crypto, confidence, signals (optional)."""
+    try:
+        import crypto_site_detector
+        result = crypto_site_detector.detect_from_url(target_url, fetch=True)
+        return {
+            "is_crypto": result.is_crypto,
+            "confidence": result.confidence,
+            "signals": getattr(result, "signals", [])[:12],
+        }
+    except Exception:
+        return {"is_crypto": False, "confidence": 0.0, "signals": []}
+
+
+def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> dict:
     """
     Run full web-only scan (no blockchain) and return aggregated result for API/extension.
-    Runs phase 1 (all independent skills including client_surface), then phase 2
-    (dependency_audit, logic_abuse, entity_reputation) with context from phase 1.
+    If goal is provided, run only skills matching the natural-language goal (see intent_skills).
+    Otherwise runs phase 1 then phase 2. When target is detected as crypto/DeFi, chain_validation_abuse is added automatically.
     Returns dict with target_url, findings, summary, scanned_at, skills_run.
     """
     domain = target.replace("https://", "").replace("http://", "").split("/")[0]
     target_url = target if target.startswith("http") else f"https://{target}"
 
-    skills_phase1 = WEB_SCAN_PHASE1 if scope == "full" else SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])
-    skills_phase2 = WEB_SCAN_PHASE2 if scope == "full" else []
+    site_classification = _get_crypto_detection(target_url)
+    chain_validation_abuse_reason: str | None = None
+
+    if goal and str(goal).strip():
+        from intent_skills import resolve_goal
+        requested = resolve_goal(goal)
+        skills_phase1 = [s for s in WEB_SCAN_PHASE1 if s in requested]
+        skills_phase2 = [s for s in WEB_SCAN_PHASE2 if s in requested]
+        if "chain_validation_abuse" in requested and "chain_validation_abuse" not in skills_phase2:
+            skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
+            chain_validation_abuse_reason = "goal"
+    else:
+        skills_phase1 = WEB_SCAN_PHASE1 if scope == "full" else SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])
+        skills_phase2 = WEB_SCAN_PHASE2 if scope == "full" else []
+        if scope == "crypto":
+            if "chain_validation_abuse" not in skills_phase2:
+                skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
+            chain_validation_abuse_reason = "scope_crypto"
+        elif scope == "full" and (site_classification.get("is_crypto") and site_classification.get("confidence", 0) >= 0.2):
+            if "chain_validation_abuse" not in skills_phase2:
+                skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
+            chain_validation_abuse_reason = "auto_crypto"
 
     results: dict[str, dict] = {}
 
@@ -1177,6 +1250,7 @@ def run_web_scan(target: str, scope: str = "full") -> dict:
             "client_surface_json": json.dumps(results["client_surface"]) if results.get("client_surface") and "error" not in results.get("client_surface", {}) else None,
             "recon_json": json.dumps(results["recon"]) if results.get("recon") and "error" not in results.get("recon", {}) else None,
             "osint_json": json.dumps(results["osint"]) if results.get("osint") and "error" not in results.get("osint", {}) else None,
+            "api_results_json": json.dumps(results["api_test"]) if results.get("api_test") and "error" not in results.get("api_test", {}) else None,
         }
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_phase2))) as pool:
             future_to_skill = {
@@ -1206,6 +1280,11 @@ def run_web_scan(target: str, scope: str = "full") -> dict:
         "company_surfaces": company_surfaces,
         "scanned_at": timestamp,
         "skills_run": list(results.keys()),
+        "site_classification": {
+            **site_classification,
+            "chain_validation_abuse_ran": "chain_validation_abuse" in results,
+            "chain_validation_abuse_reason": chain_validation_abuse_reason,
+        },
         "summary": {
             "total_findings": len(findings),
             "critical": sum(1 for f in findings if f.get("severity") == "Critical"),
@@ -1215,6 +1294,94 @@ def run_web_scan(target: str, scope: str = "full") -> dict:
             "info": sum(1 for f in findings if f.get("severity") == "Info"),
         },
     }
+
+
+def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = None):
+    """
+    Generator that runs the same scan as run_web_scan but yields progress events (NDJSON).
+    Yields: skill_start, skill_done per skill, then done with full report (including site_classification).
+    """
+    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
+    target_url = target if target.startswith("http") else f"https://{target}"
+
+    site_classification = _get_crypto_detection(target_url)
+    chain_validation_abuse_reason: str | None = None
+
+    if goal and str(goal).strip():
+        from intent_skills import resolve_goal
+        requested = resolve_goal(goal)
+        skills_phase1 = [s for s in WEB_SCAN_PHASE1 if s in requested]
+        skills_phase2 = [s for s in WEB_SCAN_PHASE2 if s in requested]
+        if "chain_validation_abuse" in requested and "chain_validation_abuse" not in skills_phase2:
+            skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
+            chain_validation_abuse_reason = "goal"
+    else:
+        skills_phase1 = WEB_SCAN_PHASE1 if scope == "full" else SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])
+        skills_phase2 = WEB_SCAN_PHASE2 if scope == "full" else []
+        if scope == "crypto":
+            if "chain_validation_abuse" not in skills_phase2:
+                skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
+            chain_validation_abuse_reason = "scope_crypto"
+        elif scope == "full" and (site_classification.get("is_crypto") and site_classification.get("confidence", 0) >= 0.2):
+            if "chain_validation_abuse" not in skills_phase2:
+                skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
+            chain_validation_abuse_reason = "auto_crypto"
+
+    results: dict[str, dict] = {}
+
+    for skill_name in skills_phase1:
+        yield {"event": "skill_start", "skill": skill_name}
+        try:
+            out = run_skill(skill_name, domain, target_url)
+            results[skill_name] = out
+            cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
+            yield {"event": "skill_done", "skill": skill_name, "findings_count": cnt}
+        except Exception as exc:
+            results[skill_name] = {"error": str(exc), "skill": skill_name}
+            yield {"event": "skill_done", "skill": skill_name, "findings_count": 0, "error": str(exc)}
+
+    if skills_phase2:
+        ctx = {
+            "client_surface_json": json.dumps(results["client_surface"]) if results.get("client_surface") and "error" not in results.get("client_surface", {}) else None,
+            "recon_json": json.dumps(results["recon"]) if results.get("recon") and "error" not in results.get("recon", {}) else None,
+            "osint_json": json.dumps(results["osint"]) if results.get("osint") and "error" not in results.get("osint", {}) else None,
+            "api_results_json": json.dumps(results["api_test"]) if results.get("api_test") and "error" not in results.get("api_test", {}) else None,
+        }
+        for skill_name in skills_phase2:
+            yield {"event": "skill_start", "skill": skill_name}
+            try:
+                out = run_skill(skill_name, domain, target_url, ctx)
+                results[skill_name] = out
+                cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
+                yield {"event": "skill_done", "skill": skill_name, "findings_count": cnt}
+            except Exception as exc:
+                results[skill_name] = {"error": str(exc), "skill": skill_name}
+                yield {"event": "skill_done", "skill": skill_name, "findings_count": 0, "error": str(exc)}
+
+    findings = aggregate_findings(results)
+    company_surfaces = aggregate_company_surfaces(results)
+    timestamp = datetime.now(timezone.utc).isoformat()
+    report = {
+        "target_url": target_url,
+        "findings": findings,
+        "company_surfaces": company_surfaces,
+        "scanned_at": timestamp,
+        "skills_run": list(results.keys()),
+        "site_classification": {
+            **site_classification,
+            "chain_validation_abuse_ran": "chain_validation_abuse" in results,
+            "chain_validation_abuse_reason": chain_validation_abuse_reason,
+        },
+        "summary": {
+            "total_findings": len(findings),
+            "critical": sum(1 for f in findings if f.get("severity") == "Critical"),
+            "high": sum(1 for f in findings if f.get("severity") == "High"),
+            "medium": sum(1 for f in findings if f.get("severity") == "Medium"),
+            "low": sum(1 for f in findings if f.get("severity") == "Low"),
+            "info": sum(1 for f in findings if f.get("severity") == "Info"),
+        },
+    }
+    yield {"event": "done", "report": report}
 
 
 def run_direct(target: str, scope: str, report_type: str) -> None:

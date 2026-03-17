@@ -1,13 +1,18 @@
-# Authorized test targets
+# Example test targets (public / hackathon)
 
-Targets below are authorized for Diverg security testing (contractual scope or intentionally vulnerable).
+Use only targets you are **authorized** to test (e.g. your own apps or intentionally vulnerable demos).
 
 | Target | Purpose |
 |--------|--------|
-| https://testphp.vulnweb.com | Intentionally vulnerable (Acunetix); for scanner validation and exploit discovery. |
-| https://www.perplexity.ai/computer/new | Authorized assessment; discover novel or not-yet-public issues; multi-site applicability noted. |
-| https://x.com/home | Authorized assessment; discover novel or not-yet-public issues; multi-site applicability noted. |
+| https://testphp.vulnweb.com | Intentionally vulnerable (Acunetix); for scanner validation. May time out. |
+| https://example.com | Generic example; replace with your own target. |
 
-Add more URLs here when you have written authorization. Run scans with:
-`./venv/bin/python orchestrator.py --target <URL> --scope web`
-or `--scope full` for full assessment.
+Add URLs here when you have written authorization. Run scans with:
+
+```bash
+./venv/bin/python orchestrator.py --target <URL> --scope web
+# or
+./venv/bin/python orchestrator.py --target <URL> --scope full
+```
+
+**Do not** commit internal or customer-specific URLs to the public repo.

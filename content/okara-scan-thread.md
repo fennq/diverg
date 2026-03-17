@@ -26,36 +26,27 @@ Open **`content/okara-scan-diagrams.html`** in Chrome (from the repo: `open cont
   `?c=0&h=0&m=2&l=6&i=5`  
   (c=Critical, h=High, m=Medium, l=Low, i=Info). Use the same numbers from your scan results.
 - **Screenshot each card** (scroll to each card, crop to the 1200×628 card frame). Use Card 1 for Tweet 4, Card 2 for Tweet 5. Card 3 is an optional “safe” badge.
+---
+
+## 3. Thread tweets (5 tweets — copy/paste ready)
+
+**Tweet 1**  
+We ran a full security scan on okara.ai/chat. Here’s the report. 🧵
+
+**Tweet 2**  
+17 checks: headers, TLS, cookies, CORS, path probe (admin, API, backup), client-side. No login. Just the URL.
+
+**Tweet 3**  
+0 Critical. 0 High. The rest were Low/Info — config and best-practice notes, not exploitable. For an AI chat product that handles real conversations, that’s a strong baseline.  
+→ Attach screenshot: Card 1 (severity breakdown) from okara-scan-diagrams.html
+
+**Tweet 4**  
+We checked HTTPS, HSTS, security headers, cookie flags, CORS, 40+ paths, and client-side surface. One URL. Full picture.  
+→ Attach screenshot: Card 2 (what we checked) from okara-scan-diagrams.html
+
+**Tweet 5**  
+AI chat sees a lot of sensitive input. okara.ai showing no Critical or High in a full scan is a signal they care about how it’s built. We’re calling that a really safe baseline. We use Diverg to scan before we recommend — try it on your own URL. 🔒
 
 ---
 
-## 3. Thread tweets
-
-**Tweet 1 (Hook)**  
-We ran a full security scan on https://okara.ai/chat — the AI chat product. Here’s the report. 🧵
-
-**Tweet 2 (What we ran)**  
-Diverg ran 17 checks: headers, TLS, cookies, CORS, path probe (admin, API, backup, config), client-side surface, and more. No login. Just the URL.
-
-**Tweet 3 (The result — safe angle)**  
-[FILL: e.g. "0 Critical. 0 High."] The rest were Low/Info — configuration and best-practice notes, not exploitable issues. For an AI chat product that handles conversations, that’s a strong baseline.
-
-**Tweet 4 (Diagram — attach Card 1: Severity breakdown)**  
-[Attach screenshot of Card 1 from okara-scan-diagrams.html]
-
-**Tweet 5 (Diagram — attach Card 2: What we checked)**  
-[Attach screenshot of Card 2 from okara-scan-diagrams.html]
-
-**Tweet 6 (Why “safe” matters for AI)**  
-AI chat products see a lot of sensitive input. okara.ai showing [FILL: e.g. "no Critical/High"] in a full scan is a signal they care about transport, headers, and exposure. We’re calling that a really safe baseline.
-
-**Tweet 7 (CTA)**  
-We use Diverg to scan before we recommend. Full scan or focused (headers, payment, admin). Try it on your own URL. 🔒
-
----
-
-## 4. Short copy for “really safe” angle
-
-- “We scanned okara.ai. No Critical, no High. We’re calling that a really safe baseline.”
-- “okara.ai/chat — full security scan. Strong headers, clean path probe. Safe to recommend.”
-- “AI chat that handles sensitive convos — we ran 17 checks on okara.ai. Here’s why we call it safe.”
+**Note:** If your scan has different severity counts, replace “0 Critical. 0 High” in Tweet 3 with your actual numbers (e.g. “1 High” if you had one).

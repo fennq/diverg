@@ -1,0 +1,48 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; background: #0d1117; color: #e7e9ea; }
+.container { max-width: 800px; margin: 0 auto; padding: 24px; }
+header { margin-bottom: 24px; }
+h1 { margin: 0 0 8px; font-size: 22px; }
+.target { color: #58a6ff; margin: 0 0 4px; font-size: 13px; }
+.summary { color: #8b949e; margin: 0; font-size: 13px; }
+.findingsList { list-style: none; padding: 0; margin: 0; }
+.finding { padding: 14px; margin-bottom: 10px; border: 1px solid #30363d; border-radius: 8px; background: #161b22; }
+.finding.critical { border-left: 4px solid #f85149; }
+.finding.high { border-left: 4px solid #ff7b72; }
+.finding.medium { border-left: 4px solid #d29922; }
+.finding.low { border-left: 4px solid #58a6ff; }
+.finding.info { border-left: 4px solid #6e7681; }
+.findingHeader { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.findingTitle { font-weight: 600; margin: 0; font-size: 14px; }
+.findingSeverity { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+.findingSeverity.critical { background: #f85149; color: #fff; }
+.findingSeverity.high { background: #ff7b72; color: #fff; }
+.findingSeverity.medium { background: #d29922; color: #000; }
+.findingSeverity.low { background: #58a6ff; color: #000; }
+.findingSeverity.info { background: #6e7681; color: #fff; }
+.findingUrl { font-size: 12px; color: #8b949e; margin: 6px 0 0; word-break: break-all; }
+.findingActions { margin-top: 12px; }
+.btnSimulate {
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: none;
+  background: #238636;
+  color: #fff;
+  cursor: pointer;
+  display: inline-block;
+}
+.btnSimulate:hover { background: #2ea043; }
+.btnSimulate:disabled { opacity: 0.6; cursor: not-allowed; }
+.simulateHint { margin: 12px 0 0; padding: 10px 14px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; font-size: 13px; color: #8b949e; }
+.simulateHint strong { color: #7ee787; }
+.noFindings { color: #8b949e; padding: 24px; text-align: center; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modalContent { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 24px; max-width: 520px; width: 90%; max-height: 80vh; overflow: auto; }
+.modalContent h3 { margin: 0 0 12px; font-size: 16px; }
+.modalContent .conclusion { margin: 0 0 8px; color: #e7e9ea; line-height: 1.5; }
+.modalContent .meta { margin: 0 0 10px; font-size: 12px; color: #8b949e; }
+.modalContent pre { background: #0d1117; padding: 12px; border-radius: 6px; font-size: 12px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 0 0 16px; max-height: 200px; }
+.modalContent button { padding: 8px 16px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #e7e9ea; cursor: pointer; }
+.modalContent button:hover { background: #30363d; }

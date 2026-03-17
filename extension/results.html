@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="results.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Diverg — Scan results</h1>
+      <p id="targetUrl" class="target"></p>
+      <p id="summary" class="summary"></p>
+      <p class="simulateHint">Click <strong>Simulate</strong> on any finding below to run a proof-of-concept.</p>
+    </header>
+    <main>
+      <ul id="findingsList"></ul>
+    </main>
+    <div id="noFindings" class="noFindings" style="display:none;">No findings. Run a scan from the popup.</div>
+  </div>
+  <div id="pocModal" class="modal" style="display:none;">
+    <div class="modalContent">
+      <h3>PoC result</h3>
+      <p id="pocConclusion" class="conclusion"></p>
+      <p id="pocMeta" class="meta"></p>
+      <pre id="pocBody"></pre>
+      <button id="pocClose" type="button">Close</button>
+    </div>
+  </div>
+  <script src="results.js"></script>
+</body>
+</html>

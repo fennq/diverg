@@ -1,5 +1,14 @@
-# Environment and secrets
+# Environment and secrets (never commit — required for hackathon/public)
 .env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+*.pem
+*.key
+secrets*.yml
+secrets*.yaml
+config.local.json
 venv/
 .venv/
 env/

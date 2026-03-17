@@ -399,6 +399,15 @@ _MISC = [
     "/nginx_status",
 ]
 
+# Path substrings that indicate critical admin/database/debug surfaces (solanafunded-style).
+# When these paths allow dangerous HTTP methods without auth, we emit a first-class high-impact finding.
+CRITICAL_ADMIN_DEBUG_PATH_SUBSTRINGS = (
+    "/phpMyAdmin",
+    "/phpmyadmin",
+    "/admin/",
+    "/__debug__",
+)
+
 # -- Versioned API resource combos --
 _VERSIONED = [
     f"/api/v{v}/{r}"
@@ -474,6 +483,18 @@ def discover_endpoints(base_url: str, wordlist: str = "medium") -> list[Endpoint
 # HTTP method testing
 # ---------------------------------------------------------------------------
 
+def _is_critical_admin_debug_path(url: str) -> bool:
+    """True if URL path is a critical admin/database/debug surface (solanafunded-style)."""
+    path = urlparse(url).path
+    path_lower = path.lower()
+    return (
+        "phpmyadmin" in path_lower
+        or path_lower.rstrip("/").endswith("/admin")
+        or "/admin/" in path_lower
+        or "__debug__" in path_lower
+    )
+
+
 def test_methods(endpoints: list[Endpoint]) -> tuple[list[Endpoint], list[Finding]]:
     findings: list[Finding] = []
 
@@ -491,15 +512,27 @@ def test_methods(endpoints: list[Endpoint]) -> tuple[list[Endpoint], list[Findin
         dangerous = {"PUT", "DELETE", "PATCH"}
         exposed = dangerous.intersection(set(allowed))
         if exposed and not ep.auth_required:
-            findings.append(Finding(
-                title=f"Dangerous HTTP methods enabled without auth on {ep.url}",
-                severity="High",
-                url=ep.url,
-                category="OWASP-A01 Broken Access Control",
-                evidence=f"Allowed methods: {', '.join(allowed)}\nDangerous methods without auth: {', '.join(exposed)}",
-                impact="Unauthenticated users could modify or delete resources.",
-                remediation="Restrict PUT, PATCH, DELETE to authenticated users. Disable unused HTTP methods.",
-            ))
+            is_critical = _is_critical_admin_debug_path(ep.url)
+            if is_critical:
+                findings.append(Finding(
+                    title=f"Exposed admin or database interface with dangerous HTTP methods: {ep.url}",
+                    severity="High",
+                    url=ep.url,
+                    category="OWASP-A01 Broken Access Control",
+                    evidence=f"Critical path (phpMyAdmin/admin/__debug__) allows unauthenticated modification. Allowed methods: {', '.join(allowed)}. Dangerous without auth: {', '.join(exposed)}.",
+                    impact="Database or admin panel is reachable and accepts PUT/PATCH/DELETE without authentication. Data loss or takeover risk.",
+                    remediation="Remove from public internet or enforce strong auth. Restrict PUT, PATCH, DELETE to authenticated users; disable unused HTTP methods.",
+                ))
+            else:
+                findings.append(Finding(
+                    title=f"Dangerous HTTP methods enabled without auth on {ep.url}",
+                    severity="High",
+                    url=ep.url,
+                    category="OWASP-A01 Broken Access Control",
+                    evidence=f"Allowed methods: {', '.join(allowed)}\nDangerous methods without auth: {', '.join(exposed)}",
+                    impact="Unauthenticated users could modify or delete resources.",
+                    remediation="Restrict PUT, PATCH, DELETE to authenticated users. Disable unused HTTP methods.",
+                ))
 
     return endpoints, findings
 

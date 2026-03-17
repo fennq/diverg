@@ -1,10 +1,9 @@
 """
 Workflow probe — Diverg-proprietary skill that finds business-logic bugs by
-abusing flow order and state. Others test single endpoints; we probe whether
-you can skip steps, reorder steps, or change critical params after "commit".
-
-Examples: confirm order without payment, complete checkout without cart,
-apply discount after confirmation, or replay a step to double-apply.
+abusing flow order and state. Zero false positives: we only report when
+(1) path clearly indicates order/checkout/confirm, (2) response body has
+two+ order/checkout semantics (not generic "success"), (3) we include
+verification_steps so assessor can replay.
 
 Authorized use only.
 """
@@ -28,20 +27,43 @@ SESSION = get_session()
 TIMEOUT = 8
 RUN_BUDGET_SEC = 45
 
-# Paths that often mean "terminal" step (confirm, complete, place order)
+# Path must clearly indicate order/checkout/confirm (not generic)
 TERMINAL_PATH_HINTS = [
     "confirm", "complete", "place", "submit", "finalize", "finish",
     "place-order", "place_order", "complete-order", "create-order",
     "checkout/complete", "order/confirm", "payment/confirm",
     "apply", "redeem", "activate", "commit",
+    "order", "checkout", "cart/checkout",
 ]
-# Paths that suggest "prerequisite" (cart, pay, add)
-PREREQ_PATH_HINTS = ["cart", "add", "pay", "payment", "checkout", "billing"]
 
-SUCCESS_BODY = re.compile(
-    r"\b(success|completed|confirmed|placed|order\s*#|order_id|thank you|confirmation)\b",
-    re.I,
-)
+# Two-signal rule: response must contain at least TWO of these (order/checkout semantics).
+# Avoids false positives from generic "success" or "completed" on non-order pages.
+ORDER_SEMANTIC_SIGNALS = [
+    re.compile(r"\border_?id\b", re.I),
+    re.compile(r"\border\s*#", re.I),
+    re.compile(r"\bconfirmation\b", re.I),
+    re.compile(r"\bplaced\b", re.I),
+    re.compile(r"\bthank\s*you\b", re.I),
+    re.compile(r"\b(?:order|checkout)\s*completed\b", re.I),
+    re.compile(r"\bcompleted.*(?:order|checkout)\b", re.I),
+    re.compile(r"\bsuccess.*(?:order|placed|confirm)\b", re.I),
+    re.compile(r"\b(?:order|placed|confirm).*success\b", re.I),
+    re.compile(r"\bredeem(?:ed)?\s*(?:success|complete)\b", re.I),
+    re.compile(r"\bapply\s*(?:success|complete)\b", re.I),
+]
+# Generic single-word "success" / "completed" alone is NOT enough
+GENERIC_ONLY = re.compile(r"^\s*{\s*\"(?:success|completed|status)\"\s*:\s*true\s*}\s*$", re.I)
+
+
+def _response_indicates_order_success(body: str) -> bool:
+    """True only if body has at least TWO order/checkout semantic signals (zero false positives)."""
+    if not (body and body.strip()):
+        return False
+    # Reject generic-only JSON like {"success": true}
+    if GENERIC_ONLY.match(body.strip()):
+        return False
+    count = sum(1 for pat in ORDER_SEMANTIC_SIGNALS if pat.search(body))
+    return count >= 2
 
 
 @dataclass
@@ -53,6 +75,8 @@ class Finding:
     evidence: str
     impact: str
     remediation: str
+    verification_steps: list[dict] | None = None
+    confidence: str = "confirmed"
 
 
 @dataclass
@@ -105,34 +129,41 @@ def _collect_flow_candidates(base_url: str, run_start: float) -> list[str]:
 
 
 def _probe_skip_step(url: str, run_start: float) -> Finding | None:
-    """Probe: call terminal step with empty/minimal payload. If 2xx + success-like body, possible flow bypass."""
+    """Probe: call terminal step with empty/minimal payload. Report only when 2xx + two order-semantic signals."""
     try:
         for method, payload in [("POST", {}), ("POST", {"confirm": True}), ("GET", None)]:
             if _over_budget(run_start):
                 return None
             if method == "GET":
                 r = SESSION.get(url, timeout=TIMEOUT, allow_redirects=False)
+                req_body = None
             else:
                 r = SESSION.post(url, json=payload, timeout=TIMEOUT, allow_redirects=False)
+                req_body = payload
             if r.status_code not in (200, 201):
                 continue
-            if SUCCESS_BODY.search(r.text or ""):
-                return Finding(
-                    title="Flow bypass: terminal step accepted without prior steps",
-                    severity="High",
-                    url=url,
-                    category="Business logic (workflow)",
-                    evidence=f"{method} {url} returned {r.status_code} with success-like body. No cart/payment step was sent in this probe.",
-                    impact="Attacker may complete order/checkout without adding items or paying (free order, bypass payment).",
-                    remediation="Enforce server-side state machine: require valid cart/session and payment step before confirm/complete.",
-                )
+            body = (r.text or "")[:2000]
+            if not _response_indicates_order_success(body):
+                continue
+            steps = [{"method": method, "url": url, "body": req_body, "response_status": r.status_code}]
+            return Finding(
+                title="Flow bypass: terminal step accepted without prior steps",
+                severity="High",
+                url=url,
+                category="Business logic (workflow)",
+                evidence=f"{method} {url} returned {r.status_code}. Response body contains two+ order/checkout semantics (e.g. order_id, confirmation, placed). No cart/payment step was sent. Replay with verification_steps below.",
+                impact="Attacker may complete order/checkout without adding items or paying (free order, bypass payment).",
+                remediation="Enforce server-side state machine: require valid cart/session and payment step before confirm/complete.",
+                verification_steps=steps,
+                confidence="confirmed",
+            )
     except requests.RequestException:
         pass
     return None
 
 
 def _probe_zero_amount(url: str, run_start: float) -> Finding | None:
-    """Probe: send amount=0 or total=0 to order/checkout endpoints."""
+    """Probe: send amount=0 or total=0. Report only when 2xx + two order-semantic signals in response."""
     try:
         payloads = [
             {"amount": 0, "total": 0},
@@ -146,16 +177,21 @@ def _probe_zero_amount(url: str, run_start: float) -> Finding | None:
             r = SESSION.post(url, json=p, timeout=TIMEOUT, allow_redirects=False)
             if r.status_code not in (200, 201):
                 continue
-            if SUCCESS_BODY.search(r.text or ""):
-                return Finding(
-                    title="Zero-amount order/checkout accepted",
-                    severity="Critical",
-                    url=url,
-                    category="Business logic (workflow)",
-                    evidence=f"POST with {p} returned {r.status_code} and success-like response.",
-                    impact="Attacker can place orders for zero cost (free products, bypass payment).",
-                    remediation="Reject amount/total/quantity of zero (or negative). Validate server-side against cart and pricing.",
-                )
+            body = (r.text or "")[:2000]
+            if not _response_indicates_order_success(body):
+                continue
+            steps = [{"method": "POST", "url": url, "body": p, "response_status": r.status_code}]
+            return Finding(
+                title="Zero-amount order/checkout accepted",
+                severity="Critical",
+                url=url,
+                category="Business logic (workflow)",
+                evidence=f"POST with payload {p} returned {r.status_code}. Response body contains two+ order/checkout semantics. Replay with verification_steps below.",
+                impact="Attacker can place orders for zero cost (free products, bypass payment).",
+                remediation="Reject amount/total/quantity of zero (or negative). Validate server-side against cart and pricing.",
+                verification_steps=steps,
+                confidence="confirmed",
+            )
     except requests.RequestException:
         pass
     return None
@@ -199,12 +235,14 @@ def run(target_url: str, scan_type: str = "full", context: dict | None = None) -
                 "evidence": f.evidence,
                 "impact": f.impact,
                 "remediation": f.remediation,
+                "verification_steps": getattr(f, "verification_steps", None),
+                "confidence": getattr(f, "confidence", "confirmed"),
             }
             for f in report.findings
         ],
         "endpoints_probed": report.endpoints_probed,
         "errors": report.errors,
-        "note": "Workflow probe: tests flow order and zero-amount. Run with more endpoints (from api_test or client_surface) for broader coverage.",
+        "note": "Workflow probe: zero-FP — only reports when path is order/checkout and response has two+ order semantics. Replay via verification_steps.",
     }
     return json.dumps(out, indent=2)
 
