@@ -1,35 +1,31 @@
-# Diverg
+# Security testing pipeline
 
-**AI-powered security testing** — recon, web vulns, API and auth checks. Run from the CLI or the Chrome extension.
+CLI and HTTP API for running security checks against a target URL. Python 3.11+.
 
-Diverg is our security testing platform. The core runs standalone.
+## Run
 
----
+```bash
+pip install -r requirements.txt
+cp .env.example .env
+# Set OPENAI_API_KEY in .env
 
-## Public
+# CLI
+python orchestrator.py --target https://example.com --scope full
 
-- **[What’s public](PUBLIC.md)** — What we keep public in this repo vs internal.
-- **[Recent updates](RECENT_UPDATES.md)** — Day-to-day progress so we can show we’re working on the product.
+# API (for extension or other clients)
+python api_server.py
+```
 
----
+## Layout
 
-## Chrome extension
+- `orchestrator.py` — CLI entry; runs scan profiles (full, quick, web, api, recon).
+- `api_server.py` — HTTP API (scan, stream, PoC simulate).
+- `intent_skills.py` — Goal-to-skill mapping.
+- `skills/` — Scan modules (headers, recon, web, API, etc.).
+- `rag/` — Index and citations (reads from local content; not in repo).
+- `extension/` — Chrome extension UI (full extension lives in separate repo).
 
-The **free public Chrome extension** lives here: **[github.com/fennq/diverg-extension](https://github.com/fennq/diverg-extension)**.
-
-- Quick scan in the browser (headers, page checks). No backend required.
-- Optional full scan when the Diverg API is running locally.
-- The free extension does **not** perform blockchain, wallet, or crypto-specific scanning.
-
-Load unpacked from the extension repo; see its README for setup.
-
----
-
-## Ethics and authorization
-
-Use only for **authorized** security testing. Get written permission and define scope.
-
----
+Internal content, runbooks, and product docs are not included in this repo. Use authorized targets only.
 
 ## License
 

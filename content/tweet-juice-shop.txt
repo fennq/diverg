@@ -1,9 +1,0 @@
-First Diverg scan completed.
-
-Target: https://juice-shop.herokuapp.com
-
-In ~2 minutes we identified missing HSTS, no Content-Security-Policy, and transport/header misconfigurations. TLS and certificate checks passed.
-
-No sensitive data exposure confirmed.
-
-More scans soon.

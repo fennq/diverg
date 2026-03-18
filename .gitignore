@@ -46,3 +46,11 @@ brain.json
 content/*-results.json
 content/*-scan-results.json
 content/*proof-results.json
+
+# Internal content and product docs (local only — do not commit)
+content/
+agents/
+contracts/
+PUBLIC.md
+RECENT_UPDATES.md
+scripts/generate_synq_report_pdf.py
