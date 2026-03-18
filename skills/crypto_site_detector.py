@@ -23,7 +23,7 @@ except ImportError:
 # Keywords and patterns that strongly indicate crypto/DeFi/chain
 CRYPTO_KEYWORDS = [
     "wallet", "connect wallet", "metamask", "phantom", "walletconnect", "wallets",
-    "web3", "web3.js", "ethereum", "solana", "injective", "cosmos", "chain",
+    "web3", "web3.js", "ethereum", "solana", "cosmos", "chain",
     "swap", "dex", "defi", "decentralized", "token", "tokens", "nft", "nfts",
     "bridge", "cross-chain", "layerzero", "wormhole", "peggo",
     "stake", "staking", "unstake", "delegate", "validator",
@@ -33,9 +33,9 @@ CRYPTO_KEYWORDS = [
     "tokenfactory", "permissionless", "governance proposal", "dao",
     "blockchain", "on-chain", "explorer", "tx hash", "transaction",
 ]
-# Domain/substring hints (e.g. injective, uniswap)
+# Domain/substring hints (generic DeFi/crypto patterns)
 CRYPTO_DOMAIN_HINTS = [
-    "injective", "uniswap", "sushiswap", "pancake", "raydium", "jupiter",
+    "uniswap", "sushiswap", "pancake", "raydium", "jupiter",
     "phantom", "metamask", "walletconnect", "opensea", "blur", "magiceden",
     "anchor", "aave", "compound", "lido", "wormhole", "layerzero",
     "cosmos", "osmosis", "sei", "sui", "aptos", "base.org", "zksync",
@@ -112,7 +112,7 @@ def detect_from_content(html_or_js: str, url: str = "") -> CryptoDetectionResult
         confidence = 0.0
     is_crypto = confidence >= 0.2
 
-    # Suggested scan routes from content/injective-style doc
+    # Suggested scan routes from content/diverg-batch-validation-routes.md
     suggested_scan_routes: list[str] = []
     if is_crypto:
         suggested_scan_routes = [

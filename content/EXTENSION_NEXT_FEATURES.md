@@ -173,7 +173,7 @@ These aren’t “add a button” — they’re ideas for things that would make
 ## 2. **Site classification badge (crypto vs non-crypto)**
 
 - **What:** After a scan, show a clear badge or line: “Site classified as **crypto/DeFi**” or “Site not classified as crypto,” with optional tooltip: “Chain validation checks ran because …” using `site_classification.chain_validation_abuse_reason`.
-- **Why:** Users want to see whether we treated the site as crypto and why the extra (Injective-style) checks ran or didn’t.
+- **Why:** Users want to see whether we treated the site as crypto and why the extra (Diverg batch validation) checks ran or didn’t.
 - **API:** `report.site_classification`: `is_crypto`, `confidence`, `chain_validation_abuse_ran`, `chain_validation_abuse_reason`.
 
 ---
@@ -399,11 +399,11 @@ These turn the extension into a real workflow tool and make it clearly better th
 
 ---
 
-## R. **Crypto-specific: “Injective-style checks” summary**
+## R. **Crypto-specific: “Diverg batch validation checks” summary**
 
-- **What:** When `site_classification.is_crypto` and chain_validation_abuse ran, show a small card: “Injective-style batch/validation checks ran (100+ routes).” Link to a short doc or in-app blurb: “We looked for batch-vs-single path gaps and account_id substitution.”
+- **What:** When `site_classification.is_crypto` and chain_validation_abuse ran, show a small card: “Diverg batch/validation checks ran (100+ routes).” Link to a short doc or in-app blurb: “We looked for batch-vs-single path gaps and account_id substitution.”
 - **Why:** Makes the crypto/chain value prop visible instead of buried in “skills_run.”
-- **Implementation:** Extension-only; link to `content/injective-style-exploit-routes.md` or hosted copy.
+- **Implementation:** Extension-only; link to `content/diverg-batch-validation-routes.md` or hosted copy.
 
 ---
 
@@ -428,6 +428,6 @@ These turn the extension into a real workflow tool and make it clearly better th
 | O. Theme + density | Low | Low |
 | P. Search findings | Medium | Low |
 | Q. Copy finding formatted | Medium | Low |
-| R. Crypto Injective card | Medium | Low |
+| R. Crypto batch validation card | Medium | Low |
 
 **Strong first picks from this list:** A (diff), B (attack paths), C (create ticket), F (full results page), J (batch scan links), K (baseline). Then H (SARIF), D (scheduled), L (webhook) when you want pipeline and automation.

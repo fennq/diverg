@@ -1,8 +1,8 @@
 """
-Chain / batch validation abuse — Injective-style checks for crypto and high-value apps:
+Chain / batch validation abuse — Diverg batch validation checks for high-value apps:
 batch vs single path validation gaps, account/subaccount ID substitution, and parameter trust.
 
-Reference: content/injective-style-exploit-routes.md (100+ routes).
+Reference: content/diverg-batch-validation-routes.md (100+ routes).
 Run when target is crypto/DeFi (detected automatically) or when goal includes "batch", "crypto audit", "chain validation".
 Authorized use only.
 """
@@ -36,7 +36,7 @@ BATCH_PATH_HINTS = [
     "/api/batch", "/api/v1/batch", "/api/bulk", "/api/orders/batch",
     "/submit/batch", "/batch/submit", "/batchUpdate", "/batch_update",
 ]
-# Parameters that may indicate account/subaccount (IDOR / Injective-style)
+# Parameters that may indicate account/subaccount (IDOR / batch validation)
 ACCOUNT_PARAM_NAMES = [
     "subaccount_id", "subaccountId", "subaccount", "account_id", "accountId",
     "wallet_id", "wallet_address", "address", "owner", "user_id", "userId",
@@ -103,12 +103,12 @@ def run(
             "parameter_trust_body_header",
         ]
         findings.append(Finding(
-            title="Target classified as crypto/DeFi — run Injective-style validation checks",
+            title="Target classified as crypto/DeFi — run Diverg batch validation checks",
             severity="Info",
             url=base,
             category="Chain / Batch Validation",
             evidence=f"Crypto confidence: {confidence}. Signals: {getattr(det, 'signals', [])[:8]}.",
-            impact="Batch vs single path and account-id substitution checks are recommended (see content/injective-style-exploit-routes.md).",
+            impact="Batch vs single path and account-id substitution checks are recommended (see content/diverg-batch-validation-routes.md).",
             remediation="Compare validation on batch vs single endpoints; verify account_id/subaccount_id are not trusted from request body without signer check.",
         ))
     else:
@@ -119,7 +119,7 @@ def run(
             category="Chain / Batch Validation",
             evidence="Crypto detection confidence below threshold or no crypto signals. This skill ran due to scope=crypto or goal (e.g. batch validation, crypto audit).",
             impact="Batch-like endpoints and account_id/subaccount_id in request body are still checked; findings apply to any API with batch or account parameters.",
-            remediation="If the site is crypto-related, use scope=crypto or goal 'crypto audit' for full Injective-style checks.",
+            remediation="If the site is crypto-related, use scope=crypto or goal 'crypto audit' for full Diverg batch validation checks.",
         ))
 
     if not SESSION or not requests:
@@ -188,7 +188,7 @@ def run(
                             severity="Low",
                             url=url,
                             category="Chain / Batch Validation",
-                            evidence=f"GET {url} returned {r.status_code}. Compare with single-create path (see injective-style-exploit-routes.md routes 1–10).",
+                            evidence=f"GET {url} returned {r.status_code}. Compare with single-create path (see diverg-batch-validation-routes.md routes 1–10).",
                             impact="If batch path skips ownership/validation that single path has, account drain possible.",
                             remediation="Ensure batch handler calls same ValidateBasic/ownership checks as single-operation handler.",
                         ))
@@ -207,7 +207,7 @@ def run(
                         severity="Info",
                         url=base,
                         category="Chain / Batch Validation",
-                        evidence=f"Parameter '{param}' appears in page/JS. (Injective-style: subaccount_id was trusted in batch path.)",
+                        evidence=f"Parameter '{param}' appears in page/JS. (Batch path may trust subaccount_id without signer check.)",
                         impact="If server uses client-supplied account/subaccount without verifying ownership, IDOR or account drain.",
                         remediation="Validate account_id/subaccount_id against authenticated signer or session in every path (single and batch).",
                     ))

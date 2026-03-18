@@ -56,9 +56,9 @@ GOAL_PHRASES: list[tuple[Sequence[str], list[str]]] = [
     (["business logic", "workflow", "workflow abuse", "logic abuse"], ["workflow_probe", "logic_abuse", "race_condition"]),
     (["dependency", "cve", "outdated", "vulnerable library"], ["dependency_audit"]),
     (["reputation", "entity", "fraud", "scam", "lawsuit"], ["entity_reputation", "osint"]),
-    # Crypto / DeFi / chain validation (Injective-style batch vs single, account ID substitution)
+    # Crypto / DeFi / chain validation (Diverg batch vs single, account ID substitution)
     (["crypto", "cryptocurrency", "defi", "decentralized finance", "web3", "blockchain", "chain"], ["crypto_security", "payment_financial", "api_test", "high_value_flaws", "chain_validation_abuse", "client_surface"]),
-    (["batch validation", "batch vs single", "chain validation", "injective style", "account drain", "subaccount"], ["chain_validation_abuse", "api_test", "high_value_flaws"]),
+    (["batch validation", "batch vs single", "chain validation", "account drain", "subaccount"], ["chain_validation_abuse", "api_test", "high_value_flaws"]),
     (["crypto audit", "defi audit", "chain audit", "exchange security"], ["crypto_security", "chain_validation_abuse", "payment_financial", "api_test", "workflow_probe", "high_value_flaws"]),
     # General / safe / comprehensive
     (["everything", "full", "comprehensive", "deep", "thorough", "complete scan"], ALL_WEB_SKILLS),

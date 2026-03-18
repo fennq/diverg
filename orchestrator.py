@@ -113,7 +113,7 @@ SKILL_DESCRIPTIONS = {
     "dependency_audit": "detected stack/versions, CVE watchlist, upgrade recommendations",
     "logic_abuse": "numeric/bounds abuse (amount, limit, offset), overflow, success-like response to tampered params",
     "entity_reputation": "domain owner/entity foul-play research, fraud/lawsuit/breach/reputation searches",
-    "chain_validation_abuse": "Injective-style: batch vs single path validation, account/subaccount ID substitution, parameter trust (see content/injective-style-exploit-routes.md)",
+    "chain_validation_abuse": "Diverg batch validation: batch vs single path validation, account/subaccount ID substitution, parameter trust (see content/diverg-batch-validation-routes.md)",
 }
 
 # Canonical finding schema — all skills normalize to this shape for dedup and correlation

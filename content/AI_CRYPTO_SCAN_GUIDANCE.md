@@ -13,7 +13,7 @@
 - **`is_crypto`** — boolean from detector
 - **`confidence`** — 0.0–1.0
 - **`signals`** — sample keywords/signals that triggered (if any)
-- **`chain_validation_abuse_ran`** — whether the Injective-style skill ran
+- **`chain_validation_abuse_ran`** — whether the Diverg batch validation skill ran
 - **`chain_validation_abuse_reason`** — `"auto_crypto"` | `"scope_crypto"` | `"goal"` | null
 
 So you can always see (1) whether we classified the site as crypto, and (2) why the extra skill ran (or didn’t). On a **non-crypto** site when the skill **does** run (goal or scope), the skill adds an Info finding: *"Site not classified as crypto/DeFi — generic batch/IDOR checks still applied"* so the report is explicit.
@@ -46,11 +46,11 @@ When assessing a target (e.g. for Diverg/Sectester), the AI should:
 - Classifies the site as crypto or not (if not already known).
 - Probes for **batch-like endpoints** (e.g. `/batch`, `/orders/batch`) and suggests comparing validation to the single-operation path.
 - Looks for **account/subaccount-style parameters** in the page/JS (e.g. `subaccount_id`, `account_id`, `beneficiary`) and recommends ensuring they are not trusted without signer/session check.
-- References **content/injective-style-exploit-routes.md** (100+ routes) for manual or follow-up checks.
+- References **content/diverg-batch-validation-routes.md** (100+ routes) for manual or follow-up checks.
 
 ## 5. Using the 100+ exploit routes
 
-- For crypto and high-value targets, use **content/injective-style-exploit-routes.md** as a checklist:
+- For crypto and high-value targets, use **content/diverg-batch-validation-routes.md** as a checklist:
   - Batch vs single path (routes 1–10), parameter substitution (11–20), alternate endpoints (21–30), type confusion (31–38), etc.
   - The AI can prioritize routes that match the surface (e.g. if batch API exists, emphasize batch-vs-single; if account_id appears, emphasize IDOR/ownership).
 - Findings from `chain_validation_abuse` and related skills can be enriched with the **exploit_catalog** entry `batch_validation_gap` (prevention text and CWE/OWASP).
@@ -59,4 +59,4 @@ When assessing a target (e.g. for Diverg/Sectester), the AI should:
 
 - **Filter:** Use `crypto_site_detector` to decide if the site is crypto-related.
 - **Scans:** Main scans always; add **chain_validation_abuse** (and optionally the **crypto** profile) when crypto is detected or requested.
-- **Routes:** Use **injective-style-exploit-routes.md** for 100+ ways to find or replicate Injective-style issues on other sites.
+- **Routes:** Use **diverg-batch-validation-routes.md** for 100+ ways to find or replicate batch validation issues on other sites.
