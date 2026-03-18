@@ -6,22 +6,45 @@
 </head>
 <body>
   <div class="popup">
-    <h1>Diverg</h1>
-    <p class="sub">Security scan (API scope) + PoC simulate</p>
-    <div class="field">
-      <label>URL to scan</label>
+    <header class="popupHeader">
+      <div class="logoRow">
+        <span class="logoIcon">◇</span>
+        <span class="logoText">Diverg</span>
+      </div>
+      <span class="betaBadge">BETA</span>
+    </header>
+
+    <div class="field urlRow">
       <input type="text" id="url" placeholder="https://example.com" />
+      <button type="button" id="scanCurrent" class="btnIcon" title="Use current tab">↻</button>
     </div>
-    <div class="actions">
-      <button id="scanCurrent" type="button">Use current tab</button>
-      <button id="scan" type="button">Scan</button>
+
+    <button type="button" id="scan" class="btnScan">↑ Run Security Scan</button>
+
+    <div class="optionsArea">
+      <div class="optionsLabel">Options</div>
+      <label class="optionRow">
+        <input type="checkbox" id="autoScan" />
+        <span>Auto-scan on visit</span>
+      </label>
+      <a href="options.html" target="_blank" class="optionLink">Open full options</a>
     </div>
+
     <div id="status" class="status"></div>
-    <div class="links">
-      <a href="results.html" target="_blank" id="viewResults">View detailed report</a>
-      <a href="options.html" target="_blank">Options</a>
+
+    <div id="scanSummary" class="scanSummary" hidden>
+      <div class="summaryHeader">
+        <span class="summaryIcon">✓</span>
+        <span class="summaryTitle">Scan Complete</span>
+        <span id="summaryCount" class="summaryCount"></span>
+      </div>
+      <div id="summaryPills" class="summaryPills"></div>
+      <a href="results.html" target="_blank" id="viewResults" class="viewReport">View detailed report →</a>
     </div>
+
+    <footer class="popupFooter">Diverg Security Platform — Beta Release</footer>
   </div>
+  <script src="api.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

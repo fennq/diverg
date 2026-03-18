@@ -2,21 +2,54 @@
   const urlEl = document.getElementById('url');
   const scanBtn = document.getElementById('scan');
   const scanCurrentBtn = document.getElementById('scanCurrent');
-  const statusEl = document.getElementById('status');
+  const autoScanEl = document.getElementById('autoScan');
+  const scanSummary = document.getElementById('scanSummary');
+  const summaryCount = document.getElementById('summaryCount');
+  const summaryPills = document.getElementById('summaryPills');
   const viewResultsLink = document.getElementById('viewResults');
 
-  function getApiBase() {
-    return new Promise(function (resolve) {
-      chrome.storage.local.get({ apiBase: 'http://127.0.0.1:5000' }, function (o) {
-        resolve(o.apiBase.replace(/\/$/, ''));
-      });
+  function setStatus(msg, isError) {
+    var el = document.getElementById('status');
+    if (el) { el.textContent = msg; el.className = 'status' + (isError ? ' error' : ' ok'); }
+  }
+
+  // Auto-scan: load from storage and save on change
+  chrome.storage.local.get({ autoScanEnabled: false }, function (o) {
+    if (autoScanEl) autoScanEl.checked = !!o.autoScanEnabled;
+  });
+  if (autoScanEl) {
+    autoScanEl.addEventListener('change', function () {
+      chrome.storage.local.set({ autoScanEnabled: autoScanEl.checked });
     });
   }
 
-  function setStatus(msg, isError) {
-    statusEl.textContent = msg;
-    statusEl.className = 'status' + (isError ? ' error' : ' ok');
+  // Scan summary from last report
+  function renderSummary(report) {
+    if (!report || !report.findings || !report.findings.length) {
+      scanSummary.setAttribute('hidden', '');
+      return;
+    }
+    var counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    report.findings.forEach(function (f) {
+      var s = (f.severity || 'info').toLowerCase();
+      if (counts[s] !== undefined) counts[s]++; else counts.info++;
+    });
+    summaryCount.textContent = report.findings.length + ' findings';
+    summaryPills.innerHTML = '';
+    [['critical', 'Critical'], ['high', 'High'], ['medium', 'MEDIUM'], ['low', 'LOW'], ['info', 'INFO']].forEach(function (pair) {
+      if (counts[pair[0]] > 0) {
+        var span = document.createElement('span');
+        span.className = 'pill ' + pair[0];
+        span.textContent = pair[1].toUpperCase() + ': ' + counts[pair[0]];
+        summaryPills.appendChild(span);
+      }
+    });
+    scanSummary.removeAttribute('hidden');
   }
+
+  chrome.storage.local.get(['lastReport'], function (o) {
+    renderSummary(o.lastReport);
+  });
 
   scanCurrentBtn.addEventListener('click', function () {
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
@@ -28,24 +61,28 @@
     });
   });
 
+  function getApiBase() {
+    return window.DivergAPI ? window.DivergAPI.detectApiBase() : Promise.resolve('http://127.0.0.1:5000');
+  }
+
   scanBtn.addEventListener('click', async function () {
-    const url = urlEl.value.trim();
+    var url = urlEl.value.trim();
     if (!url) {
       setStatus('Enter a URL', true);
       return;
     }
-    const fullUrl = url.startsWith('http') ? url : 'https://' + url;
+    var fullUrl = url.startsWith('http') ? url : 'https://' + url;
     scanBtn.disabled = true;
     setStatus('Scanning…');
 
     try {
-      const apiBase = await getApiBase();
-      const res = await fetch(apiBase + '/api/scan', {
+      var apiBase = await getApiBase();
+      var res = await fetch(apiBase + '/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: fullUrl, scope: 'api' }),
       });
-      const data = await res.json();
+      var data = await res.json();
       if (data.error) {
         setStatus('Error: ' + data.error, true);
         return;
@@ -53,10 +90,11 @@
       await new Promise(function (resolve) {
         chrome.storage.local.set({ lastReport: data, lastReportUrl: fullUrl }, resolve);
       });
-      setStatus('Done. ' + (data.findings && data.findings.length) + ' findings.');
+      renderSummary(data);
+      setStatus('Done.');
       viewResultsLink.click();
     } catch (e) {
-      setStatus('Request failed: ' + e.message, true);
+      setStatus('API not reachable. Run: python api_server.py', true);
     } finally {
       scanBtn.disabled = false;
     }

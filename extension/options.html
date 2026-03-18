@@ -3,15 +3,16 @@
 <head>
   <meta charset="utf-8">
   <link rel="stylesheet" href="popup.css">
-  <style> body { padding: 20px; max-width: 400px; } </style>
+  <style>
+    body { padding: 20px; max-width: 400px; background: #0d1117; color: #e7e9ea; }
+    .apiHint { font-size: 12px; color: #8b949e; margin: 0 0 14px; }
+    .apiHint code { background: #21262d; padding: 2px 6px; border-radius: 4px; }
+  </style>
 </head>
 <body>
   <h1>Diverg Options</h1>
-  <div class="field">
-    <label>API base URL</label>
-    <input type="text" id="apiBase" placeholder="http://127.0.0.1:5000" />
-  </div>
-  <button id="save" type="button">Save</button>
+  <p class="apiHint">API runs locally — start it with <code>python api_server.py</code> in your Diverg folder. No URL to configure.</p>
+  <p class="apiHint">Auto-scan on visit is in the popup: click <strong>Options ▾</strong> and toggle it there.</p>
   <div id="status" class="status"></div>
   <script src="options.js"></script>
 </body>

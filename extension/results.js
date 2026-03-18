@@ -10,11 +10,7 @@
   const pocClose = document.getElementById('pocClose');
 
   function getApiBase() {
-    return new Promise(function (resolve) {
-      chrome.storage.local.get({ apiBase: 'http://127.0.0.1:5000' }, function (o) {
-        resolve(o.apiBase.replace(/\/$/, ''));
-      });
-    });
+    return (window.DivergAPI && window.DivergAPI.detectApiBase) ? window.DivergAPI.detectApiBase() : Promise.resolve('http://127.0.0.1:5000');
   }
 
   function canSimulate(finding) {
@@ -83,7 +79,7 @@
           pocModal.style.display = 'flex';
         })
         .catch(function (e) {
-          pocConclusion.textContent = 'Request failed: ' + e.message;
+          pocConclusion.textContent = 'API not reachable. Run: python api_server.py';
           pocMeta.textContent = '';
           pocBody.textContent = '';
           pocModal.style.display = 'flex';
