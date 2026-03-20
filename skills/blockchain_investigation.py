@@ -16,7 +16,9 @@ For platforms like liquid.af (launchpad / token creation):
 - Multi-chain: Solana (Solscan), Ethereum (Etherscan stub).
 
 Requires SOLSCAN_PRO_API_KEY (Solana) or ETHERSCAN_API_KEY (Ethereum) for on-chain checks.
-ARKHAM_API_KEY optional for labels. Authorized use only.
+ARKHAM_API_KEY optional for labels. FRONTRUNPRO_API_KEY + FRONTRUNPRO_BASE_URL optional for
+FrontrunPro (linked wallets, KOL follow list, CA history — paid API; see investigation/frontrunpro_client.py).
+Authorized use only.
 """
 
 from __future__ import annotations
