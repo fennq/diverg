@@ -1,10 +1,11 @@
 """
-Bags API client for blockchain investigations (Section 1: core token intelligence).
+Bags API client for blockchain investigations.
 
-Features:
-- token creators (v3)
-- token lifetime fees
-- token claim events (offset/time modes)
+Section 1 — core token intelligence:
+- token creators (v3), lifetime fees, claim events (offset/time)
+
+Section 2 — liquidity / pool context:
+- Bags pool by token mint (Meteora DBC + DAMM v2 keys)
 
 Auth: set BAGS_API_KEY in environment.
 """
@@ -94,6 +95,89 @@ def get_token_claim_events(
         params["limit"] = max(1, min(int(limit), 100))
         params["offset"] = max(0, int(offset))
     return _get("/fee-share/token/claim-events", params)
+
+
+def get_bags_pool_by_token_mint(token_mint: str) -> Optional[dict[str, Any]]:
+    """Section 2: Meteora DBC + DAMM v2 pool keys for this token on Bags."""
+    return _get("/solana/bags/pools/token-mint", {"tokenMint": token_mint})
+
+
+def _solscan_account_url(address: str) -> str:
+    """Public Solscan deep link for a Solana account (pool, config, mint)."""
+    return f"https://solscan.io/account/{address}"
+
+
+def parse_bags_pool(payload: Optional[dict[str, Any]], requested_mint: Optional[str] = None) -> dict[str, Any]:
+    """
+    Normalize pool response for reports (Section 2).
+
+    Adds:
+    - liquidity_stage: dbc_only | migrated_to_damm_v2 | unknown
+    - pool_addresses_for_tracing: copy-paste list for Bubblemaps / manual flow tracing
+    - explorer_links: Solscan URLs for each relevant account
+    - consistency_check: API tokenMint vs requested mint
+    """
+    inner = _unwrap_response(payload)
+    if not isinstance(inner, dict):
+        inner = {}
+    damm = inner.get("dammV2PoolKey")
+    dbc_pool = inner.get("dbcPoolKey")
+    dbc_cfg = inner.get("dbcConfigKey")
+    api_mint = inner.get("tokenMint")
+
+    if damm:
+        liquidity_stage = "migrated_to_damm_v2"
+    elif dbc_pool or dbc_cfg:
+        liquidity_stage = "dbc_only"
+    else:
+        liquidity_stage = "unknown"
+
+    tracing: list[str] = []
+    for k in (dbc_cfg, dbc_pool, damm):
+        if isinstance(k, str) and k.strip():
+            tracing.append(k.strip())
+    if isinstance(api_mint, str) and api_mint.strip():
+        m = api_mint.strip()
+        if m not in tracing:
+            tracing.insert(0, m)
+
+    explorer_links: list[dict[str, str]] = []
+    labels = [
+        ("token_mint", api_mint),
+        ("dbc_config", dbc_cfg),
+        ("dbc_pool", dbc_pool),
+        ("damm_v2_pool", damm),
+    ]
+    for label, addr in labels:
+        if isinstance(addr, str) and addr.strip():
+            a = addr.strip()
+            explorer_links.append({"label": label, "address": a, "solscan": _solscan_account_url(a)})
+
+    consistency: dict[str, Any] = {
+        "requested_mint": requested_mint,
+        "api_token_mint": api_mint,
+        "mint_matches": None,
+    }
+    if requested_mint and api_mint:
+        consistency["mint_matches"] = requested_mint.strip() == str(api_mint).strip()
+    elif requested_mint and not api_mint:
+        consistency["mint_matches"] = None
+        consistency["note"] = "api_returned_no_token_mint"
+    elif not requested_mint:
+        consistency["note"] = "no_requested_mint_supplied"
+
+    return {
+        "token_mint": api_mint,
+        "dbc_config_key": dbc_cfg,
+        "dbc_pool_key": dbc_pool,
+        "damm_v2_pool_key": damm,
+        "has_damm_v2_pool": bool(damm),
+        "liquidity_stage": liquidity_stage,
+        "pool_addresses_for_tracing": tracing,
+        "explorer_links": explorer_links,
+        "consistency_check": consistency,
+        "raw": inner if inner else None,
+    }
 
 
 def parse_token_creators(payload: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -215,14 +299,6 @@ def compare_claim_windows(
         "claimed_trend": _trend(claimed_ratio_7d_to_30d),
         "creator_claimed_trend": _trend(creator_claimed_ratio_7d_to_30d),
     }
-
-
-def compare_claim_summaries(
-    summary_7d: Optional[dict[str, Any]],
-    summary_30d: Optional[dict[str, Any]],
-) -> dict[str, Any]:
-    """Backward-compatible alias for claim window comparison."""
-    return compare_claim_windows(summary_7d, summary_30d)
 
 
 def compare_claim_summaries(short_window: Optional[dict[str, Any]], long_window: Optional[dict[str, Any]]) -> dict[str, Any]:

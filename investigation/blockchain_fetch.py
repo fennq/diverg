@@ -55,15 +55,18 @@ try:
         get_token_creators,
         get_token_lifetime_fees,
         get_token_claim_events,
+        get_bags_pool_by_token_mint,
         parse_token_creators,
         parse_lifetime_fees,
+        parse_bags_pool,
         summarize_claim_events,
         compare_claim_summaries,
         is_configured as bags_configured,
     )
 except ImportError:
     get_token_creators = get_token_lifetime_fees = get_token_claim_events = None
-    parse_token_creators = parse_lifetime_fees = summarize_claim_events = compare_claim_summaries = None
+    get_bags_pool_by_token_mint = None
+    parse_token_creators = parse_lifetime_fees = parse_bags_pool = summarize_claim_events = compare_claim_summaries = None
     bags_configured = lambda: False
 
 
@@ -123,7 +126,7 @@ def fetch_wallet(addr: str) -> dict[str, Any]:
 
 
 def fetch_token(mint: str) -> dict[str, Any]:
-    """Fetch one token: Solscan + Helius DAS + Bags Section 1."""
+    """Fetch one token: Solscan + Helius DAS + Bags (Section 1 + Section 2 pool)."""
     out: dict[str, Any] = {"mint": mint, "error": None}
     if token_holders_total is None:
         out["holders_total"] = {}
@@ -165,6 +168,16 @@ def fetch_token(mint: str) -> dict[str, Any]:
             time.sleep(0.15)
         except Exception as e:
             out["bags"]["lifetime_fees"] = {"error": str(e)}
+        # Section 2: liquidity / pool keys (Meteora DBC + DAMM v2)
+        try:
+            pool_raw = get_bags_pool_by_token_mint(mint) if get_bags_pool_by_token_mint else None
+            out["bags"]["pool_raw"] = pool_raw
+            out["bags"]["pool"] = (
+                parse_bags_pool(pool_raw, requested_mint=mint) if parse_bags_pool else pool_raw
+            )
+            time.sleep(0.15)
+        except Exception as e:
+            out["bags"]["pool"] = {"error": str(e)}
         try:
             claim_raw = (
                 get_token_claim_events(mint, mode="offset", limit=50, offset=0)

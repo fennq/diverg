@@ -88,11 +88,12 @@ Our blockchain investigation pipeline is powered by key data and intelligence pr
 
 **What it is:** Bags.fm token launch and fee APIs on Solana.
 
-**Value:** With `BAGS_API_KEY`, the pipeline enriches a token mint with creators, lifetime fees, claim events, 7d/30d claim trends, and (with Helius) CEX-linked signals for wallets that appear in claim activity.
+**Value:** With `BAGS_API_KEY`, the pipeline enriches a token mint with creators, lifetime fees, claim events, 7d/30d claim trends, pool keys (Meteora DBC / DAMM v2), and (with Helius) CEX-linked signals for wallets that appear in claim activity.
 
 **What it lets us do deeper:**  
 - Who launched the token and royalty/admin context.  
 - How much fee revenue accumulated and who claimed it (amounts, timestamps, signatures).  
+- Where Bags-associated liquidity lives (DBC config, DBC pool, optional DAMM v2 pool), with **liquidity stage** (`dbc_only` vs `migrated_to_damm_v2`), **Solscan explorer links**, and a **mint consistency** check vs the requested mint.  
 - Whether recent claim activity is accelerating or cooling (7d vs 30d).  
 - Whether claim wallets map to exchange-labeled identities or exchange-funded origins (via Helius).
 
