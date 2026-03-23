@@ -88,12 +88,14 @@ Our blockchain investigation pipeline is powered by key data and intelligence pr
 
 **What it is:** Bags.fm token launch and fee APIs on Solana.
 
-**Value:** With `BAGS_API_KEY`, the pipeline enriches a token mint with creators, lifetime fees, claim events, 7d/30d claim trends, pool keys (Meteora DBC / DAMM v2), **per-fee-claimer claim totals (claim-stats)**, optional **full Bags pool listing** for ecosystem scans, and (with Helius) CEX-linked signals for wallets that appear in claim activity.
+**Value:** With `BAGS_API_KEY`, the pipeline enriches a token mint with creators, lifetime fees, claim events, 7d/30d claim trends, pool keys (Meteora DBC / DAMM v2), **per-fee-claimer claim totals (claim-stats)** with **concentration analytics** (Herfindahl index, top1/top3/top5, creator vs non-creator split, distribution label), **reconciliation** of claim-stats vs sampled claim-events (detects partial pagination), optional **fee-share admin list** check for creator wallets, optional **full Bags pool listing** for ecosystem scans, and (with Helius) CEX-linked signals for wallets that appear in claim activity.
 
 **What it lets us do deeper:**  
 - Who launched the token and royalty/admin context.  
 - How much fee revenue accumulated and who claimed it (amounts, timestamps, signatures).  
-- **Fee distribution:** total claimed per fee sharer (wallet + social fields), plus concentration metrics (creator share, top1/top3 share).  
+- **Fee distribution:** total claimed per fee sharer (wallet + social fields), plus concentration metrics (creator share, top1/top3/top5, Herfindahl index, `highly_concentrated` / `moderate` / `dispersed`).  
+- **Cross-check:** claim-stats totals vs first-page claim-events to flag truncated samples.  
+- **Admin scope:** whether the mint appears in `/fee-share/admin/list` for creator wallet(s) (optional; `BAGS_SECTION3_ADMIN_CHECK`, `BAGS_SECTION3_ADMIN_MAX_WALLETS`).  
 - Where Bags-associated liquidity lives (DBC config, DBC pool, optional DAMM v2 pool), with **liquidity stage** (`dbc_only` vs `migrated_to_damm_v2`), **Solscan explorer links**, and a **mint consistency** check vs the requested mint.  
 - Whether recent claim activity is accelerating or cooling (7d vs 30d).  
 - Whether claim wallets map to exchange-labeled identities or exchange-funded origins (via Helius).  

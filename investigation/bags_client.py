@@ -8,7 +8,8 @@ Section 2 — liquidity / pool context:
 - Bags pool by token mint (Meteora DBC + DAMM v2 keys)
 
 Section 3 — fee-share analytics:
-- per-claimer totals (`GET /token-launch/claim-stats`)
+- per-claimer totals (`GET /token-launch/claim-stats`) with concentration metrics + reconciliation vs claim-events
+- optional: `GET /fee-share/admin/list` to verify creator wallet admin scope for the mint
 - optional: list all Bags pools (`GET /solana/bags/pools`) for ecosystem / migration scans
 
 Auth: set BAGS_API_KEY in environment.
@@ -128,6 +129,18 @@ def get_bags_pools(*, only_migrated: bool = False) -> Optional[dict[str, Any]]:
     return _get("/solana/bags/pools", params)
 
 
+def get_fee_share_admin_list(wallet: str) -> Optional[dict[str, Any]]:
+    """
+    Section 3 (optional): Token mints where this wallet is fee-share admin.
+
+    GET /fee-share/admin/list?wallet=...
+    """
+    w = (wallet or "").strip()
+    if not w:
+        return None
+    return _get("/fee-share/admin/list", {"wallet": w})
+
+
 def _solscan_account_url(address: str) -> str:
     """Public Solscan deep link for a Solana account (pool, config, mint)."""
     return f"https://solscan.io/account/{address}"
@@ -224,7 +237,8 @@ def parse_token_claim_stats(payload: Optional[dict[str, Any]]) -> dict[str, Any]
     """
     Normalize Section 3 claim-stats for reports.
 
-    Adds per-row SOL, totals, creator share, and concentration (top1/top3 share of claimed fees).
+    Adds per-row SOL, totals, creator/non-creator splits, concentration (top1/top3/top5),
+    Herfindahl-style fee concentration index, and a plain-language distribution label.
     """
     rows_in = _unwrap_response(payload)
     if not isinstance(rows_in, list):
@@ -232,6 +246,7 @@ def parse_token_claim_stats(payload: Optional[dict[str, Any]]) -> dict[str, Any]
     rows_out: list[dict[str, Any]] = []
     total_lamports = 0
     creator_lamports = 0
+    admin_lamports = 0
     for row in rows_in:
         if not isinstance(row, dict):
             continue
@@ -239,6 +254,8 @@ def parse_token_claim_stats(payload: Optional[dict[str, Any]]) -> dict[str, Any]
         total_lamports += lam
         if row.get("isCreator") is True:
             creator_lamports += lam
+        if row.get("isAdmin") is True:
+            admin_lamports += lam
         rows_out.append(
             {
                 "wallet": row.get("wallet"),
@@ -261,11 +278,42 @@ def parse_token_claim_stats(payload: Optional[dict[str, Any]]) -> dict[str, Any]
     sorted_lams = [int(r.get("total_claimed_lamports") or 0) for r in rows_out]
     top1 = sorted_lams[0] if sorted_lams else 0
     top3 = sum(sorted_lams[:3]) if sorted_lams else 0
+    top5 = sum(sorted_lams[:5]) if sorted_lams else 0
+    non_creator_lamports = max(0, total_lamports - creator_lamports)
 
     def _share(part: int) -> Optional[float]:
         if total_lamports <= 0:
             return None
         return round(part / total_lamports, 6)
+
+    # Herfindahl index on fee shares (0..1); higher = more concentrated among few claimers
+    hhi = None
+    if total_lamports > 0 and sorted_lams:
+        shares = [lam / total_lamports for lam in sorted_lams]
+        hhi = round(sum(s * s for s in shares), 6)
+
+    t1s = _share(top1) or 0.0
+    t3s = _share(top3) or 0.0
+    if t1s >= 0.55 or (hhi is not None and hhi >= 0.35):
+        distribution_label = "highly_concentrated"
+    elif t1s >= 0.35 or t3s >= 0.65 or (hhi is not None and hhi >= 0.2):
+        distribution_label = "moderate"
+    else:
+        distribution_label = "dispersed"
+
+    top_claimer = None
+    if rows_out:
+        r0 = rows_out[0]
+        top_claimer = {
+            "wallet": r0.get("wallet"),
+            "display": r0.get("provider_username")
+            or r0.get("twitter_username")
+            or r0.get("bags_username")
+            or r0.get("username"),
+            "total_claimed_sol": r0.get("total_claimed_sol"),
+            "share_of_total": _share(int(r0.get("total_claimed_lamports") or 0)),
+            "is_creator": r0.get("is_creator"),
+        }
 
     return {
         "claimers_count": len(rows_out),
@@ -273,12 +321,94 @@ def parse_token_claim_stats(payload: Optional[dict[str, Any]]) -> dict[str, Any]
         "total_claimed_sol": round(total_lamports / 1e9, 9),
         "creator_claimed_lamports": creator_lamports,
         "creator_claimed_sol": round(creator_lamports / 1e9, 9),
+        "non_creator_claimed_lamports": non_creator_lamports,
+        "non_creator_claimed_sol": round(non_creator_lamports / 1e9, 9),
+        "admin_claimed_lamports": admin_lamports,
+        "admin_claimed_sol": round(admin_lamports / 1e9, 9),
         "creator_share_of_total": _share(creator_lamports),
+        "non_creator_share_of_total": _share(non_creator_lamports),
         "top1_share_of_total": _share(top1),
         "top3_share_of_total": _share(top3),
+        "top5_share_of_total": _share(top5),
+        "fee_herfindahl_index": hhi,
+        "distribution_label": distribution_label,
+        "top_claimer": top_claimer,
         "claimers": rows_out,
         "raw_count": len(rows_in),
     }
+
+
+def reconcile_claim_stats_with_events(
+    claim_stats_parsed: Optional[dict[str, Any]],
+    events_summary: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    """
+    Compare Bags claim-stats (full per-claimer totals) with a claim-events sample
+    (first page / time window). Large gaps usually mean pagination or partial events.
+    """
+    cs = claim_stats_parsed if isinstance(claim_stats_parsed, dict) else {}
+    ev = events_summary if isinstance(events_summary, dict) else {}
+    s_tot = int(cs.get("total_claimed_lamports") or 0)
+    e_tot = int(ev.get("total_claimed_lamports") or 0)
+    s_count = int(cs.get("claimers_count") or 0)
+    e_wallets = int(ev.get("unique_wallets_count") or 0)
+    e_events = int(ev.get("events_count") or 0)
+
+    ratio: Optional[float] = None
+    if s_tot > 0:
+        ratio = round(e_tot / s_tot, 6)
+
+    notes: list[str] = []
+    if e_events >= 100:
+        notes.append("events_sample_may_be_capped_at_api_limit")
+    if ratio is not None and ratio < 0.85 and s_tot > 0:
+        notes.append("events_total_below_stats_suggest_partial_sample_or_timing_skew")
+
+    return {
+        "stats_total_claimed_lamports": s_tot,
+        "events_sample_total_claimed_lamports": e_tot,
+        "events_to_stats_claimed_ratio": ratio,
+        "stats_claimers_count": s_count,
+        "events_unique_wallets_count": e_wallets,
+        "events_row_count": e_events,
+        "claimers_vs_unique_wallets_delta": (s_count - e_wallets) if s_count or e_wallets else None,
+        "notes": notes,
+    }
+
+
+def section3_fee_share_admin_for_mint(
+    token_mint: str,
+    creators_parsed: Optional[dict[str, Any]],
+    *,
+    max_wallets: int = 1,
+) -> dict[str, Any]:
+    """
+    For up to N creator wallets, call GET /fee-share/admin/list and check whether
+    this token mint appears (fee-share admin scope for that wallet).
+    """
+    mint = (token_mint or "").strip()
+    out: dict[str, Any] = {"token_mint": mint, "checks": []}
+    if not mint or not is_configured():
+        return out
+    wallets: list[str] = []
+    if isinstance(creators_parsed, dict):
+        wallets = [w for w in (creators_parsed.get("wallets") or []) if isinstance(w, str) and w][
+            : max(1, int(max_wallets))
+        ]
+    for w in wallets:
+        raw = get_fee_share_admin_list(w)
+        inner = _unwrap_response(raw)
+        mints: list[str] = []
+        if isinstance(inner, dict) and isinstance(inner.get("tokenMints"), list):
+            mints = [str(x) for x in (inner.get("tokenMints") or []) if x]
+        out["checks"].append(
+            {
+                "wallet": w,
+                "mint_in_fee_share_admin_list": mint in mints,
+                "fee_share_admin_token_count": len(mints),
+            }
+        )
+    return out
 
 
 def parse_token_creators(payload: Optional[dict[str, Any]]) -> dict[str, Any]:

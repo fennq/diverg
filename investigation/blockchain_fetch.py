@@ -62,6 +62,8 @@ try:
         parse_lifetime_fees,
         parse_bags_pool,
         parse_token_claim_stats,
+        reconcile_claim_stats_with_events,
+        section3_fee_share_admin_for_mint,
         summarize_claim_events,
         compare_claim_summaries,
         is_configured as bags_configured,
@@ -70,6 +72,8 @@ except ImportError:
     get_token_creators = get_token_lifetime_fees = get_token_claim_events = None
     get_bags_pool_by_token_mint = get_token_claim_stats = get_bags_pools = None
     parse_token_creators = parse_lifetime_fees = parse_bags_pool = parse_token_claim_stats = None
+    reconcile_claim_stats_with_events = None
+    section3_fee_share_admin_for_mint = None
     summarize_claim_events = compare_claim_summaries = None
     bags_configured = lambda: False
 
@@ -202,6 +206,40 @@ def fetch_token(mint: str) -> dict[str, Any]:
             time.sleep(0.15)
         except Exception as e:
             out["bags"]["claim_stats"] = {"error": str(e)}
+        # Section 3b: reconcile claim-stats vs claim-events sample; optional fee-share admin scope
+        try:
+            cs = out["bags"].get("claim_stats")
+            ev_sum = out["bags"].get("claim_events")
+            if (
+                reconcile_claim_stats_with_events
+                and isinstance(cs, dict)
+                and not cs.get("error")
+                and isinstance(ev_sum, dict)
+                and not ev_sum.get("error")
+            ):
+                out["bags"]["claim_stats_reconciliation"] = reconcile_claim_stats_with_events(cs, ev_sum)
+            time.sleep(0.1)
+        except Exception as e:
+            out["bags"]["claim_stats_reconciliation"] = {"error": str(e)}
+        if (
+            section3_fee_share_admin_for_mint
+            and os.environ.get("BAGS_SECTION3_ADMIN_CHECK", "true").strip().lower()
+            not in ("0", "false", "no", "")
+        ):
+            try:
+                max_adm = 1
+                try:
+                    max_adm = max(1, min(5, int(os.environ.get("BAGS_SECTION3_ADMIN_MAX_WALLETS", "1"))))
+                except ValueError:
+                    max_adm = 1
+                cr = out["bags"].get("creators")
+                if isinstance(cr, dict) and cr.get("wallets"):
+                    out["bags"]["section3_fee_share_admin"] = section3_fee_share_admin_for_mint(
+                        mint, cr, max_wallets=max_adm
+                    )
+                    time.sleep(0.15)
+            except Exception as e:
+                out["bags"]["section3_fee_share_admin"] = {"error": str(e)}
         if os.environ.get("BAGS_FETCH_POOLS_LIST", "").strip().lower() in (
             "1",
             "true",

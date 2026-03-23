@@ -78,6 +78,25 @@ def main():
             )
         elif isinstance(cs, dict) and cs.get("error"):
             lines.append(f"- **Claim stats (Section 3):** error — {cs.get('error')}")
+        if isinstance(cs, dict) and cs.get("distribution_label"):
+            lines.append(
+                f"- **Fee distribution (Section 3):** `{cs.get('distribution_label')}` "
+                f"(HHI={cs.get('fee_herfindahl_index')}, top1 share={cs.get('top1_share_of_total')})"
+            )
+        rec = bags.get("claim_stats_reconciliation") or {}
+        if isinstance(rec, dict) and not rec.get("error") and rec.get("events_to_stats_claimed_ratio") is not None:
+            lines.append(
+                f"- **Claim stats vs events sample:** ratio={rec.get('events_to_stats_claimed_ratio')} "
+                f"(stats lamports {rec.get('stats_total_claimed_lamports')} vs events sample {rec.get('events_sample_total_claimed_lamports')})"
+            )
+        adm = bags.get("section3_fee_share_admin") or {}
+        if isinstance(adm, dict) and adm.get("checks"):
+            for chk in adm.get("checks", [])[:2]:
+                lines.append(
+                    f"- **Fee-share admin list:** creator `{chk.get('wallet', '')[:8]}…` → "
+                    f"mint in admin scope: **{chk.get('mint_in_fee_share_admin_list')}** "
+                    f"({chk.get('fee_share_admin_token_count')} tokens as admin)"
+                )
         pl = bags.get("pools_list")
         if isinstance(pl, dict) and pl.get("count") is not None:
             lines.append(
