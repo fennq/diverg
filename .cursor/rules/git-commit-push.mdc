@@ -1,0 +1,17 @@
+---
+description: Commit and push after substantive repo work
+alwaysApply: true
+---
+
+# Git — commit and push habit
+
+After **any substantive change** to this repository (code, docs, config templates, rules):
+
+1. **Review** `git status` — do not commit secrets (`.env`, keys, private investigation outputs if gitignored).
+2. **Stage** intentionally: `git add` with paths you mean to ship.
+3. **Commit** with a clear message, e.g. `feat: …`, `fix: …`, `docs: …`, `chore: …`.
+4. **Push** to the default remote/branch (`git push`) so work is backed up and visible.
+
+If the session produced multiple unrelated changes, prefer **multiple small commits** over one huge commit.
+
+When the user asks for work that touches the repo, **end the task by offering or performing** `git status` → commit → push unless they explicitly asked not to.

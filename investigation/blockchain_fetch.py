@@ -56,17 +56,21 @@ try:
         get_token_lifetime_fees,
         get_token_claim_events,
         get_bags_pool_by_token_mint,
+        get_token_claim_stats,
+        get_bags_pools,
         parse_token_creators,
         parse_lifetime_fees,
         parse_bags_pool,
+        parse_token_claim_stats,
         summarize_claim_events,
         compare_claim_summaries,
         is_configured as bags_configured,
     )
 except ImportError:
     get_token_creators = get_token_lifetime_fees = get_token_claim_events = None
-    get_bags_pool_by_token_mint = None
-    parse_token_creators = parse_lifetime_fees = parse_bags_pool = summarize_claim_events = compare_claim_summaries = None
+    get_bags_pool_by_token_mint = get_token_claim_stats = get_bags_pools = None
+    parse_token_creators = parse_lifetime_fees = parse_bags_pool = parse_token_claim_stats = None
+    summarize_claim_events = compare_claim_summaries = None
     bags_configured = lambda: False
 
 
@@ -126,7 +130,7 @@ def fetch_wallet(addr: str) -> dict[str, Any]:
 
 
 def fetch_token(mint: str) -> dict[str, Any]:
-    """Fetch one token: Solscan + Helius DAS + Bags (Section 1 + Section 2 pool)."""
+    """Fetch one token: Solscan + Helius DAS + Bags (Sections 1–3 when configured)."""
     out: dict[str, Any] = {"mint": mint, "error": None}
     if token_holders_total is None:
         out["holders_total"] = {}
@@ -188,6 +192,50 @@ def fetch_token(mint: str) -> dict[str, Any]:
             out["bags"]["claim_events"] = summarize_claim_events(claim_raw) if summarize_claim_events else claim_raw
         except Exception as e:
             out["bags"]["claim_events"] = {"error": str(e)}
+        # Section 3: per-claimer fee totals (claim-stats) + optional ecosystem pool list
+        try:
+            stats_raw = get_token_claim_stats(mint) if get_token_claim_stats else None
+            out["bags"]["claim_stats_raw"] = stats_raw
+            out["bags"]["claim_stats"] = (
+                parse_token_claim_stats(stats_raw) if parse_token_claim_stats else None
+            )
+            time.sleep(0.15)
+        except Exception as e:
+            out["bags"]["claim_stats"] = {"error": str(e)}
+        if os.environ.get("BAGS_FETCH_POOLS_LIST", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        ):
+            try:
+                only_mig = os.environ.get("BAGS_POOLS_ONLY_MIGRATED", "").strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                )
+                pools_raw = get_bags_pools(only_migrated=only_mig) if get_bags_pools else None
+                out["bags"]["pools_list_raw"] = pools_raw
+                inner = None
+                if isinstance(pools_raw, dict):
+                    inner = pools_raw.get("response")
+                if inner is None and isinstance(pools_raw, dict):
+                    inner = pools_raw
+                pool_arr = inner if isinstance(inner, list) else []
+                mint_norm = (mint or "").strip()
+                mints_in = {
+                    str(p.get("tokenMint") or "").strip()
+                    for p in pool_arr
+                    if isinstance(p, dict) and p.get("tokenMint")
+                }
+                out["bags"]["pools_list"] = {
+                    "count": len(pool_arr),
+                    "only_migrated": only_mig,
+                    "requested_mint_in_list": bool(mint_norm and mint_norm in mints_in),
+                    "sample_mints": [p.get("tokenMint") for p in pool_arr[:20] if isinstance(p, dict)],
+                }
+                time.sleep(0.2)
+            except Exception as e:
+                out["bags"]["pools_list"] = {"error": str(e)}
         # Wallet claim connections through CEX (Section 1 enhancement)
         try:
             claim_wallets = out["bags"].get("claim_events", {}).get("unique_wallets", [])

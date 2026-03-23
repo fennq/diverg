@@ -28,6 +28,7 @@ def main():
     lines.append("Source: `investigation/synq_data.json` (from `scripts/run_synq_research.py`).")
     lines.append("RPC: Solana public getBalance + getSignaturesForAddress. Token: Solscan holder total + metadata.")
     lines.append("Optional: `HELIUS_API_KEY` for parsed wallet history/transfers; `ARKHAM_API_KEY` for address labels/entities.")
+    lines.append("Optional: `BAGS_API_KEY` for Bags Sections 1–3 (creators/fees/claims, pool keys, per-claimer claim-stats).")
     lines.append("")
     lines.append("### Wallets (SOL balance, recent tx count, Helius/Arkham)")
     lines.append("")
@@ -54,6 +55,36 @@ def main():
     lines.append(f"- **Supply (raw):** {total.get('supply', '—')}")
     if meta:
         lines.append(f"- **Metadata (Solscan):** price_usdt={meta.get('price_usdt')}, marketcap={meta.get('marketcap')} (verify on explorer — may be SOL market data if wrong endpoint).")
+    bags = tok.get("bags") or {}
+    if isinstance(bags, dict) and bags:
+        lines.append("")
+        lines.append("### Bags API (Sections 1–3)")
+        lf = bags.get("lifetime_fees") or {}
+        if isinstance(lf, dict) and lf.get("sol") is not None:
+            lines.append(f"- **Lifetime fees (approx):** {lf.get('sol')} SOL (lamports: {lf.get('lamports')})")
+        pool = bags.get("pool") or {}
+        if isinstance(pool, dict) and pool.get("liquidity_stage"):
+            lines.append(f"- **Liquidity stage:** `{pool.get('liquidity_stage')}` (DBC/DAMM context)")
+            cc = pool.get("consistency_check") or {}
+            if isinstance(cc, dict) and cc.get("mint_matches") is not None:
+                lines.append(f"- **Mint consistency (API vs request):** {cc.get('mint_matches')}")
+        cs = bags.get("claim_stats") or {}
+        if isinstance(cs, dict) and not cs.get("error"):
+            lines.append(
+                f"- **Claim stats (Section 3):** {cs.get('claimers_count', '—')} fee claimers; "
+                f"total claimed ~{cs.get('total_claimed_sol')} SOL; "
+                f"creator share of total: {cs.get('creator_share_of_total')}; "
+                f"top-1 share: {cs.get('top1_share_of_total')}; top-3 share: {cs.get('top3_share_of_total')}"
+            )
+        elif isinstance(cs, dict) and cs.get("error"):
+            lines.append(f"- **Claim stats (Section 3):** error — {cs.get('error')}")
+        pl = bags.get("pools_list")
+        if isinstance(pl, dict) and pl.get("count") is not None:
+            lines.append(
+                f"- **Bags pools list (optional):** {pl.get('count')} pools"
+                f"{' (only migrated)' if pl.get('only_migrated') else ''}"
+                f"; mint in list: **{pl.get('requested_mint_in_list')}**"
+            )
     lines.append("")
     lines.append("---")
     lines.append("")

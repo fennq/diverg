@@ -88,14 +88,16 @@ Our blockchain investigation pipeline is powered by key data and intelligence pr
 
 **What it is:** Bags.fm token launch and fee APIs on Solana.
 
-**Value:** With `BAGS_API_KEY`, the pipeline enriches a token mint with creators, lifetime fees, claim events, 7d/30d claim trends, pool keys (Meteora DBC / DAMM v2), and (with Helius) CEX-linked signals for wallets that appear in claim activity.
+**Value:** With `BAGS_API_KEY`, the pipeline enriches a token mint with creators, lifetime fees, claim events, 7d/30d claim trends, pool keys (Meteora DBC / DAMM v2), **per-fee-claimer claim totals (claim-stats)**, optional **full Bags pool listing** for ecosystem scans, and (with Helius) CEX-linked signals for wallets that appear in claim activity.
 
 **What it lets us do deeper:**  
 - Who launched the token and royalty/admin context.  
 - How much fee revenue accumulated and who claimed it (amounts, timestamps, signatures).  
+- **Fee distribution:** total claimed per fee sharer (wallet + social fields), plus concentration metrics (creator share, top1/top3 share).  
 - Where Bags-associated liquidity lives (DBC config, DBC pool, optional DAMM v2 pool), with **liquidity stage** (`dbc_only` vs `migrated_to_damm_v2`), **Solscan explorer links**, and a **mint consistency** check vs the requested mint.  
 - Whether recent claim activity is accelerating or cooling (7d vs 30d).  
-- Whether claim wallets map to exchange-labeled identities or exchange-funded origins (via Helius).
+- Whether claim wallets map to exchange-labeled identities or exchange-funded origins (via Helius).  
+- Optional: `GET /solana/bags/pools` when `BAGS_FETCH_POOLS_LIST=true` (can be large; use for migration/ecosystem analysis). Set `BAGS_POOLS_ONLY_MIGRATED=true` to filter migrated-to-DAMM pools only.
 
 ---
 
@@ -108,6 +110,6 @@ Our blockchain investigation pipeline is powered by key data and intelligence pr
 | **Helius**    | Identity, funded-by, balances, DAS, tx | Who is this wallet, funding, full history     |
 | **FrontrunPro** | @handle → wallet, optional clusters  | Social→chain attribution, network mapping      |
 | **Bubblemaps**  | Flow and cluster visuals              | Movement, clusters, narrative and reporting   |
-| **Bags**      | Creators, fees, claims, trends       | Launch attribution, profit-taking, CEX links |
+| **Bags**      | Creators, fees, claims, claim-stats, pools | Launch attribution, fee distribution, profit-taking, CEX links |
 
 Together, these integrations let us move from raw addresses and tx lists to **attribution**, **funding trails**, **social linkage**, and **visual flow analysis**—so we can go deeper on any Solana-focused investigation.

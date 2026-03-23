@@ -7,6 +7,10 @@ Section 1 — core token intelligence:
 Section 2 — liquidity / pool context:
 - Bags pool by token mint (Meteora DBC + DAMM v2 keys)
 
+Section 3 — fee-share analytics:
+- per-claimer totals (`GET /token-launch/claim-stats`)
+- optional: list all Bags pools (`GET /solana/bags/pools`) for ecosystem / migration scans
+
 Auth: set BAGS_API_KEY in environment.
 """
 from __future__ import annotations
@@ -102,6 +106,28 @@ def get_bags_pool_by_token_mint(token_mint: str) -> Optional[dict[str, Any]]:
     return _get("/solana/bags/pools/token-mint", {"tokenMint": token_mint})
 
 
+def get_token_claim_stats(token_mint: str) -> Optional[dict[str, Any]]:
+    """
+    Section 3: Per-fee-claimer claim totals for a token (analytics).
+
+    GET /token-launch/claim-stats?tokenMint=...
+    """
+    return _get("/token-launch/claim-stats", {"tokenMint": token_mint})
+
+
+def get_bags_pools(*, only_migrated: bool = False) -> Optional[dict[str, Any]]:
+    """
+    Section 3 (optional): List Bags pools with DBC + DAMM v2 keys.
+
+    Can return a large list; use sparingly (e.g. migration scans).
+    GET /solana/bags/pools?onlyMigrated=...
+    """
+    params: dict[str, Any] = {}
+    if only_migrated:
+        params["onlyMigrated"] = "true"
+    return _get("/solana/bags/pools", params)
+
+
 def _solscan_account_url(address: str) -> str:
     """Public Solscan deep link for a Solana account (pool, config, mint)."""
     return f"https://solscan.io/account/{address}"
@@ -177,6 +203,81 @@ def parse_bags_pool(payload: Optional[dict[str, Any]], requested_mint: Optional[
         "explorer_links": explorer_links,
         "consistency_check": consistency,
         "raw": inner if inner else None,
+    }
+
+
+def _lamports_from_claim_field(raw: Any) -> int:
+    if raw is None:
+        return 0
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    s = str(raw).strip()
+    if s.isdigit():
+        return int(s)
+    try:
+        return int(float(s))
+    except Exception:
+        return 0
+
+
+def parse_token_claim_stats(payload: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """
+    Normalize Section 3 claim-stats for reports.
+
+    Adds per-row SOL, totals, creator share, and concentration (top1/top3 share of claimed fees).
+    """
+    rows_in = _unwrap_response(payload)
+    if not isinstance(rows_in, list):
+        rows_in = []
+    rows_out: list[dict[str, Any]] = []
+    total_lamports = 0
+    creator_lamports = 0
+    for row in rows_in:
+        if not isinstance(row, dict):
+            continue
+        lam = _lamports_from_claim_field(row.get("totalClaimed"))
+        total_lamports += lam
+        if row.get("isCreator") is True:
+            creator_lamports += lam
+        rows_out.append(
+            {
+                "wallet": row.get("wallet"),
+                "username": row.get("username"),
+                "provider": row.get("provider"),
+                "provider_username": row.get("providerUsername"),
+                "twitter_username": row.get("twitterUsername"),
+                "bags_username": row.get("bagsUsername"),
+                "is_creator": row.get("isCreator"),
+                "is_admin": row.get("isAdmin"),
+                "royalty_bps": row.get("royaltyBps"),
+                "total_claimed_lamports": lam,
+                "total_claimed_sol": round(lam / 1e9, 9),
+                "pfp": row.get("pfp"),
+            }
+        )
+    # Sort by claimed amount descending
+    rows_out.sort(key=lambda r: int(r.get("total_claimed_lamports") or 0), reverse=True)
+
+    sorted_lams = [int(r.get("total_claimed_lamports") or 0) for r in rows_out]
+    top1 = sorted_lams[0] if sorted_lams else 0
+    top3 = sum(sorted_lams[:3]) if sorted_lams else 0
+
+    def _share(part: int) -> Optional[float]:
+        if total_lamports <= 0:
+            return None
+        return round(part / total_lamports, 6)
+
+    return {
+        "claimers_count": len(rows_out),
+        "total_claimed_lamports": total_lamports,
+        "total_claimed_sol": round(total_lamports / 1e9, 9),
+        "creator_claimed_lamports": creator_lamports,
+        "creator_claimed_sol": round(creator_lamports / 1e9, 9),
+        "creator_share_of_total": _share(creator_lamports),
+        "top1_share_of_total": _share(top1),
+        "top3_share_of_total": _share(top3),
+        "claimers": rows_out,
+        "raw_count": len(rows_in),
     }
 
 
