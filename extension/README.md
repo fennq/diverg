@@ -4,7 +4,7 @@ Background worker and API auto-detect logic. **Canonical Chrome UX** (side panel
 
 **Popup (click extension icon)**
 
-- **Security** — URL + Run Security Scan (same as [diverg-extension](https://github.com/fennq/diverg-extension)).
-- **Solana** — Token mint + optional wallet; `solana_bundle.js` + Helius key in **Options** (browser-only).
+- **Security scan** — URL, Run Security Scan, Options (same as diverg-extension).
+- **Solana** — Token mint + optional wallet + **Analyze bundle**; `solana_bundle.js` + Helius key in **Options**. Not in the side panel.
 
-**Side panel** — Site scan summary for the active tab only; Solana lives in the **popup → Solana** tab.
+**Side panel** — Auto-scan / site findings for the active tab only.

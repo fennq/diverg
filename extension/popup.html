@@ -16,8 +16,8 @@
   </header>
 
   <main class="popup-main">
-    <div class="popup-tabs" role="tablist" aria-label="Mode">
-      <button type="button" class="popup-tab active" data-popup-tab="web" role="tab" aria-selected="true">Security</button>
+    <div class="popup-mode-tabs" role="tablist" aria-label="Diverg mode">
+      <button type="button" class="popup-tab active" data-popup-tab="web" role="tab" aria-selected="true">Security scan</button>
       <button type="button" class="popup-tab" data-popup-tab="sol" role="tab" aria-selected="false">Solana</button>
     </div>
 
@@ -121,14 +121,15 @@
     </div>
 
     <div id="popup-panel-sol" class="popup-panel popup-panel-sol hidden">
-      <p class="sol-popup-hint">Bundle heuristic: top holders + same direct funder (Helius). Add your key in <a href="options.html" target="_blank" rel="noopener">Options</a>.</p>
-      <label class="sol-field-label" for="sol-mint-popup">Token mint</label>
-      <input type="text" id="sol-mint-popup" class="sol-field-input" placeholder="SPL mint address" autocomplete="off" spellcheck="false" />
-      <label class="sol-field-label" for="sol-wallet-popup">Wallet <span class="sol-optional">(optional)</span></label>
-      <input type="text" id="sol-wallet-popup" class="sol-field-input" placeholder="Focus cluster &amp; balance" autocomplete="off" spellcheck="false" />
-      <button type="button" id="sol-analyze-popup" class="btn-solana">Analyze bundle</button>
-      <div id="sol-status-popup" class="sol-status-popup" aria-live="polite"></div>
-      <div id="sol-out-popup" class="sol-out-popup"></div>
+      <p class="sol-popup-intro">Bundle heuristic: top holders + same direct funder (Helius). Add your <a href="options.html" target="_blank" rel="noopener">Helius API key</a> in Options.</p>
+      <label class="sol-field-label" for="popup-sol-mint">Token mint</label>
+      <input type="text" id="popup-sol-mint" class="sol-field-input" placeholder="SPL mint address" autocomplete="off" spellcheck="false" />
+      <label class="sol-field-label" for="popup-sol-wallet">Wallet <span class="sol-optional">(optional)</span></label>
+      <input type="text" id="popup-sol-wallet" class="sol-field-input" placeholder="Focus cluster &amp; balance" autocomplete="off" spellcheck="false" />
+      <button type="button" id="popup-sol-analyze" class="btn-sol-analyze">Analyze bundle</button>
+      <div id="popup-sol-state" class="popup-sol-status" aria-live="polite"></div>
+      <div id="popup-sol-out" class="popup-sol-out"></div>
+      <p class="sol-popup-foot"><a href="https://www.helius.dev/" target="_blank" rel="noopener">helius.dev</a></p>
     </div>
   </main>
 

@@ -117,6 +117,14 @@ body {
 .panelHeader .panelTitle { font-size: 17px; }
 .panelHeader .panelSub { margin-top: 2px; }
 
+.panelHint {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0 0 12px;
+}
+.panelHint strong { color: var(--text-secondary); font-weight: 600; }
+
 .tabs {
   display: flex;
   gap: 0;

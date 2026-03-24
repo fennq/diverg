@@ -386,22 +386,22 @@
   })();
 })();
 
-/** Solana bundle tab — same logic as solana_bundle.js (Helius BYOK). */
+/** Popup tabs: Security scan vs Solana bundle (Helius in Options). */
 (function () {
-  const TAB_KEY = 'divergPopupTab';
+  const POPUP_TAB_KEY = 'divergPopupTab';
   const SOL_MINT_KEY = 'solanaBundleMint';
   const SOL_WALLET_KEY = 'solanaBundleWallet';
 
   const tabBtns = document.querySelectorAll('.popup-tab');
   const panelWeb = document.getElementById('popup-panel-web');
   const panelSol = document.getElementById('popup-panel-sol');
-  const solMint = document.getElementById('sol-mint-popup');
-  const solWallet = document.getElementById('sol-wallet-popup');
-  const solBtn = document.getElementById('sol-analyze-popup');
-  const solStatus = document.getElementById('sol-status-popup');
-  const solOut = document.getElementById('sol-out-popup');
+  const solMint = document.getElementById('popup-sol-mint');
+  const solWallet = document.getElementById('popup-sol-wallet');
+  const solAnalyze = document.getElementById('popup-sol-analyze');
+  const solState = document.getElementById('popup-sol-state');
+  const solOut = document.getElementById('popup-sol-out');
 
-  if (!panelSol || !solBtn) return;
+  if (!panelSol || !solAnalyze) return;
 
   function escapeHtml(s) {
     const div = document.createElement('div');
@@ -418,74 +418,76 @@
       b.classList.toggle('active', on);
       b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    chrome.storage.local.set({ [TAB_KEY]: which });
-    if (which === 'sol') tryFillMintFromTab();
+    chrome.storage.local.set({ [POPUP_TAB_KEY]: which });
   }
 
-  function tryFillMintFromTab() {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const u = (tabs[0] && tabs[0].url) || '';
-      const m = u.match(/solscan\.io\/token\/([1-9A-HJ-NP-Za-km-z]{32,44})/i);
+  async function tryFillMintFromActiveTab() {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const u = (tab && tab.url) || '';
+      let m = u.match(/solscan\.io\/token\/([1-9A-HJ-NP-Za-km-z]{32,44})/i);
+      if (!m) m = u.match(/dexscreener\.com\/solana\/([1-9A-HJ-NP-Za-km-z]{32,44})/i);
       if (m && solMint && !solMint.value.trim()) solMint.value = m[1];
-      const m2 = u.match(/dexscreener\.com\/solana\/([1-9A-HJ-NP-Za-km-z]{32,44})/i);
-      if (m2 && solMint && !solMint.value.trim()) solMint.value = m2[1];
-    });
+    } catch (_) {}
   }
+
+  chrome.storage.local.get([POPUP_TAB_KEY, SOL_MINT_KEY, SOL_WALLET_KEY], (o) => {
+    if (o[SOL_MINT_KEY] && solMint) solMint.value = o[SOL_MINT_KEY];
+    if (o[SOL_WALLET_KEY] && solWallet) solWallet.value = o[SOL_WALLET_KEY];
+    const tab = o[POPUP_TAB_KEY] === 'sol' ? 'sol' : 'web';
+    setTab(tab);
+    if (tab === 'sol') tryFillMintFromActiveTab();
+  });
 
   tabBtns.forEach((b) => {
     b.addEventListener('click', () => {
-      setTab(b.getAttribute('data-popup-tab') || 'web');
+      const w = b.getAttribute('data-popup-tab') || 'web';
+      setTab(w);
+      if (w === 'sol') tryFillMintFromActiveTab();
     });
   });
 
-  chrome.storage.local.get([TAB_KEY, SOL_MINT_KEY, SOL_WALLET_KEY], (o) => {
-    if (o[SOL_MINT_KEY] && solMint) solMint.value = o[SOL_MINT_KEY];
-    if (o[SOL_WALLET_KEY] && solWallet) solWallet.value = o[SOL_WALLET_KEY];
-    const tab = o[TAB_KEY] === 'sol' ? 'sol' : 'web';
-    setTab(tab);
-  });
-
   function renderSolError(msg) {
-    solStatus.textContent = msg;
-    solStatus.className = 'sol-status-popup error';
+    solState.textContent = msg;
+    solState.className = 'popup-sol-status error';
     solOut.innerHTML = '';
   }
 
   function renderSolResult(data) {
-    solStatus.textContent = '';
-    solStatus.className = 'sol-status-popup';
+    solState.textContent = '';
+    solState.className = 'popup-sol-status';
     const parts = [];
-    parts.push(`<div class="sol-card-mini"><div class="sol-k">Mint</div><div class="sol-v">${escapeHtml(data.mint)}</div></div>`);
+    parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">Mint</div><div class="sol-v-mini mono">${escapeHtml(data.mint)}</div></div>`);
     if (data.token_supply_ui != null) {
-      parts.push(`<div class="sol-card-mini"><div class="sol-k">Token supply (ui)</div><div class="sol-v">${escapeHtml(String(data.token_supply_ui))}</div></div>`);
+      parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">Token supply</div><div class="sol-v-mini">${escapeHtml(String(data.token_supply_ui))}</div></div>`);
     }
     if (data.seed_wallet) {
-      parts.push(`<div class="sol-card-mini"><div class="sol-k">Wallet</div><div class="sol-v">${escapeHtml(data.seed_wallet)}</div></div>`);
+      parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">Wallet</div><div class="sol-v-mini mono">${escapeHtml(data.seed_wallet)}</div></div>`);
       if (data.seed_balance_ui != null) {
-        parts.push(`<div class="sol-card-mini"><div class="sol-k">Balance (tokens)</div><div class="sol-v">${escapeHtml(String(data.seed_balance_ui))}</div></div>`);
+        parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">Balance (tokens)</div><div class="sol-v-mini">${escapeHtml(String(data.seed_balance_ui))}</div></div>`);
       }
       if (data.seed_pct_supply != null) {
-        parts.push(`<div class="sol-card-mini"><div class="sol-k">% supply</div><div class="sol-v">${escapeHtml(String(data.seed_pct_supply))}%</div></div>`);
+        parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">% supply</div><div class="sol-v-mini">${escapeHtml(String(data.seed_pct_supply))}%</div></div>`);
       }
     }
     parts.push(
-      `<div class="sol-card-mini highlight"><div class="sol-k">Cluster (same funder)</div><div class="sol-v">${escapeHtml(String((data.focus_cluster_wallets || []).length))} wallets · ${escapeHtml(String(data.focus_cluster_pct_supply != null ? data.focus_cluster_pct_supply : '—'))}% of supply · balance ${escapeHtml(String(data.focus_cluster_supply_ui != null ? data.focus_cluster_supply_ui : '—'))}</div></div>`
+      `<div class="sol-card-mini highlight"><div class="sol-k-mini">Cluster (same funder)</div><div class="sol-v-mini">${escapeHtml(String((data.focus_cluster_wallets || []).length))} wallets · ${escapeHtml(String(data.focus_cluster_pct_supply != null ? data.focus_cluster_pct_supply : '—'))}%</div><div class="sol-k-mini" style="margin-top:6px">Cluster balance</div><div class="sol-v-mini">${escapeHtml(String(data.focus_cluster_supply_ui != null ? data.focus_cluster_supply_ui : '—'))}</div></div>`
     );
     if (data.top_holders && data.top_holders.length) {
-      parts.push('<ul class="sol-list-mini">');
+      parts.push('<div class="sol-h3-mini">Top holders</div><ul class="sol-list-mini">');
       data.top_holders.slice(0, 6).forEach((h) => {
-        const tag = h.in_focus_cluster ? ' *' : '';
-        parts.push(`<li>${escapeHtml(h.wallet.slice(0, 10))}… ${escapeHtml(String(h.pct_supply))}%${tag}</li>`);
+        const tag = h.in_focus_cluster ? ' <span style="color:var(--primary)">●</span>' : '';
+        parts.push(`<li>${escapeHtml(h.wallet.slice(0, 6))}… ${escapeHtml(String(h.pct_supply))}%${tag}</li>`);
       });
       parts.push('</ul>');
     }
-    if (data.disclaimer) parts.push(`<p class="sol-disclaimer">${escapeHtml(data.disclaimer)}</p>`);
-    if (data.pnl_note) parts.push(`<p class="sol-disclaimer">${escapeHtml(data.pnl_note)}</p>`);
-    if (data.focus_cluster_note) parts.push(`<p class="sol-disclaimer">${escapeHtml(data.focus_cluster_note)}</p>`);
+    if (data.disclaimer) parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(data.disclaimer)}</p>`);
+    if (data.pnl_note) parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(data.pnl_note)}</p>`);
+    if (data.focus_cluster_note) parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(data.focus_cluster_note)}</p>`);
     solOut.innerHTML = parts.join('');
   }
 
-  solBtn.addEventListener('click', () => {
+  solAnalyze.addEventListener('click', () => {
     const mint = solMint && solMint.value ? solMint.value.trim() : '';
     const wallet = solWallet && solWallet.value ? solWallet.value.trim() : '';
     if (!mint) {
@@ -493,8 +495,8 @@
       return;
     }
     chrome.storage.local.set({ [SOL_MINT_KEY]: mint, [SOL_WALLET_KEY]: wallet || '' });
-    solStatus.textContent = 'Calling Helius…';
-    solStatus.className = 'sol-status-popup scanning';
+    solState.textContent = 'Calling Helius…';
+    solState.className = 'popup-sol-status scanning';
     solOut.innerHTML = '';
 
     const bundle = typeof globalThis !== 'undefined' && globalThis.divergSolanaBundle ? globalThis.divergSolanaBundle : null;
@@ -509,15 +511,18 @@
         renderSolError('Add your Helius API key in Options.');
         return;
       }
-      bundle.runBundleSnapshot(key, mint, { wallet: wallet || null }).then((data) => {
-        if (!data || !data.ok) {
-          renderSolError((data && data.error) || 'Request failed');
-          return;
-        }
-        renderSolResult(data);
-      }).catch((e) => {
-        renderSolError(e.message || 'Network error');
-      });
+      bundle
+        .runBundleSnapshot(key, mint, { wallet: wallet || null })
+        .then((data) => {
+          if (!data || !data.ok) {
+            renderSolError((data && data.error) || 'Request failed');
+            return;
+          }
+          renderSolResult(data);
+        })
+        .catch((e) => {
+          renderSolError(e.message || 'Network error');
+        });
     });
   });
 })();

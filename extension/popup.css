@@ -76,18 +76,20 @@ body {
   padding: 16px;
   position: relative;
   z-index: 2;
-  overflow-y: auto;
-  max-height: min(560px, 85vh);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
-.popup-tabs {
+.popup-mode-tabs {
   display: flex;
   gap: 0;
-  margin: -4px 0 14px;
+  margin-bottom: 14px;
   border-radius: var(--radius);
   overflow: hidden;
   border: 1px solid var(--border);
   background: var(--bg-elevated);
+  flex-shrink: 0;
 }
 .popup-tab {
   flex: 1;
@@ -107,17 +109,18 @@ body {
   color: var(--primary);
   box-shadow: inset 0 -2px 0 var(--primary);
 }
+.popup-panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .popup-panel.hidden { display: none !important; }
 
-.sol-popup-hint {
+.popup-panel-sol { margin-top: 0; }
+.sol-popup-intro {
   font-size: 11px;
   color: var(--text-muted);
   line-height: 1.45;
   margin: 0 0 12px;
 }
-.sol-popup-hint a { color: var(--primary); text-decoration: none; }
-.sol-popup-hint a:hover { text-decoration: underline; }
-
+.sol-popup-intro a { color: var(--primary); text-decoration: none; }
+.sol-popup-intro a:hover { text-decoration: underline; }
 .sol-field-label {
   display: block;
   font-size: 10px;
@@ -129,24 +132,20 @@ body {
   margin-top: 10px;
 }
 .sol-field-label:first-of-type { margin-top: 0; }
-.sol-optional { font-weight: 400; color: var(--text-muted); text-transform: none; }
+.sol-optional { font-weight: 400; color: var(--text-muted); text-transform: none; letter-spacing: normal; }
 .sol-field-input {
   width: 100%;
   height: 34px;
   padding: 0 10px;
   font-size: 12px;
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: ui-monospace, monospace;
   color: var(--text);
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
-.sol-field-input:focus {
-  outline: none;
-  border-color: var(--primary);
-}
-
-.btn-solana {
+.sol-field-input:focus { outline: none; border-color: var(--primary); }
+.btn-sol-analyze {
   width: 100%;
   margin-top: 12px;
   height: 36px;
@@ -159,35 +158,43 @@ body {
   border-radius: var(--radius);
   cursor: pointer;
 }
-.btn-solana:hover { filter: brightness(1.08); }
-
-.sol-status-popup {
+.btn-sol-analyze:hover { filter: brightness(1.08); }
+.popup-sol-status {
   margin-top: 10px;
   min-height: 1.2em;
   font-size: 12px;
   color: var(--text-secondary);
 }
-.sol-status-popup.error { color: #f87171; }
-.sol-status-popup.scanning { color: var(--primary); }
-
-.sol-out-popup {
-  margin-top: 10px;
+.popup-sol-status.error { color: #f87171; }
+.popup-sol-status.scanning { color: var(--primary); }
+.popup-sol-out {
+  margin-top: 8px;
   max-height: 220px;
   overflow-y: auto;
   font-size: 11px;
 }
 .sol-card-mini {
-  padding: 8px 10px;
-  margin-bottom: 6px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  margin-bottom: 6px;
 }
 .sol-card-mini.highlight { border-color: rgba(37, 99, 235, 0.45); }
-.sol-k { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-bottom: 2px; }
-.sol-v { word-break: break-all; color: var(--text); }
-.sol-disclaimer { font-size: 10px; color: var(--text-muted); line-height: 1.4; margin-top: 8px; }
-.sol-list-mini { margin: 6px 0 0; padding-left: 16px; color: var(--text-muted); }
+.sol-k-mini {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.sol-v-mini { word-break: break-all; color: var(--text); font-size: 12px; }
+.sol-v-mini.mono { font-family: ui-monospace, monospace; font-size: 10px; }
+.sol-h3-mini { font-size: 10px; font-weight: 600; margin: 8px 0 4px; color: var(--text-secondary); }
+.sol-list-mini { margin: 0; padding-left: 16px; color: var(--text-muted); font-size: 10px; }
+.sol-disclaimer-mini { font-size: 9px; color: var(--text-muted); line-height: 1.4; margin-top: 6px; }
+.sol-popup-foot { font-size: 10px; color: var(--text-muted); margin-top: 8px; text-align: center; }
+.sol-popup-foot a { color: var(--primary); text-decoration: none; }
 
 .url-section { margin-bottom: 12px; }
 .url-input-wrap { display: flex; gap: 8px; align-items: center; }
