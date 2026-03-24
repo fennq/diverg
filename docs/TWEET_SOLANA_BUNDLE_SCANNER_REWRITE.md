@@ -6,22 +6,20 @@ Same voice as Bags tweets. Tag **@HeliusRPC** if relevant. Add extension link wh
 
 ## Single post (copy-paste)
 
-**Option A — full**
+**Option A — Bags-style (recommended)**
 
-Rewrote the Solana token bundle scanner in Diverg from scratch.
+New feature: **@HeliusRPC** — Solana token bundle scanner in Diverg
 
-The old version was throwing garbage — turns out `getTokenAccounts` (Helius DAS) takes **object params**, not array params. Silent fail meant we were only ever scanning 20 wallets and calling it a full analysis.
+Built for on-chain investigations.
 
-Fixed flow now mirrors Godmode:
+Access to:
+- **Holder map** — `getTokenAccounts` (DAS, paginated): every real holder ranked by balance, not a 20-account stub
+- **Funder identity** — `getSignaturesForAddress` + `/v0/transactions` batch parse: first native SOL inbound = true funder per wallet
+- **Cluster analysis** — group holders by shared funder, filter out exchanges via `batch-identity`, surface coordinated wallets only
+- **Verdict** — `CLEAN / WATCHLIST / SUSPICIOUS / BUNDLER` + risk score + % supply held by each suspicious cluster
+- **Live progress** — status updates as each stage runs so you know it's actually scanning
 
-- **`getAsset`** → token name / symbol / supply / decimals  
-- **`getTokenAccounts`** (DAS, paginated) → real top holders, not a 20-account stub  
-- **`getSignaturesForAddress`** concurrent per holder → oldest tx per wallet  
-- **`/v0/transactions`** batch parse → first native SOL inbound = true funder identity  
-- **`batch-identity`** → exchange filter on funders  
-- Cluster by funder → `CLEAN / WATCHLIST / SUSPICIOUS / BUNDLER` + risk score  
-
-Live status updates in the popup so you can see it's actually working.
+Diverg: paste a mint → get a real bundle verdict in ~20s.
 
 ---
 
