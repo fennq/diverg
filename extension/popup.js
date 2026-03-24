@@ -46,7 +46,10 @@
   function showSummary(result) {
     const findings = result.findings || [];
     const count = findings.length;
-    summaryCountEl.textContent = count === 0 ? 'No issues found' : `${count} finding${count === 1 ? '' : 's'}`;
+    const evidence = result.evidence_summary || {};
+    summaryCountEl.textContent = count === 0
+      ? 'No issues found'
+      : `${count} finding${count === 1 ? '' : 's'}${evidence.quality ? ` · evidence ${evidence.quality}` : ''}`;
 
     const bySeverity = { Critical: 0, High: 0, Medium: 0, Low: 0, Info: 0 };
     findings.forEach((f) => {
@@ -62,6 +65,13 @@
       chip.textContent = `${sev}: ${bySeverity[sev]}`;
       severityBarEl.appendChild(chip);
     });
+
+    if (evidence.verified_count) {
+      const chip = document.createElement('span');
+      chip.className = 'severity-chip info';
+      chip.textContent = `Verified: ${evidence.verified_count}`;
+      severityBarEl.appendChild(chip);
+    }
 
     resultsSummary.hidden = false;
   }

@@ -35,6 +35,18 @@
         '<span class="findingSeverity ' + severity + '">' + escapeHtml(finding.severity || 'Info') + '</span>' +
       '</div>' +
       (finding.url ? '<p class="findingUrl">' + escapeHtml(finding.url) + '</p>' : '') +
+      ((finding.confidence || finding.source || finding.verified)
+        ? '<p class="findingUrl">' +
+            escapeHtml(
+              [
+                finding.confidence ? 'confidence: ' + finding.confidence : '',
+                finding.verified ? 'verified' : '',
+                finding.source ? 'source: ' + finding.source : ''
+              ].filter(Boolean).join(' · ')
+            ) +
+          '</p>'
+        : '') +
+      (finding.proof ? '<p class="findingUrl">proof: ' + escapeHtml(String(finding.proof).substring(0, 220)) + '</p>' : '') +
       (showSimulate
         ? '<div class="findingActions"><button type="button" class="btnSimulate" data-index="' + index + '">Simulate</button></div>'
         : '');
@@ -107,9 +119,11 @@
     }
     var s = report.summary;
     if (s) {
+      var evidence = report.evidence_summary || {};
       summaryEl.textContent =
         'Total: ' + (s.total_findings || report.findings.length) +
-        ' (Critical: ' + (s.critical || 0) + ', High: ' + (s.high || 0) + ', Medium: ' + (s.medium || 0) + ', Low: ' + (s.low || 0) + ', Info: ' + (s.info || 0) + ')';
+        ' (Critical: ' + (s.critical || 0) + ', High: ' + (s.high || 0) + ', Medium: ' + (s.medium || 0) + ', Low: ' + (s.low || 0) + ', Info: ' + (s.info || 0) + ')' +
+        (evidence.quality ? ' · Evidence: ' + evidence.quality + ' · Verified: ' + (evidence.verified_count || 0) + '/' + (evidence.total_findings || report.findings.length) : '');
     } else {
       summaryEl.textContent = 'Findings: ' + report.findings.length;
     }

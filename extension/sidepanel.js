@@ -52,6 +52,7 @@
       if (data.score != null && data.verdict != null) {
         var score = data.score;
         var verdict = data.verdict;
+        var evidence = data.evidence_summary || {};
         var summaryText =
           data.summaryText != null && data.summaryText !== ''
             ? data.summaryText
@@ -64,6 +65,7 @@
           '<div class="scoreVerdict-value" style="color:' + scoreColor + '">' + score + '<span class="scoreVerdict-total">/100</span></div>' +
           '<div class="scoreVerdict-summary">' + escapeHtml(summaryText) + '</div>' +
           '<div class="scoreVerdict-verdict">Verdict: ' + escapeHtml(verdict) + '</div>' +
+          (evidence.quality ? '<div class="scoreVerdict-evidence">Evidence: ' + escapeHtml(evidence.quality) + ' · verified ' + escapeHtml(String(evidence.verified_count || 0)) + '/' + escapeHtml(String(evidence.total_findings || 0)) + '</div>' : '') +
           '</div>' +
           '<div class="state-meta">' + escapeHtml(origin) + ' · ' + risks.length + ' findings' + durationStr + '</div>';
       } else {
@@ -77,10 +79,17 @@
           var li = document.createElement('div');
           var sev = (f.severity || 'info').toLowerCase();
           li.className = 'risk ' + sev;
+          var conf = f.confidence ? String(f.confidence) : '';
+          var src = f.source ? String(f.source) : '';
+          var metaBits = [];
+          if (conf) metaBits.push('confidence: ' + conf);
+          if (f.verified) metaBits.push('verified');
+          if (src) metaBits.push('source: ' + src);
           li.innerHTML =
             '<div class="riskTitle">' + escapeHtml(f.title || 'Finding') + '</div>' +
             (f.url ? '<p class="riskUrl">' + escapeHtml(f.url) + '</p>' : '') +
-            '<span class="riskSeverity ' + sev + '">' + escapeHtml(f.severity || 'Info') + '</span>';
+            '<span class="riskSeverity ' + sev + '">' + escapeHtml(f.severity || 'Info') + '</span>' +
+            (metaBits.length ? '<p class="riskUrl">' + escapeHtml(metaBits.join(' · ')) + '</p>' : '');
           risksEl.appendChild(li);
         });
       }

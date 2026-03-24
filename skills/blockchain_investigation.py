@@ -119,6 +119,132 @@ def _over_budget(start: float) -> bool:
     return (time.time() - start) > RUN_BUDGET_SEC
 
 
+def _normalize_confidence(value: str | None) -> str:
+    conf = str(value or "").strip().lower()
+    if conf in {"high", "medium", "low"}:
+        return conf
+    return ""
+
+
+def _default_finding_source(finding: Finding) -> str:
+    title = (finding.title or "").lower()
+    category = (finding.category or "").lower()
+    if "arkham" in title or "arkham" in category:
+        return "arkham_api"
+    if "etherscan" in title or "ethereum" in category:
+        return "etherscan_api"
+    if "config" in category:
+        return "config_check"
+    if any(
+        key in title
+        for key in (
+            "launchpad-style platform detected",
+            "platform mentions",
+            "fee / tax mention on platform",
+        )
+    ):
+        return "web_scrape"
+    return "analysis"
+
+
+def _default_finding_confidence(finding: Finding, source: str) -> str:
+    severity = str(finding.severity or "").strip().lower()
+    if source in {"solscan_api", "etherscan_api", "arkham_api", "helius_rpc", "config_check"}:
+        return "high"
+    if source == "web_scrape":
+        return "medium" if severity in {"high", "medium"} else "low"
+    if severity in {"high", "medium"}:
+        return "medium"
+    return "low"
+
+
+def _finalize_finding(finding: Finding) -> Finding:
+    source = (finding.source or "").strip() or _default_finding_source(finding)
+    confidence = _normalize_confidence(finding.confidence) or _default_finding_confidence(finding, source)
+    proof = (finding.proof or "").strip() or (finding.evidence or "")[:280]
+    verified = bool(finding.verified)
+    if source == "config_check":
+        verified = True
+    return Finding(
+        title=finding.title,
+        severity=finding.severity,
+        url=finding.url,
+        category=finding.category,
+        evidence=finding.evidence,
+        impact=finding.impact,
+        remediation=finding.remediation,
+        confidence=confidence,
+        source=source,
+        proof=proof,
+        verified=verified,
+    )
+
+
+def _finalize_findings(findings: list[Finding]) -> list[Finding]:
+    return [_finalize_finding(f) for f in findings]
+
+
+def _build_evidence_summary(findings: list[Finding]) -> dict:
+    confidence_counts = {"high": 0, "medium": 0, "low": 0}
+    sources: dict[str, int] = defaultdict(int)
+    verified_count = 0
+    for finding in findings:
+        conf = _normalize_confidence(finding.confidence) or "medium"
+        confidence_counts[conf] += 1
+        source = (finding.source or "unknown").strip() or "unknown"
+        sources[source] += 1
+        if finding.verified:
+            verified_count += 1
+    total = len(findings)
+    verified_ratio = round((verified_count / total), 2) if total else 0.0
+    if confidence_counts["high"] >= 3 or verified_ratio >= 0.5:
+        quality = "strong"
+    elif confidence_counts["high"] >= 1 or confidence_counts["medium"] >= 3:
+        quality = "moderate"
+    else:
+        quality = "limited"
+    return {
+        "total_findings": total,
+        "confidence_counts": confidence_counts,
+        "verified_count": verified_count,
+        "unverified_count": max(0, total - verified_count),
+        "verified_ratio": verified_ratio,
+        "source_breakdown": dict(sorted(sources.items(), key=lambda item: (-item[1], item[0]))),
+        "top_sources": [name for name, _count in sorted(sources.items(), key=lambda item: (-item[1], item[0]))[:5]],
+        "quality": quality,
+    }
+
+
+def _severity_rank(severity: str) -> int:
+    sev = str(severity or "").strip().lower()
+    if sev == "critical":
+        return 4
+    if sev == "high":
+        return 3
+    if sev == "medium":
+        return 2
+    if sev == "low":
+        return 1
+    return 0
+
+
+def _finding_risk_weight(finding: Finding) -> float:
+    severity_weight = {"critical": 25.0, "high": 18.0, "medium": 10.0, "low": 4.0, "info": 0.0}
+    confidence_weight = {"high": 1.0, "medium": 0.72, "low": 0.45}
+    sev = str(finding.severity or "Info").strip().lower()
+    conf = _normalize_confidence(finding.confidence) or "medium"
+    base = severity_weight.get(sev, 0.0)
+    multiplier = confidence_weight.get(conf, confidence_weight["medium"])
+    if finding.verified and base > 0:
+        multiplier *= 1.15
+    elif base > 0:
+        multiplier *= 0.9
+    source = (finding.source or "").strip().lower()
+    if source in {"web_scrape", "analysis"} and conf != "high":
+        multiplier *= 0.9
+    return base * multiplier
+
+
 def _detect_platform(target_url: str) -> str:
     try:
         domain = urlparse(target_url).netloc.lower().replace("www.", "")
@@ -505,14 +631,8 @@ def _heuristic_concentrated_holders(holders: list[dict], top_n: int = 10, thresh
 def _compute_risk_score(report: BlockchainInvestigationReport) -> float:
     """Aggregate risk 0-100 from findings and alerts. Higher = more likely fraud/rug."""
     score = 0.0
-    # High severity findings (authority, LP pull, sniper, concentration)
     for f in report.findings:
-        if f.severity == "High":
-            score += 18
-        elif f.severity == "Medium":
-            score += 10
-        elif f.severity == "Low":
-            score += 4
+        score += _finding_risk_weight(f)
     # Explicit risk signals (avoid double-counting with severity)
     for a in report.liquidity_alerts:
         if "remove" in str(a).lower() or "REMOVE_LIQ" in str(a):
@@ -523,7 +643,13 @@ def _compute_risk_score(report: BlockchainInvestigationReport) -> float:
         score += 20
     if report.counterparties:
         score += 5  # known counterparties (CEX/OTC) = traceability, slight risk if deployer
-    # Cap
+    evidence_summary = _build_evidence_summary(report.findings)
+    if evidence_summary.get("quality") == "limited":
+        score *= 0.82
+    elif evidence_summary.get("quality") == "moderate":
+        score *= 0.92
+    if evidence_summary.get("verified_count", 0) >= 3:
+        score += 4
     return min(100.0, round(score, 1))
 
 
@@ -646,6 +772,7 @@ def _build_crime_report(report: BlockchainInvestigationReport) -> dict:
     """Structured crime report for export: verdict first (Diverg style), then summary, risk, deployer, tokens, findings, flow, red_flags, linked wallets, flow_graph, explorer_links, chronological_narrative."""
     chain = (report.chain or "solana").lower()[:10]
     deployer_addr = report.deployer_address
+    evidence_summary = _build_evidence_summary(report.findings)
     # Verdict first: one-line risk + main reason (how Zach presents findings)
     risk = report.risk_score
     if risk >= 70:
@@ -668,6 +795,8 @@ def _build_crime_report(report: BlockchainInvestigationReport) -> dict:
     high_findings = [f for f in report.findings if f.severity == "High"]
     if high_findings:
         verdict_reasons.append(f"{len(high_findings)} high-severity findings")
+    if evidence_summary.get("verified_count", 0):
+        verdict_reasons.append(f"{evidence_summary['verified_count']} verified evidence points")
     if not verdict_reasons:
         verdict_reasons.append("on-chain and counterparty context")
     verdict_one_line = f"{verdict_level} ({report.risk_score}/100). Main factors: {', '.join(verdict_reasons[:3])}."
@@ -684,6 +813,15 @@ def _build_crime_report(report: BlockchainInvestigationReport) -> dict:
         "mints": (report.tokens_discovered or [])[:10],
         "authority_risks": [f.title for f in report.findings if "mint authority" in f.title or "freeze authority" in f.title],
     }
+    ordered_findings = sorted(
+        report.findings,
+        key=lambda f: (
+            -_severity_rank(f.severity),
+            -(1 if f.verified else 0),
+            -({"high": 3, "medium": 2, "low": 1}.get(_normalize_confidence(f.confidence) or "medium", 2)),
+            (f.title or "").lower(),
+        ),
+    )
     findings_with_evidence = [
         {
             "title": f.title,
@@ -698,7 +836,7 @@ def _build_crime_report(report: BlockchainInvestigationReport) -> dict:
             "proof": f.proof,
             "verified": f.verified,
         }
-        for f in report.findings
+        for f in ordered_findings
     ]
     flow_highlights = []
     if report.counterparties:
@@ -748,6 +886,11 @@ def _build_crime_report(report: BlockchainInvestigationReport) -> dict:
         f"Risk score {report.risk_score}/100. "
         f"Findings: {len(report.findings)} ({len([f for f in report.findings if f.severity == 'High'])} High). "
     )
+    summary += (
+        f"Evidence quality: {evidence_summary.get('quality', 'limited')} "
+        f"({evidence_summary.get('verified_count', 0)} verified, "
+        f"{evidence_summary.get('confidence_counts', {}).get('high', 0)} high-confidence). "
+    )
     if report.sniper_alerts:
         summary += "Sniper pattern detected. "
     if report.liquidity_alerts:
@@ -787,6 +930,7 @@ def _build_crime_report(report: BlockchainInvestigationReport) -> dict:
         if report.on_chain_used
         else "No SOLSCAN_PRO_API_KEY or ETHERSCAN_API_KEY set; on-chain checks skipped",
         "flow_graph_from_live_data_only": report.flow_graph is not None,
+        "evidence_quality": evidence_summary,
     }
     out = {
         "verdict": verdict_one_line,
@@ -801,6 +945,7 @@ def _build_crime_report(report: BlockchainInvestigationReport) -> dict:
         "explorer_links": explorer_links[:40],
         "linked_wallets": linked,
         "data_sources": data_sources,
+        "evidence_summary": evidence_summary,
     }
     if report.flow_graph:
         out["flow_graph"] = report.flow_graph
@@ -1225,6 +1370,7 @@ def run(
     for fee in scraped.get("fee_mentions", [])[:5]:
         report.fee_alerts.append({"mention": fee})
 
+    report.findings = _finalize_findings(report.findings)
     # Crime report: risk score, linked wallets, structured report
     report.risk_score = _compute_risk_score(report)
     report.linked_wallets = [

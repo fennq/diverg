@@ -78,6 +78,49 @@ except ImportError:
     bags_configured = lambda: False
 
 
+def _normalize_text(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _soft_text_match(left: Any, right: Any) -> bool:
+    lval = _normalize_text(left)
+    rval = _normalize_text(right)
+    if not lval or not rval:
+        return False
+    return lval == rval or lval in rval or rval in lval
+
+
+def _finalize_consistency_checks(checks: list[dict[str, Any]]) -> dict[str, Any]:
+    consistent = [c for c in checks if c.get("match", True)]
+    inconsistent = [c for c in checks if not c.get("match", True)]
+    total = len(checks)
+    score = round((len(consistent) / total) * 100, 1) if total else None
+    if total >= 3:
+        coverage = "good"
+    elif total >= 1:
+        coverage = "partial"
+    else:
+        coverage = "limited"
+    if total >= 3 and len(inconsistent) == 0:
+        quality = "strong"
+    elif total >= 1 and len(inconsistent) <= 1:
+        quality = "moderate"
+    else:
+        quality = "limited"
+    return {
+        "checks": checks,
+        "all_consistent": len(inconsistent) == 0,
+        "sources_compared": total,
+        "consistent_checks": len(consistent),
+        "inconsistent_checks": len(inconsistent),
+        "consistency_score": score,
+        "coverage": coverage,
+        "quality": quality,
+        "matching_fields": [str(c.get("field") or "") for c in consistent if c.get("field")],
+        "mismatched_fields": [str(c.get("field") or "") for c in inconsistent if c.get("field")],
+    }
+
+
 def fetch_wallet(addr: str) -> dict[str, Any]:
     """Fetch one wallet: RPC balance/sigs, optional Helius, Arkham, FrontrunPro."""
     out: dict[str, Any] = {"address": addr, "error": None}
@@ -216,12 +259,104 @@ def _validate_wallet_data(data: dict[str, Any]) -> dict[str, Any]:
                 "note": "Identity labels corroborate" if match else "Identity labels differ between Helius and Arkham — review both",
             })
 
-    all_match = all(c.get("match", True) for c in checks) if checks else True
-    return {
-        "checks": checks,
-        "all_consistent": all_match,
-        "sources_compared": len(checks),
-    }
+    return _finalize_consistency_checks(checks)
+
+
+def _validate_token_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Cross-check token metadata across Solscan and Helius DAS where available."""
+    checks: list[dict[str, Any]] = []
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    helius_asset = data.get("helius_das_asset") if isinstance(data.get("helius_das_asset"), dict) else {}
+    content = helius_asset.get("content") if isinstance(helius_asset.get("content"), dict) else {}
+    content_meta = content.get("metadata") if isinstance(content.get("metadata"), dict) else {}
+    token_info = helius_asset.get("token_info") if isinstance(helius_asset.get("token_info"), dict) else {}
+
+    sol_name = metadata.get("name") or metadata.get("token_name") or metadata.get("tokenName")
+    helius_name = content_meta.get("name") or helius_asset.get("name")
+    if sol_name and helius_name:
+        checks.append({
+            "field": "token_name",
+            "sources": ["solscan_metadata", "helius_das"],
+            "solscan_value": sol_name,
+            "helius_value": helius_name,
+            "match": _soft_text_match(sol_name, helius_name),
+            "note": "Token names corroborate"
+            if _soft_text_match(sol_name, helius_name)
+            else "Token name differs between Solscan and Helius DAS",
+        })
+
+    sol_symbol = metadata.get("symbol") or metadata.get("token_symbol") or metadata.get("tokenSymbol")
+    helius_symbol = content_meta.get("symbol") or helius_asset.get("symbol")
+    if sol_symbol and helius_symbol:
+        checks.append({
+            "field": "token_symbol",
+            "sources": ["solscan_metadata", "helius_das"],
+            "solscan_value": sol_symbol,
+            "helius_value": helius_symbol,
+            "match": _soft_text_match(sol_symbol, helius_symbol),
+            "note": "Token symbols corroborate"
+            if _soft_text_match(sol_symbol, helius_symbol)
+            else "Token symbol differs between Solscan and Helius DAS",
+        })
+
+    sol_decimals = metadata.get("decimals")
+    helius_decimals = token_info.get("decimals")
+    if isinstance(sol_decimals, int) and isinstance(helius_decimals, int):
+        checks.append({
+            "field": "token_decimals",
+            "sources": ["solscan_metadata", "helius_das"],
+            "solscan_value": sol_decimals,
+            "helius_value": helius_decimals,
+            "match": sol_decimals == helius_decimals,
+            "note": "Token decimals corroborate"
+            if sol_decimals == helius_decimals
+            else "Token decimals differ between Solscan and Helius DAS",
+        })
+
+    sol_supply = metadata.get("supply") or metadata.get("total_supply") or metadata.get("current_supply")
+    helius_supply = token_info.get("supply")
+    if sol_supply is not None and helius_supply is not None:
+        try:
+            sol_supply_num = float(sol_supply)
+            helius_supply_num = float(helius_supply)
+            diff = abs(sol_supply_num - helius_supply_num)
+            match = diff <= max(1.0, sol_supply_num * 0.001)
+            checks.append({
+                "field": "token_supply",
+                "sources": ["solscan_metadata", "helius_das"],
+                "solscan_value": sol_supply_num,
+                "helius_value": helius_supply_num,
+                "match": match,
+                "note": "Token supply roughly consistent"
+                if match
+                else f"Token supply differs by {diff:.4f} between Solscan and Helius DAS",
+            })
+        except (TypeError, ValueError):
+            pass
+
+    bags = data.get("bags") if isinstance(data.get("bags"), dict) else {}
+    creators = bags.get("creators")
+    if isinstance(creators, dict) and creators.get("wallets"):
+        creator_wallets = [str(w).strip() for w in creators.get("wallets", []) if str(w).strip()]
+        update_authority = (
+            metadata.get("update_authority")
+            or metadata.get("updateAuthority")
+            or content_meta.get("update_authority")
+            or content_meta.get("updateAuthority")
+        )
+        if update_authority:
+            checks.append({
+                "field": "creator_update_authority",
+                "sources": ["bags_creators", "metadata_authority"],
+                "bags_value": creator_wallets[:5],
+                "metadata_value": update_authority,
+                "match": any(_soft_text_match(update_authority, wallet) for wallet in creator_wallets),
+                "note": "Creator wallet aligns with update authority"
+                if any(_soft_text_match(update_authority, wallet) for wallet in creator_wallets)
+                else "Bags creator wallets do not match token update authority",
+            })
+
+    return _finalize_consistency_checks(checks)
 
 
 def fetch_token(mint: str) -> dict[str, Any]:
@@ -445,6 +580,7 @@ def fetch_token(mint: str) -> dict[str, Any]:
             out["bags"]["claim_events_windows"] = {"error": str(e)}
     else:
         out["bags"] = None
+    out["data_consistency"] = _validate_token_data(out)
     return out
 
 

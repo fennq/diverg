@@ -34,10 +34,112 @@
     return out;
   }
 
-  function finding(title, severity, url, category, evidence, impact, remediation, detail) {
-    const o = { title, severity, url, category, evidence, impact, remediation };
+  function finding(title, severity, url, category, evidence, impact, remediation, detail, meta) {
+    const m = meta || {};
+    const o = {
+      title,
+      severity,
+      url,
+      category,
+      evidence,
+      impact,
+      remediation,
+      confidence: m.confidence || '',
+      source: m.source || '',
+      proof: m.proof || '',
+      verified: !!m.verified,
+    };
     if (detail) o.detail = detail;
     return o;
+  }
+
+  function normalizeConfidence(value) {
+    const conf = String(value || '').trim().toLowerCase();
+    return conf === 'high' || conf === 'medium' || conf === 'low' ? conf : '';
+  }
+
+  function defaultFindingSource(finding) {
+    const category = String(finding.category || '').toLowerCase();
+    const title = String(finding.title || '').toLowerCase();
+    if (category === 'headers' || category === 'cookies' || category === 'transport' || category === 'information disclosure') return 'header_analysis';
+    if (category === 'page structure' || category === 'client-side') return 'dom_scan';
+    if (category === 'path probe') return 'path_probe';
+    if (category === 'link credibility') return 'link_analysis';
+    if (category === 'scan') return title.indexOf('failed') !== -1 ? 'scan_error' : 'scan_summary';
+    return 'analysis';
+  }
+
+  function defaultFindingConfidence(finding, source) {
+    const sev = String(finding.severity || '').trim().toLowerCase();
+    if (source === 'header_analysis' || source === 'path_probe') return 'high';
+    if (source === 'scan_error') return 'medium';
+    if (source === 'link_analysis' || source === 'dom_scan') {
+      return sev === 'high' || sev === 'medium' ? 'medium' : 'low';
+    }
+    return sev === 'info' ? 'low' : 'medium';
+  }
+
+  function finalizeFinding(f) {
+    const source = String(f.source || '').trim() || defaultFindingSource(f);
+    const confidence = normalizeConfidence(f.confidence) || defaultFindingConfidence(f, source);
+    const proof = String(f.proof || '').trim() || String(f.detail || f.evidence || '').substring(0, 280);
+    const verified = f.verified !== undefined ? !!f.verified : source === 'header_analysis';
+    return Object.assign({}, f, {
+      confidence: confidence,
+      source: source,
+      proof: proof,
+      verified: verified,
+    });
+  }
+
+  function finalizeFindings(findings) {
+    return (Array.isArray(findings) ? findings : []).map(finalizeFinding);
+  }
+
+  function buildEvidenceSummary(findings) {
+    const summary = {
+      total_findings: 0,
+      confidence_counts: { high: 0, medium: 0, low: 0 },
+      verified_count: 0,
+      unverified_count: 0,
+      source_breakdown: {},
+      quality: 'limited',
+    };
+    (findings || []).forEach((f) => {
+      const conf = normalizeConfidence(f.confidence) || 'medium';
+      summary.total_findings++;
+      summary.confidence_counts[conf]++;
+      if (f.verified) summary.verified_count++;
+      const src = String(f.source || 'unknown');
+      summary.source_breakdown[src] = (summary.source_breakdown[src] || 0) + 1;
+    });
+    summary.unverified_count = Math.max(0, summary.total_findings - summary.verified_count);
+    summary.verified_ratio = summary.total_findings ? Number((summary.verified_count / summary.total_findings).toFixed(2)) : 0;
+    if (summary.confidence_counts.high >= 3 || summary.verified_ratio >= 0.5) summary.quality = 'strong';
+    else if (summary.confidence_counts.high >= 1 || summary.confidence_counts.medium >= 3) summary.quality = 'moderate';
+    return summary;
+  }
+
+  function buildScanSummary(findings) {
+    const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    (findings || []).forEach((f) => {
+      const sev = String(f.severity || 'info').toLowerCase();
+      if (counts[sev] !== undefined) counts[sev]++;
+    });
+    return Object.assign({ total_findings: (findings || []).length }, counts);
+  }
+
+  function finalizeScanOutput(targetUrl, scanType, findings, scanMeta) {
+    const finalized = finalizeFindings(findings);
+    return {
+      target_url: targetUrl,
+      scan_type: scanType,
+      findings: finalized,
+      summary: buildScanSummary(finalized),
+      evidence_summary: buildEvidenceSummary(finalized),
+      scanned_at: new Date().toISOString(),
+      scan_meta: scanMeta || {},
+    };
   }
 
   function analyzeHeaders(url, response) {
@@ -561,13 +663,7 @@
         findings.push(finding('Scan request failed', 'Info', targetUrl, 'Scan', err.message || String(err), 'Headers check could not complete.', 'Ensure the target is reachable.', err.stack || ''));
       }
       const duration_ms = Date.now() - start;
-      return {
-        target_url: finalUrl,
-        scan_type: 'option',
-        findings,
-        scanned_at: new Date().toISOString(),
-        scan_meta: { goal: key || 'headers', headers_only: true, duration_ms, request_count: 1 },
-      };
+      return finalizeScanOutput(finalUrl, 'option', findings, { goal: key || 'headers', headers_only: true, duration_ms, request_count: 1 });
     }
 
     const base = await runStandardScan(targetUrl);
@@ -608,13 +704,7 @@
     }
 
     const duration_ms = Date.now() - start;
-    return {
-      target_url: finalUrl,
-      scan_type: 'option',
-      findings,
-      scanned_at: new Date().toISOString(),
-      scan_meta: { goal: key, paths_probed: pathsProbed, paths_with_2xx_3xx: pathsHit, duration_ms, request_count: 1 + pathsProbed },
-    };
+    return finalizeScanOutput(finalUrl, 'option', findings, { goal: key, paths_probed: pathsProbed, paths_with_2xx_3xx: pathsHit, duration_ms, request_count: 1 + pathsProbed });
   }
 
   async function runStandardScan(targetUrl) {
@@ -645,13 +735,7 @@
     }
 
     const duration_ms = Date.now() - start;
-    return {
-      target_url: finalUrl,
-      scan_type: 'standard',
-      findings,
-      scanned_at: new Date().toISOString(),
-      scan_meta: { headers_checked: true, paths_probed: 0, duration_ms, request_count: 1 },
-    };
+    return finalizeScanOutput(finalUrl, 'standard', findings, { headers_checked: true, paths_probed: 0, duration_ms, request_count: 1 });
   }
 
   async function runExtendedScan(targetUrl) {
@@ -726,19 +810,13 @@
       pathResults.map(p => `${p.path} (${p.label}): ${p.status}`).join('\n')
     ));
 
-    return {
-      target_url: finalUrl,
-      scan_type: 'extended',
-      findings,
-      scanned_at: new Date().toISOString(),
-      scan_meta: {
-        headers_checked: true,
-        paths_probed: pathsProbed,
-        paths_with_2xx_3xx: pathsHit,
-        duration_ms,
-        request_count: 1 + pathsProbed,
-      },
-    };
+    return finalizeScanOutput(finalUrl, 'extended', findings, {
+      headers_checked: true,
+      paths_probed: pathsProbed,
+      paths_with_2xx_3xx: pathsHit,
+      duration_ms,
+      request_count: 1 + pathsProbed,
+    });
   }
 
   const api = { runStandardScan, runExtendedScan, runOptionScan };
