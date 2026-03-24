@@ -1,33 +1,51 @@
-# Tweet drafts — Bags API Section 3 (Diverg investigation pipeline)
+# Tweet drafts — Bags API Section 3/4 (Fee analytics & claim-stats)
 
-Use one thread or a single post. Replace `[repo]` with your GitHub link if you publish.
+Same layout as **Section 2** tweets. Tag **@BagsApp** if that’s your canonical handle. Add repo or `docs/INTEGRATIONS.md` when you ship.
 
 ---
 
-## Single post (technical audience)
+## Single post (copy-paste)
 
-**Option A — short**  
-We upgraded our **Bags.fm** integration (Section 3): per-fee-claimer totals now ship with **concentration analytics** (top1/top3/top5, Herfindahl index, creator vs non-creator split), **claim-stats ↔ claim-events reconciliation** (catch truncated samples), and optional **fee-share admin list** checks for creator wallets. Built for on-chain investigations, not vibes. `[repo]`
+**Option A — full**
 
-**Option B — bullets**  
-Shipping a deeper **@bags_fm** Section 3 in Diverg:
+New integration: **@BagsApp** API — **Sec 3/4** (Fee analytics & claim-stats)
 
-- Claim-stats: distribution label + Herfindahl + top-N concentration  
-- Reconcile against claim-events so “first page” doesn’t lie  
-- Optional `/fee-share/admin/list` pass for creator wallets  
+Built for on-chain investigations.
 
-Solana token intel that actually holds up in a report.
+Access to:
+- **Per-claimer totals** — `GET /token-launch/claim-stats`: wallet + social fields, SOL claimed per fee sharer  
+- **Concentration** — top1 / top3 / top5 share, Herfindahl-style fee index, creator vs non-creator split, `highly_concentrated` / `moderate` / `dispersed`  
+- **Reconciliation** — claim-stats vs sampled claim-events so truncated “first page” data doesn’t fake a narrative  
+- **Fee-share admin scope** (optional) — `/fee-share/admin/list` for creator wallets: is this mint in their admin set?  
+
+Diverg: `parse_token_claim_stats` + `reconcile_claim_stats_with_events` + optional `section3_fee_share_admin` when `BAGS_API_KEY` is set.
+
+---
+
+## Single post (shorter — ~280 friendly)
+
+**@BagsApp** API in Diverg — **Sec 3/4: Fee analytics**
+
+Claim-stats per sharer, concentration (HHI + top-N + distribution label), reconcile vs claim-events, optional fee-share admin check for creators.
+
+Built for on-chain investigations — not vanity metrics.
 
 ---
 
 ## Thread (3 posts)
 
 **1/**  
-We just leveled up **Bags API Section 3** in the Diverg investigation pipeline.
+New: **@BagsApp** integration — **Section 3/4: Fee analytics & claim-stats** — in the Diverg investigation stack.
 
 **2/**  
-New: **per-claimer fee distribution** with HHI-style concentration, top1/top3/top5, creator vs non-creator split, plus a plain-language **distribution** tag (`highly_concentrated` / `moderate` / `dispersed`).
+We pull **claim-stats** into structured reports: per-wallet totals, **top claimer**, creator vs non-creator split, and a **distribution** label so “who captured the fees” is obvious in one glance.
 
 **3/**  
-Also: **cross-check claim-stats vs claim-events** so pagination skew is visible, and optional **fee-share admin scope** for creator wallets (env-tunable).  
-Docs: `docs/INTEGRATIONS.md` — `BAGS_SECTION3_ADMIN_CHECK`, `BAGS_SECTION3_ADMIN_MAX_WALLETS`.
+We also **reconcile** claim-stats against the claim-events sample (pagination skew), and optionally hit **fee-share admin list** for creator wallets (`BAGS_SECTION3_ADMIN_CHECK`).  
+Docs: `docs/INTEGRATIONS.md`
+
+---
+
+## Optional CTA
+
+Code: `investigation/bags_client.py` · `investigation/blockchain_fetch.py` · env: `BAGS_SECTION3_ADMIN_CHECK`, `BAGS_SECTION3_ADMIN_MAX_WALLETS`
