@@ -21,7 +21,7 @@ from typing import Any, Optional
 
 # Solana base58 address (rough)
 _ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
-# Wrapped SOL mint — treat as inbound SOL for “who funded” (matches explorers / Axiom-style views)
+# Wrapped SOL mint — treat as inbound SOL for "who funded" (matches explorers / Axiom-style views)
 _WSOL_MINT = "So11111111111111111111111111111111111111112"
 
 from onchain_clients import (
@@ -116,7 +116,7 @@ def _mint_from_transfer_row(t: dict) -> str:
 def extract_first_inbound_sol_from_transfers(raw: Optional[dict]) -> Optional[dict]:
     """
     Best-effort: find earliest inbound native SOL (or wSOL) transfer from Helius /transfers payload.
-    Prefer this over funded-by alone — aligns with explorer / Axiom “funded by” graphs.
+    Prefer this over funded-by alone — aligns with explorer / Axiom "funded by" graphs.
     Returns {lamports, timestamp_unix, signature, from_address} or None.
     """
     rows = _iter_transfer_rows(raw)
@@ -225,7 +225,7 @@ def effective_funder_address(
 ) -> Optional[str]:
     """
     Prefer first inbound SOL sender from /transfers (on-chain), then Helius funded-by fields.
-    Use this for bundle clustering so results match typical “same funder” views (e.g. Axiom).
+    Use this for bundle clustering so results match typical "same funder" views (e.g. Axiom).
     """
     ex = extract_first_inbound_sol_from_transfers(transfers_raw)
     if ex:

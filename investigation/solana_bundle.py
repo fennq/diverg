@@ -347,7 +347,7 @@ def run_bundle_snapshot(
 
     disclaimer = (
         "Heuristic only: clusters use the same *direct* funder where possible from first inbound SOL "
-        "(Helius /transfers), else Helius funded-by. This aligns better with explorer-style “funded by” "
+        "(Helius /transfers), else Helius funded-by. This aligns better with explorer-style 'funded by' "
         "graphs. Wallets not in the sampled top holders may be missing. Not financial advice."
     )
 

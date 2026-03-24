@@ -8,7 +8,7 @@
   /** Official Helius Solana RPC (OpenAPI); api-mainnet.* can return method not found for some calls. */
   var HELIUS_RPC = 'https://mainnet.helius-rpc.com';
   var HELIUS_WALLET = 'https://api.helius.xyz';
-  /** Wrapped SOL — treat inbound wSOL as SOL for “who funded” (matches explorers / Axiom-style views). */
+  /** Wrapped SOL — treat inbound wSOL as SOL for "who funded" (matches explorers / Axiom-style views). */
   var WSOL_MINT = 'So11111111111111111111111111111111111111112';
 
   function normalizeAddress(s) {
@@ -1026,7 +1026,7 @@
       identities: identities,
       params: { max_holders: mh, max_funded_by_lookups: mf, funder_transfers_limit: 120 },
       disclaimer:
-        'Heuristic only: clusters use the same *direct* funder where possible from first inbound SOL (Helius /transfers), else funded-by. Aligns better with explorer-style “funded by” graphs. Wallets not in the sampled top holders may be missing. Not financial advice.',
+        'Heuristic only: clusters use the same *direct* funder where possible from first inbound SOL (Helius /transfers), else funded-by. Aligns better with explorer-style "funded by" graphs. Wallets not in the sampled top holders may be missing. Not financial advice.',
       pnl_note: 'PnL not computed here; use an explorer or portfolio tool for full buy/sell history.',
       bundle_signals: bundleSignals,
     };
