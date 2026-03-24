@@ -130,7 +130,98 @@ def fetch_wallet(addr: str) -> dict[str, Any]:
         time.sleep(0.3)
     else:
         out["frontrunpro"] = {}
+
+    out["data_consistency"] = _validate_wallet_data(out)
     return out
+
+
+def _validate_wallet_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Cross-check data from different sources and flag discrepancies."""
+    checks: list[dict[str, Any]] = []
+
+    rpc_sol = data.get("sol_balance_sol")
+    helius_bal = data.get("helius_balances")
+    if rpc_sol is not None and helius_bal and isinstance(helius_bal, dict):
+        h_native = helius_bal.get("nativeBalance")
+        if h_native is not None:
+            h_sol = round(float(h_native) / 1e9, 6) if isinstance(h_native, (int, float)) else None
+            if h_sol is not None:
+                diff = abs(rpc_sol - h_sol)
+                match = diff < 0.01
+                checks.append({
+                    "field": "sol_balance",
+                    "sources": ["rpc", "helius"],
+                    "rpc_value": rpc_sol,
+                    "helius_value": h_sol,
+                    "match": match,
+                    "note": "Balance consistent" if match else f"Discrepancy of {diff:.6f} SOL between RPC and Helius",
+                })
+
+    funded_by = data.get("helius_funded_by")
+    transfers = data.get("helius_transfers")
+    if funded_by and transfers:
+        api_funder = None
+        if isinstance(funded_by, dict):
+            api_funder = funded_by.get("funder") or funded_by.get("address")
+        elif isinstance(funded_by, list) and funded_by:
+            api_funder = funded_by[0].get("funder") if isinstance(funded_by[0], dict) else None
+
+        transfer_funder = None
+        t_list = transfers if isinstance(transfers, list) else (transfers.get("transfers") or transfers.get("data") or []) if isinstance(transfers, dict) else []
+        for t in t_list:
+            if not isinstance(t, dict):
+                continue
+            direction = str(t.get("direction") or t.get("type") or "").lower()
+            if "out" in direction or "sent" in direction:
+                continue
+            mint = t.get("mint") or (t.get("token", {}) or {}).get("mint") or t.get("tokenMint") or ""
+            is_sol = not mint or mint == "SOL" or mint == "So11111111111111111111111111111111111111112"
+            if not is_sol:
+                continue
+            sender = t.get("from") or t.get("fromUserAccount") or t.get("source") or t.get("sender")
+            if isinstance(sender, dict):
+                sender = sender.get("address") or sender.get("pubkey")
+            if sender and isinstance(sender, str) and len(sender) >= 32:
+                transfer_funder = sender
+                break
+
+        if api_funder and transfer_funder:
+            match = api_funder == transfer_funder
+            checks.append({
+                "field": "funder_address",
+                "sources": ["helius_funded_by", "helius_transfers"],
+                "funded_by_value": api_funder,
+                "transfer_derived_value": transfer_funder,
+                "match": match,
+                "note": "Funder sources agree" if match else "Funder mismatch: funded-by API and first inbound SOL transfer disagree — transfer-derived is more reliable",
+            })
+
+    helius_id = data.get("helius_identity")
+    arkham_sum = data.get("arkham_summary")
+    if helius_id and arkham_sum:
+        h_name = ""
+        if isinstance(helius_id, dict):
+            h_name = str(helius_id.get("name") or helius_id.get("label") or "").strip().lower()
+        a_name = ""
+        if isinstance(arkham_sum, dict):
+            a_name = str(arkham_sum.get("name") or arkham_sum.get("entity") or arkham_sum.get("label") or "").strip().lower()
+        if h_name and a_name:
+            match = h_name == a_name or h_name in a_name or a_name in h_name
+            checks.append({
+                "field": "wallet_identity",
+                "sources": ["helius_identity", "arkham"],
+                "helius_value": h_name,
+                "arkham_value": a_name,
+                "match": match,
+                "note": "Identity labels corroborate" if match else "Identity labels differ between Helius and Arkham — review both",
+            })
+
+    all_match = all(c.get("match", True) for c in checks) if checks else True
+    return {
+        "checks": checks,
+        "all_consistent": all_match,
+        "sources_compared": len(checks),
+    }
 
 
 def fetch_token(mint: str) -> dict[str, Any]:

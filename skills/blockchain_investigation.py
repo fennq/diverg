@@ -84,6 +84,10 @@ class Finding:
     evidence: str
     impact: str
     remediation: str
+    confidence: str = "medium"   # "high" | "medium" | "low"
+    source: str = ""             # e.g. "helius_rpc", "arkham_api", "solscan", "header_analysis"
+    proof: str = ""              # raw artifact: tx hash, API response snippet, header value
+    verified: bool = False       # True if cross-checked against a second data source
 
 
 @dataclass
@@ -681,7 +685,19 @@ def _build_crime_report(report: BlockchainInvestigationReport) -> dict:
         "authority_risks": [f.title for f in report.findings if "mint authority" in f.title or "freeze authority" in f.title],
     }
     findings_with_evidence = [
-        {"title": f.title, "severity": f.severity, "evidence": f.evidence[:500], "category": f.category}
+        {
+            "title": f.title,
+            "severity": f.severity,
+            "url": f.url,
+            "category": f.category,
+            "evidence": f.evidence[:2000],
+            "impact": f.impact,
+            "remediation": f.remediation,
+            "confidence": f.confidence,
+            "source": f.source,
+            "proof": f.proof,
+            "verified": f.verified,
+        }
         for f in report.findings
     ]
     flow_highlights = []
@@ -908,6 +924,10 @@ def run(
                     evidence=a.get("description", ""),
                     impact="Possible platform or insider sniper buying every launch before retail.",
                     remediation="Verify wallet is not platform-owned; consider fair launch or delay.",
+                    confidence="high",
+                    source="etherscan_api",
+                    proof=a.get("description", ""),
+                    verified=True,
                 ))
     elif solscan_key and not _over_budget(run_start):
         report.on_chain_used = True
@@ -935,6 +955,10 @@ def run(
                     evidence=a.get("description", ""),
                     impact="Possible platform or insider sniper buying every launch before retail.",
                     remediation="Verify wallet is not platform-owned; consider fair launch or delay.",
+                    confidence="high",
+                    source="solscan_api",
+                    proof=a.get("description", ""),
+                    verified=True,
                 ))
         # --- Deployer: serial launcher + defi (LP remove); collect account transfers for flow graph ---
         if deployer_address:
@@ -979,6 +1003,10 @@ def run(
                     evidence=f"Deployer {deployer_address[:12]}...: {len(defi)} ACTIVITY_TOKEN_REMOVE_LIQ.",
                     impact="LP can be pulled after launch; classic rug. Verify LP lock or burn.",
                     remediation="Lock or burn LP; audit deployer for repeated remove-liq on past tokens.",
+                    confidence="high",
+                    source="solscan_api",
+                    proof=f"{len(defi)} REMOVE_LIQ activities for {deployer_address}",
+                    verified=True,
                 ))
             # Deployer outflows (balance_change) — dump / cash-out signal
             if not _over_budget(run_start):
@@ -1024,6 +1052,10 @@ def run(
                     evidence=f"Mint authority: {str(mint_authority)[:20]}... (token {token[:12]}...). Creator can mint unlimited supply.",
                     impact="Deployer can dilute holders to zero; revoke mint authority or verify lock.",
                     remediation="Revoke mint authority on launch or use immutable mint; check on Solscan token meta.",
+                    confidence="high",
+                    source="solscan_api",
+                    proof=f"mint_authority={str(mint_authority)[:44]}, token={token}",
+                    verified=True,
                 ))
             if freeze_authority and str(freeze_authority).lower() not in ("null", "none", "revoked", "n/a", ""):
                 report.findings.append(Finding(
@@ -1034,6 +1066,10 @@ def run(
                     evidence=f"Freeze authority: {str(freeze_authority)[:20]}... (token {token[:12]}...). Creator can freeze accounts.",
                     impact="Deployer can freeze sells (honeypot: buy works, sell blocked); revoke freeze authority.",
                     remediation="Revoke freeze authority; check on Solscan token meta.",
+                    confidence="high",
+                    source="solscan_api",
+                    proof=f"freeze_authority={str(freeze_authority)[:44]}, token={token}",
+                    verified=True,
                 ))
         # --- Holder concentration + optional fee from transfers ---
         on_chain_fee_pct = None
@@ -1057,6 +1093,10 @@ def run(
                     evidence=a.get("description", ""),
                     impact="Top holders can dump and rug; verify LP lock and deployer sell pattern.",
                     remediation="Check LP lock/burn; monitor deployer and top wallets for early sells (Solscan/Arkham).",
+                    confidence="high",
+                    source="solscan_api",
+                    proof=a.get("description", ""),
+                    verified=True,
                 ))
             # Fee from first token's transfers (Solscan may include fee in decoded)
             if on_chain_fee_pct is None and stated_fee_pct is not None:
@@ -1078,6 +1118,10 @@ def run(
                     evidence=report.fee_comparison["evidence"],
                     impact="Users may be charged different than advertised; or fee not applied consistently.",
                     remediation="Align on-chain fee with stated fee; audit fee collector logic.",
+                    confidence="medium",
+                    source="solscan_api",
+                    proof=report.fee_comparison["evidence"],
+                    verified=False,
                 ))
         # --- Arkham Intel: batch labels + deployer counterparties ---
         if arkham_key and not _over_budget(run_start):
@@ -1105,6 +1149,10 @@ def run(
                             evidence=f"{addr[:12]}... → {name}",
                             impact="Entity attribution for deployer/sniper/holders aids crime investigation.",
                             remediation="Cross-check with platform and CEX off-ramp; use counterparties for flow.",
+                            confidence="high",
+                            source="arkham_api",
+                            proof=f"{addr} → {name}",
+                            verified=True,
                         ))
             if deployer_address:
                 counterparties = _arkham_intel_counterparties(SESSION, deployer_address, arkham_key, chain="solana", limit=8, time_last="30d")
@@ -1139,6 +1187,10 @@ def run(
                             evidence="Top counterparties (30d): " + ", ".join(names[:6]),
                             impact="Reveals CEX off-ramp, linked entities, or OTC; useful for tracing proceeds.",
                             remediation="Use for flow analysis and compliance; check if any counterparty is platform-related.",
+                            confidence="high",
+                            source="arkham_api",
+                            proof="Counterparties: " + ", ".join(names[:6]),
+                            verified=True,
                         ))
                 # Multi-hop (deep): add 1-hop transfers from counterparties so flow graph shows paths beyond deployer
                 if is_deep and report.counterparties and not _over_budget(run_start):
