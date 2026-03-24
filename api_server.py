@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Diverg Web Scan API — HTTP server for the Chrome extension (full web scan, no blockchain).
+Diverg Web Scan API — HTTP server for the Chrome extension (web scan + optional Solana bundle snapshot).
 
 Start: python api_server.py [--port 5000]
 
@@ -31,6 +31,9 @@ from pathlib import Path
 # Run from project root so orchestrator and skills resolve
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
+_INV = str(ROOT / "investigation")
+if _INV not in sys.path:
+    sys.path.insert(0, _INV)
 
 try:
     from flask import Flask, request, jsonify
@@ -41,6 +44,8 @@ except ImportError:
 from flask import Response, stream_with_context
 from orchestrator import run_web_scan, run_web_scan_streaming
 from poc_runner import run_poc_for_finding, run_idor_poc, run_unauth_poc, PoCResult
+
+from solana_bundle import run_bundle_snapshot
 
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
@@ -205,9 +210,37 @@ def poc_simulate():
     })
 
 
+@app.route("/api/solana/bundle-snapshot", methods=["OPTIONS"])
+def api_solana_bundle_options():
+    return "", 204
+
+
+@app.route("/api/solana/bundle-snapshot", methods=["POST"])
+def api_solana_bundle_snapshot():
+    """
+    Solana token bundle heuristic: top holders + shared-funder clustering (Helius).
+    Body: {"mint": "<token mint>", "wallet": "<optional seed wallet>"}
+    Requires HELIUS_API_KEY on the server.
+    """
+    if not request.is_json:
+        return jsonify({"error": "Content-Type must be application/json"}), 400
+    data = request.get_json() or {}
+    mint = (data.get("mint") or "").strip()
+    wallet = (data.get("wallet") or "").strip() or None
+    if not mint:
+        return jsonify({"error": "Missing 'mint'"}), 400
+    try:
+        result = run_bundle_snapshot(mint, wallet)
+        if not result.get("ok"):
+            return jsonify(result), 400
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "service": "diverg-web-scan"})
+    return jsonify({"status": "ok", "service": "diverg-web-scan", "solana_bundle": "/api/solana/bundle-snapshot"})
 
 
 def main():
@@ -215,7 +248,7 @@ def main():
     parser.add_argument("--port", type=int, default=5000, help="Port (default 5000)")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host (default 127.0.0.1)")
     args = parser.parse_args()
-    print(f"Diverg Web Scan API — http://{args.host}:{args.port}/api/scan")
+    print(f"Diverg Web Scan API — http://{args.host}:{args.port}/api/scan · POST /api/solana/bundle-snapshot")
     app.run(host=args.host, port=args.port, threaded=True)
 
 

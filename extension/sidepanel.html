@@ -8,12 +8,36 @@
   <div class="panel">
     <header class="panelHeader">
       <h1 class="panelTitle">Diverg</h1>
-      <p class="panelSub">Risks for this site</p>
+      <p class="panelSub">Security &amp; Solana intel</p>
     </header>
-    <div id="state" class="state"></div>
-    <div id="risks" class="risksList"></div>
-    <div id="footer" class="panelFooter"></div>
+
+    <div class="tabs" role="tablist">
+      <button type="button" class="tabBtn active" data-tab="web" role="tab" aria-selected="true">Site</button>
+      <button type="button" class="tabBtn" data-tab="sol" role="tab" aria-selected="false">Solana</button>
+    </div>
+
+    <section id="panelWeb" class="tabPanel" role="tabpanel">
+      <p class="panelSub panelSubInline">Risks for this tab’s site</p>
+      <div id="state" class="state"></div>
+      <div id="risks" class="risksList"></div>
+      <div id="footer" class="panelFooter"></div>
+    </section>
+
+    <section id="panelSol" class="tabPanel hidden" role="tabpanel">
+      <p class="panelSub panelSubInline">Token mint + optional wallet — requires local API + <code>HELIUS_API_KEY</code></p>
+      <label class="fieldLabel" for="solMint">Token mint</label>
+      <input type="text" id="solMint" class="fieldInput" placeholder="Solana token mint address" autocomplete="off" spellcheck="false" />
+      <label class="fieldLabel" for="solWallet">Wallet (optional)</label>
+      <input type="text" id="solWallet" class="fieldInput" placeholder="Focus cluster &amp; balance on this wallet" autocomplete="off" spellcheck="false" />
+      <button type="button" id="solAnalyze" class="primaryBtn">Analyze bundle</button>
+      <div id="solState" class="state solState"></div>
+      <div id="solOut" class="solOut"></div>
+      <div class="panelFooter solFooter">
+        <a href="options.html" target="_blank">Options</a> · run <code>python api_server.py</code>
+      </div>
+    </section>
   </div>
+  <script src="api.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

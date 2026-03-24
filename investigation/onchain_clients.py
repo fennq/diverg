@@ -104,6 +104,37 @@ def _helius_post_json_rpc(method: str, params: dict) -> Optional[Any]:
         return None
 
 
+def helius_json_rpc_ex(method: str, params: list) -> tuple[Optional[Any], Optional[str]]:
+    """
+    Standard Solana JSON-RPC via Helius (array params). Returns (result, error_message).
+    """
+    if not HELIUS_KEY:
+        return None, "HELIUS_API_KEY not set"
+    url = f"{HELIUS_RPC_BASE}/?api-key={HELIUS_KEY}"
+    try:
+        r = requests.post(
+            url,
+            json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+            headers={"Content-Type": "application/json"},
+            timeout=60,
+        )
+        r.raise_for_status()
+        data = r.json()
+        err = data.get("error")
+        if err:
+            msg = err.get("message") if isinstance(err, dict) else str(err)
+            return None, msg or "RPC error"
+        return data.get("result"), None
+    except Exception as e:
+        return None, str(e)
+
+
+def helius_json_rpc(method: str, params: list) -> Optional[Any]:
+    """Same as helius_json_rpc_ex but returns only result (or None)."""
+    res, _ = helius_json_rpc_ex(method, params)
+    return res
+
+
 def helius_wallet_history(address: str, limit: int = 25) -> Optional[dict]:
     """Parsed transaction history with balance changes. Requires HELIUS_API_KEY."""
     return _helius_get(f"/v1/wallet/{address}/history", {"limit": limit, "tokenAccounts": "balanceChanged"})
