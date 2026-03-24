@@ -17,10 +17,11 @@ from typing import Any, Optional
 from onchain_clients import (
     helius_batch_identity,
     helius_json_rpc_ex,
+    helius_transfers,
     helius_wallet_balances,
     helius_wallet_funded_by,
 )
-from solana_bundle_signals import compute_coordination_bundle
+from solana_bundle_signals import compute_coordination_bundle, effective_funder_address
 
 # Base58 Solana address (rough)
 _ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
@@ -80,17 +81,13 @@ def _parse_token_account_ui_amount(acc: Optional[dict]) -> float:
     return 0.0
 
 
-def _funder_address(funded: Optional[dict]) -> Optional[str]:
-    if not funded or not isinstance(funded, dict):
-        return None
-    f = funded.get("funder")
-    if isinstance(f, str) and _ADDR_RE.match(f):
-        return f
-    return None
-
-
-def _cluster_key(wallet: str, funded: Optional[dict]) -> str:
-    f = _funder_address(funded)
+def _cluster_key_sources(
+    wallet: str,
+    funded: Optional[dict],
+    transfers: Optional[dict],
+) -> str:
+    """Cluster by first inbound SOL sender (/transfers) when possible, else funded-by API."""
+    f = effective_funder_address(funded, transfers)
     if f:
         return f"funder:{f}"
     return f"singleton:{wallet}"
@@ -160,6 +157,7 @@ def run_bundle_snapshot(
     )
     mh = max(5, min(mh, 100))
     mf = max(5, min(mf, 100))
+    tr_limit = int(os.environ.get("SOLANA_BUNDLE_FUNDER_TRANSFERS_LIMIT", "120"))
 
     supply_raw, err = helius_json_rpc_ex("getTokenSupply", [mint])
     if err:
@@ -269,21 +267,24 @@ def run_bundle_snapshot(
     lookup_order = lookup_order[:mf]
 
     funded_by: dict[str, Optional[dict]] = {}
+    transfers_by: dict[str, Optional[dict]] = {}
     for w in lookup_order:
         fb = helius_wallet_funded_by(w)
         funded_by[w] = fb if isinstance(fb, dict) else None
+        tr = helius_transfers(w, limit=tr_limit)
+        transfers_by[w] = tr if isinstance(tr, dict) else None
         time.sleep(funded_by_delay_sec)
 
-    # Build clusters (shared direct funder only)
+    # Build clusters (shared funder: prefer first inbound SOL from /transfers, else funded-by)
     cluster_members: dict[str, set[str]] = defaultdict(set)
     for w in lookup_order:
-        fk = _cluster_key(w, funded_by.get(w))
+        fk = _cluster_key_sources(w, funded_by.get(w), transfers_by.get(w))
         cluster_members[fk].add(w)
 
     # Focus cluster
     focus_cluster_key: Optional[str] = None
     if sw:
-        focus_cluster_key = _cluster_key(sw, funded_by.get(sw))
+        focus_cluster_key = _cluster_key_sources(sw, funded_by.get(sw), transfers_by.get(sw))
     else:
         # Largest multi-wallet cluster by supply
         best_key = None
@@ -309,7 +310,7 @@ def run_bundle_snapshot(
         if seed_balance_ui is None:
             seed_balance_ui = owner_amount.get(sw)
         if focus_cluster_key and sw not in focus_members:
-            fk = _cluster_key(sw, funded_by.get(sw))
+            fk = _cluster_key_sources(sw, funded_by.get(sw), transfers_by.get(sw))
             if fk == focus_cluster_key:
                 focus_members.add(sw)
 
@@ -339,14 +340,15 @@ def run_bundle_snapshot(
                 "wallet": w,
                 "amount_ui": round(owner_amount[w], 8),
                 "pct_supply": supply_pct(owner_amount[w]),
-                "funder": _funder_address(funded_by.get(w)),
+                "funder": effective_funder_address(funded_by.get(w), transfers_by.get(w)),
                 "in_focus_cluster": w in focus_members if focus_members else False,
             }
         )
 
     disclaimer = (
-        "Heuristic only: clusters use the same *direct* funder from Helius funded-by. "
-        "Wallets not in the sampled top holders may be missing. Not financial advice."
+        "Heuristic only: clusters use the same *direct* funder where possible from first inbound SOL "
+        "(Helius /transfers), else Helius funded-by. This aligns better with explorer-style “funded by” "
+        "graphs. Wallets not in the sampled top holders may be missing. Not financial advice."
     )
 
     focus_note: Optional[str] = None
@@ -364,6 +366,7 @@ def run_bundle_snapshot(
             owner_amount=dict(owner_amount),
             mint=mint,
             focus_wallets=sorted(focus_members),
+            transfers_cache_preload=transfers_by,
         )
     except Exception as e:
         bundle_signals = {
@@ -386,7 +389,7 @@ def run_bundle_snapshot(
         "focus_cluster_note": focus_note,
         "top_holders": holders_out,
         "identities": identities,
-        "params": {"max_holders": mh, "max_funded_by_lookups": mf},
+        "params": {"max_holders": mh, "max_funded_by_lookups": mf, "funder_transfers_limit": tr_limit},
         "disclaimer": disclaimer,
         "pnl_note": "PnL not computed here; use an explorer or portfolio tool for full buy/sell history.",
         "bundle_signals": bundle_signals,

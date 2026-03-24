@@ -8,6 +8,8 @@
   /** Official Helius Solana RPC (OpenAPI); api-mainnet.* can return method not found for some calls. */
   var HELIUS_RPC = 'https://mainnet.helius-rpc.com';
   var HELIUS_WALLET = 'https://api.helius.xyz';
+  /** Wrapped SOL — treat inbound wSOL as SOL for “who funded” (matches explorers / Axiom-style views). */
+  var WSOL_MINT = 'So11111111111111111111111111111111111111112';
 
   function normalizeAddress(s) {
     if (!s || typeof s !== 'string') return null;
@@ -133,18 +135,6 @@
     return 0;
   }
 
-  function funderAddress(funded) {
-    if (!funded || typeof funded !== 'object') return null;
-    var f = funded.funder;
-    return typeof f === 'string' && ADDR_RE.test(f) ? f : null;
-  }
-
-  function clusterKey(wallet, funded) {
-    var f = funderAddress(funded);
-    if (f) return 'funder:' + f;
-    return 'singleton:' + wallet;
-  }
-
   function balanceUiForMint(apiKey, owner, mint) {
     return heliusWalletBalances(apiKey, owner).then(function (out) {
       if (!out || typeof out !== 'object') return null;
@@ -252,7 +242,14 @@
   function parseFundedByRow(fb) {
     var out = { funder: null, lamports: null, signature: null, timestamp_unix: null, slot: null };
     if (!fb || typeof fb !== 'object') return out;
-    if (typeof fb.funder === 'string') out.funder = fb.funder;
+    var fk = ['funder', 'fundingWallet', 'funding_wallet', 'from', 'fromAddress', 'from_address', 'sender', 'fundingAddress'];
+    for (var fi = 0; fi < fk.length; fi++) {
+      var fv = fb[fk[fi]];
+      if (typeof fv === 'string' && ADDR_RE.test(fv)) {
+        out.funder = fv;
+        break;
+      }
+    }
     var kLp = ['lamports', 'amountLamports', 'amount_lamports'];
     for (var i = 0; i < kLp.length; i++) {
       var lp = safeInt(fb[kLp[i]]);
@@ -286,42 +283,80 @@
     return [];
   }
 
+  function mintFromTransferRow(t) {
+    var m = t.mint;
+    if (m && typeof m === 'object') m = m.mint || m.address;
+    var tok = t.token;
+    if (tok && typeof tok === 'object') m = m || tok.mint || tok.address;
+    else if (typeof tok === 'string') m = m || tok;
+    return String(m || '').trim();
+  }
+
   function extractFirstInboundSolFromTransfers(raw) {
     var rows = iterTransferRows(raw);
     var candidates = [];
+    var wsolL = WSOL_MINT.toLowerCase();
     for (var i = 0; i < rows.length; i++) {
       var t = rows[i];
-      var direction = String(t.direction || t.type || '').toLowerCase();
-      var token = String(t.token || t.mint || '').toLowerCase();
+      var direction = String(t.direction || t.type || t.transferType || '').toLowerCase();
+      if (direction === 'out' || direction === 'outgoing' || direction === 'sent' || direction === 'send' || direction === 'withdraw') continue;
+      var mintS = mintFromTransferRow(t).toLowerCase();
       var sym = String(t.symbol || '').toUpperCase();
+      var tokS =
+        t.token && typeof t.token === 'object'
+          ? String((t.token.symbol || t.token.mint || '') + '').toLowerCase()
+          : String(t.token || '').toLowerCase();
       var isSol =
-        token.indexOf('sol') >= 0 ||
-        sym === 'SOL' ||
         t.isNative === true ||
         t.native === true ||
-        (!t.mint && (direction === 'in' || direction === 'incoming' || direction === 'received' || direction === 'receive' || direction === 'inbound' || direction === ''));
-      if (direction === 'out' || direction === 'outgoing' || direction === 'sent') continue;
-      if (!isSol && t.mint) continue;
+        sym === 'SOL' ||
+        tokS.indexOf('sol') >= 0 ||
+        mintS === wsolL ||
+        (!mintS && !t.mint) ||
+        (!mintS && (direction === 'in' || direction === 'incoming' || direction === 'received' || direction === 'receive'));
+      if (!isSol && mintS && mintS !== wsolL) continue;
+      if (
+        direction !== 'in' &&
+        direction !== 'incoming' &&
+        direction !== 'received' &&
+        direction !== 'receive' &&
+        direction !== 'inbound' &&
+        direction !== 'credit' &&
+        direction !== '' &&
+        direction !== 'transfer' &&
+        direction !== 'unknown' &&
+        direction !== 'nft'
+      ) {
+        if (direction !== '' && !isSol) continue;
+      }
       var ts = t.timestamp != null ? t.timestamp : t.blockTime != null ? t.blockTime : t.time;
       var tu = null;
       if (typeof ts === 'number') {
         tu = Math.floor(ts);
         if (tu > 1e12) tu = Math.floor(tu / 1000);
       }
-      var lam = safeInt(t.lamports != null ? t.lamports : t.amountLamports);
+      var lam = safeInt(t.lamports != null ? t.lamports : t.amountLamports != null ? t.amountLamports : t.amount);
       if (lam == null) {
-        var amt = safeFloat(t.amount != null ? t.amount : t.uiAmount);
+        var amt = safeFloat(t.amount != null ? t.amount : t.uiAmount != null ? t.uiAmount : t.tokenAmount);
         if (amt != null) lam = Math.round(amt * 1e9);
       }
       var sig = t.signature || t.tx || t.transactionSignature;
-      var fromA = t.from || t.fromUserAccount || t.sender || t.source;
+      var fromA =
+        t.from ||
+        t.fromUserAccount ||
+        t.fromAddress ||
+        t.fromUser ||
+        t.sender ||
+        t.source ||
+        t.sourceAccount;
       if (fromA && typeof fromA === 'object') fromA = fromA.address || fromA.pubkey;
       if (lam == null || tu == null) continue;
+      if (typeof fromA !== 'string' || !ADDR_RE.test(fromA)) continue;
       candidates.push({
         lamports: lam,
         timestamp_unix: tu,
         signature: typeof sig === 'string' ? sig : null,
-        from_address: typeof fromA === 'string' ? fromA : null,
+        from_address: fromA,
       });
     }
     if (!candidates.length) return null;
@@ -329,6 +364,28 @@
       return a.timestamp_unix - b.timestamp_unix;
     });
     return candidates[0];
+  }
+
+  function funderAddressFromApi(funded) {
+    if (!funded || typeof funded !== 'object') return null;
+    var keys = ['funder', 'fundingWallet', 'funding_wallet', 'from', 'fromAddress', 'from_address', 'sender', 'fundingAddress'];
+    for (var i = 0; i < keys.length; i++) {
+      var f = funded[keys[i]];
+      if (typeof f === 'string' && ADDR_RE.test(f)) return f;
+    }
+    return null;
+  }
+
+  function effectiveFunderAddress(funded, transfersRaw) {
+    var ex = extractFirstInboundSolFromTransfers(transfersRaw);
+    if (ex && typeof ex.from_address === 'string' && ADDR_RE.test(ex.from_address)) return ex.from_address;
+    return funderAddressFromApi(funded);
+  }
+
+  function clusterKeyFromSources(wallet, funded, transfersRaw) {
+    var f = effectiveFunderAddress(funded, transfersRaw);
+    if (f) return 'funder:' + f;
+    return 'singleton:' + wallet;
   }
 
   function enrichWalletFunding(wallet, fundedByRow, transfersRaw) {
@@ -340,9 +397,12 @@
       if (lamports == null) lamports = ex.lamports;
       if (ts == null) ts = ex.timestamp_unix;
     }
+    var eff = null;
+    if (ex && typeof ex.from_address === 'string' && ADDR_RE.test(ex.from_address)) eff = ex.from_address;
+    if (!eff) eff = funderAddressFromApi(fundedByRow);
     return {
       wallet: wallet,
-      funder: fb.funder || null,
+      funder: eff,
       first_fund_lamports: lamports,
       first_fund_timestamp_unix: ts,
       first_fund_signature: fb.signature || (ex && ex.signature) || null,
@@ -579,13 +639,22 @@
     var fundedBy = opts.fundedBy || {};
     var mint = opts.mint;
     var focusWallets = opts.focusWallets || [];
+    var pre = opts.transfersCache || {};
 
     var transfersCache = {};
+    Object.keys(pre).forEach(function (k) {
+      transfersCache[k] = pre[k];
+    });
     var nFetch = Math.min(lookupOrder.length, maxTransferFetch);
-    for (var ti = 0; ti < nFetch; ti++) {
-      var w = lookupOrder[ti];
+    var pending = [];
+    for (var pi = 0; pi < nFetch; pi++) {
+      var pw = lookupOrder[pi];
+      if (transfersCache[pw] == null) pending.push(pw);
+    }
+    for (var ti = 0; ti < pending.length; ti++) {
+      var w = pending[ti];
       transfersCache[w] = await heliusTransfers(apiKey, w, 80);
-      if (ti < nFetch - 1) await sleep(50);
+      if (ti < pending.length - 1) await sleep(50);
     }
 
     var metaByWallet = {};
@@ -841,9 +910,11 @@
     lookupOrder = lookupOrder.slice(0, mf);
 
     var fundedBy = {};
+    var transfersBy = {};
     for (var i = 0; i < lookupOrder.length; i++) {
       var w = lookupOrder[i];
       fundedBy[w] = await heliusFundedBy(key, w);
+      transfersBy[w] = await heliusTransfers(key, w, 120);
       if (i < lookupOrder.length - 1) await sleep(50);
     }
 
@@ -853,12 +924,12 @@
       if (clusterMembers[fk].indexOf(w) === -1) clusterMembers[fk].push(w);
     }
     lookupOrder.forEach(function (w) {
-      addToCluster(clusterKey(w, fundedBy[w]), w);
+      addToCluster(clusterKeyFromSources(w, fundedBy[w], transfersBy[w]), w);
     });
 
     var focusClusterKey = null;
     if (sw) {
-      focusClusterKey = clusterKey(sw, fundedBy[sw]);
+      focusClusterKey = clusterKeyFromSources(sw, fundedBy[sw], transfersBy[sw]);
     } else {
       var bestKey = null;
       var bestSupply = 0;
@@ -886,7 +957,7 @@
       seedBalanceUi = await balanceUiForMint(key, sw, mintNorm);
       if (seedBalanceUi == null) seedBalanceUi = ownerAmount[sw];
       if (focusClusterKey && focusMembers.indexOf(sw) === -1) {
-        if (clusterKey(sw, fundedBy[sw]) === focusClusterKey) focusMembers.push(sw);
+        if (clusterKeyFromSources(sw, fundedBy[sw], transfersBy[sw]) === focusClusterKey) focusMembers.push(sw);
       }
     }
 
@@ -909,7 +980,7 @@
         wallet: w,
         amount_ui: Math.round(ownerAmount[w] * 1e8) / 1e8,
         pct_supply: supplyPct(ownerAmount[w], totalUi),
-        funder: funderAddress(fundedBy[w]),
+        funder: effectiveFunderAddress(fundedBy[w], transfersBy[w]),
         in_focus_cluster: focusMembers.indexOf(w) >= 0,
       };
     });
@@ -929,6 +1000,7 @@
         fundedBy: fundedBy,
         mint: mintNorm,
         focusWallets: focusMembers.slice().sort(),
+        transfersCache: transfersBy,
       });
     } catch (e) {
       bundleSignals = {
@@ -952,9 +1024,9 @@
       focus_cluster_note: focusNote,
       top_holders: holdersOut,
       identities: identities,
-      params: { max_holders: mh, max_funded_by_lookups: mf },
+      params: { max_holders: mh, max_funded_by_lookups: mf, funder_transfers_limit: 120 },
       disclaimer:
-        'Heuristic only: clusters use the same *direct* funder from Helius funded-by. Wallets not in the sampled top holders may be missing. Not financial advice.',
+        'Heuristic only: clusters use the same *direct* funder where possible from first inbound SOL (Helius /transfers), else funded-by. Aligns better with explorer-style “funded by” graphs. Wallets not in the sampled top holders may be missing. Not financial advice.',
       pnl_note: 'PnL not computed here; use an explorer or portfolio tool for full buy/sell history.',
       bundle_signals: bundleSignals,
     };

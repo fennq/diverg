@@ -14,9 +14,15 @@ Not financial advice; all scores are heuristics.
 from __future__ import annotations
 
 import os
+import re
 import time
 from collections import defaultdict
 from typing import Any, Optional
+
+# Solana base58 address (rough)
+_ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+# Wrapped SOL mint — treat as inbound SOL for “who funded” (matches explorers / Axiom-style views)
+_WSOL_MINT = "So11111111111111111111111111111111111111112"
 
 from onchain_clients import (
     helius_enhanced_transactions,
@@ -61,7 +67,11 @@ def parse_funded_by_row(fb: Optional[dict]) -> dict[str, Any]:
     }
     if not fb or not isinstance(fb, dict):
         return out
-    out["funder"] = fb.get("funder") if isinstance(fb.get("funder"), str) else None
+    for k in ("funder", "fundingWallet", "funding_wallet", "from", "fromAddress", "from_address", "sender", "fundingAddress"):
+        v = fb.get(k)
+        if isinstance(v, str) and _ADDR_RE.match(v):
+            out["funder"] = v
+            break
     for k in ("lamports", "amountLamports", "amount_lamports"):
         lp = _safe_int(fb.get(k))
         if lp is not None:
@@ -89,58 +99,140 @@ def _iter_transfer_rows(raw: Optional[dict]) -> list[dict]:
     return []
 
 
+def _mint_from_transfer_row(t: dict) -> str:
+    m = t.get("mint")
+    if isinstance(m, dict):
+        m = m.get("mint") or m.get("address")
+    elif not isinstance(m, str):
+        m = None
+    tok = t.get("token")
+    if isinstance(tok, dict):
+        m = m or tok.get("mint") or tok.get("address")
+    elif isinstance(tok, str):
+        m = m or tok
+    return str(m or "").strip()
+
+
 def extract_first_inbound_sol_from_transfers(raw: Optional[dict]) -> Optional[dict]:
     """
-    Best-effort: find earliest inbound native SOL transfer from Helius /transfers payload.
+    Best-effort: find earliest inbound native SOL (or wSOL) transfer from Helius /transfers payload.
+    Prefer this over funded-by alone — aligns with explorer / Axiom “funded by” graphs.
     Returns {lamports, timestamp_unix, signature, from_address} or None.
     """
     rows = _iter_transfer_rows(raw)
     candidates: list[dict[str, Any]] = []
+    wsol_l = _WSOL_MINT.lower()
     for t in rows:
-        direction = (t.get("direction") or t.get("type") or "").lower()
-        token = (t.get("token") or t.get("mint") or "").lower()
-        sym = (t.get("symbol") or "").upper()
-        is_sol = (
-            "sol" in token
-            or sym == "SOL"
-            or t.get("isNative") is True
-            or t.get("native") is True
-            or (not t.get("mint") and direction in ("in", "incoming", "received", "receive"))
-        )
-        if direction not in ("in", "incoming", "received", "receive", "inbound", ""):
-            if direction in ("out", "outgoing", "sent"):
-                continue
-        if not is_sol and t.get("mint"):
+        direction = (t.get("direction") or t.get("type") or t.get("transferType") or "").lower()
+        if direction in ("out", "outgoing", "sent", "send", "withdraw"):
             continue
+        mint_s = _mint_from_transfer_row(t).lower()
+        sym = (t.get("symbol") or "").upper()
+        tok_o = t.get("token")
+        if isinstance(tok_o, dict):
+            tok_s = str(tok_o.get("symbol") or tok_o.get("mint") or "").lower()
+        else:
+            tok_s = str(tok_o or "").lower()
+        is_sol = (
+            t.get("isNative") is True
+            or t.get("native") is True
+            or sym == "SOL"
+            or "sol" in tok_s
+            or mint_s == wsol_l
+            or (not mint_s and not t.get("mint"))
+            or (not mint_s and direction in ("in", "incoming", "received", "receive"))
+        )
+        if not is_sol and mint_s and mint_s != wsol_l:
+            continue
+        if direction not in (
+            "in",
+            "incoming",
+            "received",
+            "receive",
+            "inbound",
+            "credit",
+            "",
+            "transfer",
+            "unknown",
+            "nft",
+        ):
+            if direction not in ("",) and not is_sol:
+                continue
         ts = t.get("timestamp") or t.get("blockTime") or t.get("time")
         tu: Optional[int] = None
         if isinstance(ts, (int, float)):
             tu = int(ts)
             if tu > 1e12:
                 tu = int(tu / 1000)
-        lam = _safe_int(t.get("lamports") or t.get("amountLamports"))
+        lam = _safe_int(t.get("lamports") or t.get("amountLamports") or t.get("amount"))
         if lam is None:
-            amt = _safe_float(t.get("amount") or t.get("uiAmount"))
+            amt = _safe_float(t.get("amount") or t.get("uiAmount") or t.get("tokenAmount"))
             if amt is not None:
                 lam = int(round(amt * 1_000_000_000))
         sig = t.get("signature") or t.get("tx") or t.get("transactionSignature")
-        from_a = t.get("from") or t.get("fromUserAccount") or t.get("sender") or t.get("source")
+        from_a = (
+            t.get("from")
+            or t.get("fromUserAccount")
+            or t.get("fromAddress")
+            or t.get("fromUser")
+            or t.get("sender")
+            or t.get("source")
+            or t.get("sourceAccount")
+        )
         if isinstance(from_a, dict):
             from_a = from_a.get("address") or from_a.get("pubkey")
         if lam is None or tu is None:
+            continue
+        if not isinstance(from_a, str) or not _ADDR_RE.match(from_a):
             continue
         candidates.append(
             {
                 "lamports": lam,
                 "timestamp_unix": tu,
                 "signature": sig if isinstance(sig, str) else None,
-                "from_address": from_a if isinstance(from_a, str) else None,
+                "from_address": from_a,
             }
         )
     if not candidates:
         return None
     candidates.sort(key=lambda x: x["timestamp_unix"])
     return candidates[0]
+
+
+def expanded_funder_from_api(funded: Optional[dict]) -> Optional[str]:
+    """Helius funded-by field names vary; normalize to one address."""
+    if not funded or not isinstance(funded, dict):
+        return None
+    for key in (
+        "funder",
+        "fundingWallet",
+        "funding_wallet",
+        "from",
+        "fromAddress",
+        "from_address",
+        "sender",
+        "fundingAddress",
+    ):
+        f = funded.get(key)
+        if isinstance(f, str) and _ADDR_RE.match(f):
+            return f
+    return None
+
+
+def effective_funder_address(
+    funded_by_row: Optional[dict],
+    transfers_raw: Optional[dict],
+) -> Optional[str]:
+    """
+    Prefer first inbound SOL sender from /transfers (on-chain), then Helius funded-by fields.
+    Use this for bundle clustering so results match typical “same funder” views (e.g. Axiom).
+    """
+    ex = extract_first_inbound_sol_from_transfers(transfers_raw)
+    if ex:
+        fa = ex.get("from_address")
+        if isinstance(fa, str) and _ADDR_RE.match(fa):
+            return fa
+    return expanded_funder_from_api(funded_by_row)
 
 
 def enrich_wallet_funding(
@@ -157,9 +249,14 @@ def enrich_wallet_funding(
             lamports = ex.get("lamports")
         if ts is None:
             ts = ex.get("timestamp_unix")
+    eff = None
+    if ex and isinstance(ex.get("from_address"), str) and _ADDR_RE.match(ex["from_address"]):
+        eff = ex["from_address"]
+    if not eff:
+        eff = expanded_funder_from_api(funded_by_row)
     return {
         "wallet": wallet,
-        "funder": fb.get("funder") or None,
+        "funder": eff,
         "first_fund_lamports": lamports,
         "first_fund_timestamp_unix": ts,
         "first_fund_signature": fb.get("signature") or (ex or {}).get("signature"),
@@ -348,17 +445,22 @@ def compute_coordination_bundle(
     owner_amount: dict[str, float],
     mint: str,
     focus_wallets: list[str],
+    transfers_cache_preload: Optional[dict[str, Optional[dict]]] = None,
 ) -> dict[str, Any]:
     """
     Run all signals; return structured report + score 0–100.
+    If transfers_cache_preload is set (e.g. from run_bundle_snapshot), reuse it to avoid duplicate /transfers calls.
     """
     meta_by_wallet: dict[str, dict[str, Any]] = {}
     transfers_cache: dict[str, Optional[dict]] = {}
+    if transfers_cache_preload:
+        transfers_cache.update(transfers_cache_preload)
 
     n_fetch = min(len(lookup_wallets), MAX_TRANSFER_FETCH)
-    for i, w in enumerate(lookup_wallets[:n_fetch]):
+    pending = [w for w in lookup_wallets[:n_fetch] if transfers_cache.get(w) is None]
+    for i, w in enumerate(pending):
         transfers_cache[w] = helius_transfers(w, limit=80)
-        if i < n_fetch - 1:
+        if i < len(pending) - 1:
             time.sleep(0.05)
 
     for w in lookup_wallets:
