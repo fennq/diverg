@@ -1,0 +1,647 @@
+/**
+ * Diverg Extension — Deep security scan (headers, HTML, path probe).
+ * Thorough checks with detailed evidence. No external API required for extended scan.
+ */
+
+(function (global) {
+  try {
+  const SECURITY_HEADERS = [
+    { name: 'Strict-Transport-Security', severity: 'High', missing: 'HSTS not set.', impact: 'Browser may allow HTTP; traffic not enforced as HTTPS.', remediation: 'Add Strict-Transport-Security: max-age=31536000; includeSubDomains; preload' },
+    { name: 'Content-Security-Policy', severity: 'Medium', missing: 'CSP not set.', impact: 'No browser-level XSS mitigation.', remediation: "Implement Content-Security-Policy (e.g. default-src 'self')" },
+    { name: 'X-Frame-Options', severity: 'Medium', missing: 'X-Frame-Options not set.', impact: 'Clickjacking possible.', remediation: "Add X-Frame-Options: DENY or SAMEORIGIN" },
+    { name: 'X-Content-Type-Options', severity: 'Low', missing: 'X-Content-Type-Options not set.', impact: 'MIME sniffing possible.', remediation: 'Add X-Content-Type-Options: nosniff' },
+    { name: 'Referrer-Policy', severity: 'Low', missing: 'Referrer-Policy not set.', impact: 'Full URL may leak in Referer.', remediation: 'Add Referrer-Policy: strict-origin-when-cross-origin' },
+    { name: 'Permissions-Policy', severity: 'Low', missing: 'Permissions-Policy not set.', impact: 'Browser features not restricted.', remediation: 'Add Permissions-Policy to restrict camera, mic, etc.' },
+    { name: 'Cross-Origin-Opener-Policy', severity: 'Low', missing: 'COOP not set.', impact: 'Cross-origin context sharing possible.', remediation: 'Add Cross-Origin-Opener-Policy: same-origin where appropriate' },
+  ];
+
+  const DANGEROUS_HEADERS = [
+    { name: 'Server', msg: 'Exposes server software/version.', severity: 'Low' },
+    { name: 'X-Powered-By', msg: 'Exposes backend framework.', severity: 'Low' },
+    { name: 'X-AspNet-Version', msg: 'Exposes ASP.NET version.', severity: 'Low' },
+    { name: 'X-AspNetMvc-Version', msg: 'Exposes ASP.NET MVC version.', severity: 'Low' },
+  ];
+
+  function getHeader(headers, name) {
+    const lower = name.toLowerCase();
+    for (const [k, v] of headers.entries()) if (k.toLowerCase() === lower) return v;
+    return null;
+  }
+
+  function allHeadersList(response) {
+    const out = [];
+    response.headers.forEach((v, k) => { out.push(`${k}: ${v}`); });
+    return out;
+  }
+
+  function finding(title, severity, url, category, evidence, impact, remediation, detail) {
+    const o = { title, severity, url, category, evidence, impact, remediation };
+    if (detail) o.detail = detail;
+    return o;
+  }
+
+  function analyzeHeaders(url, response) {
+    const findings = [];
+    const headers = response.headers;
+
+    const allHeaderLines = allHeadersList(response);
+    const headerSummary = allHeaderLines.length ? allHeaderLines.join('\n') : 'No headers captured.';
+    findings.push(finding(
+      'Response headers (full list)',
+      'Info',
+      url,
+      'Headers',
+      `Total: ${allHeaderLines.length} header(s). Use this to verify every header the server sends.`,
+      'Review for any unexpected or sensitive headers.',
+      'Remove or restrict headers that leak stack or version info.',
+      headerSummary
+    ));
+
+    for (const def of SECURITY_HEADERS) {
+      const value = getHeader(headers, def.name);
+      if (!value || !value.trim()) {
+        findings.push(finding(
+          def.missing,
+          def.severity,
+          url,
+          'Headers',
+          `'${def.name}' was not present in the response. Check the full header list above.`,
+          def.impact,
+          def.remediation
+        ));
+        continue;
+      }
+      if (def.name === 'Strict-Transport-Security') {
+        if (!/includeSubDomains/i.test(value)) {
+          findings.push(finding(
+            'HSTS missing includeSubDomains',
+            'Medium',
+            url,
+            'Headers',
+            `Current value: ${value}. Subdomains are not covered.`,
+            'Subdomains can be loaded over HTTP.',
+            'Add includeSubDomains to the HSTS header.',
+            value
+          ));
+        }
+        const maxAgeMatch = value.match(/max-age\s*=\s*(\d+)/i);
+        if (maxAgeMatch) {
+          const maxAge = parseInt(maxAgeMatch[1], 10);
+          if (maxAge < 31536000) {
+            findings.push(finding(
+              `HSTS max-age too low (${maxAge}s)`,
+              'Low',
+              url,
+              'Headers',
+              `max-age=${maxAge}. Recommended ≥ 31536000 (1 year). Full header: ${value}`,
+              'Short max-age reduces long-term HSTS protection.',
+              'Set max-age to at least 31536000.',
+              value
+            ));
+          }
+        }
+      }
+      if (def.name === 'Content-Security-Policy' && value) {
+        const hasUnsafeInline = /'unsafe-inline'|unsafe-inline/i.test(value);
+        const hasUnsafeEval = /'unsafe-eval'|unsafe-eval/i.test(value);
+        if (hasUnsafeInline || hasUnsafeEval) {
+          const parts = [];
+          if (hasUnsafeInline) parts.push('unsafe-inline');
+          if (hasUnsafeEval) parts.push('unsafe-eval');
+          findings.push(finding(
+            `CSP allows ${parts.join(' and ')}`,
+            'Medium',
+            url,
+            'Headers',
+            `Content-Security-Policy weakens XSS protection. Directives include: ${parts.join(', ')}. Full CSP: ${value.substring(0, 300)}${value.length > 300 ? '…' : ''}`,
+            'Script injection or inline execution may be possible; CSP is less effective.',
+            "Tighten script-src; avoid 'unsafe-inline' and 'unsafe-eval' where possible.",
+            value
+          ));
+        }
+      }
+    }
+
+    for (const { name, msg, severity } of DANGEROUS_HEADERS) {
+      const value = getHeader(headers, name);
+      if (value && value.trim()) {
+        findings.push(finding(
+          `Information disclosure: ${name}`,
+          severity,
+          url,
+          'Information Disclosure',
+          `Header value: ${value}. This can be used to fingerprint the stack.`,
+          msg,
+          `Remove or genericize the ${name} header.`,
+          value
+        ));
+      }
+    }
+
+    const setCookies = headers.get('set-cookie') || headers.get('Set-Cookie');
+    if (setCookies) {
+      const cookieStr = Array.isArray(setCookies) ? setCookies.join('\n---\n') : setCookies;
+      const hasSecure = /;\s*Secure\b/i.test(cookieStr);
+      const hasHttpOnly = /;\s*HttpOnly\b/i.test(cookieStr);
+      const hasSameSite = /;\s*SameSite\s*=/i.test(cookieStr);
+      if (!hasSecure) {
+        findings.push(finding(
+          'Set-Cookie: Secure flag not seen',
+          'Medium',
+          url,
+          'Cookies',
+          'At least one cookie in the response does not include the Secure attribute. Raw Set-Cookie value(s) below for verification.',
+          'Cookies can be sent over HTTP; risk of interception.',
+          'Add the Secure attribute to all cookies on HTTPS.',
+          cookieStr.substring(0, 800)
+        ));
+      }
+      if (!hasHttpOnly) {
+        findings.push(finding(
+          'Set-Cookie: HttpOnly flag not seen',
+          'Medium',
+          url,
+          'Cookies',
+          'Session or sensitive cookies should use HttpOnly so JavaScript cannot read them. Raw Set-Cookie value(s) below.',
+          'XSS could steal session if cookies are readable by script.',
+          'Add HttpOnly to session and sensitive cookies.',
+          cookieStr.substring(0, 800)
+        ));
+      }
+      findings.push(finding(
+        'Cookie attributes summary',
+        'Info',
+        url,
+        'Cookies',
+        `Secure: ${hasSecure ? 'yes' : 'no'}. HttpOnly: ${hasHttpOnly ? 'yes' : 'no'}. SameSite present: ${hasSameSite ? 'yes' : 'no'}.`,
+        'Review the full Set-Cookie value(s) in the detail section.',
+        'Set Secure, HttpOnly, and SameSite=Strict/Lax where appropriate.',
+        cookieStr.substring(0, 1000)
+      ));
+    }
+
+    if (url.startsWith('http://')) {
+      findings.push(finding('Page served over HTTP', 'High', url, 'Transport', 'Final request URL uses http:// — connection is not encrypted.', 'Traffic is visible to eavesdroppers.', 'Serve over HTTPS and redirect HTTP to HTTPS.'));
+    } else if (url.startsWith('https://')) {
+      findings.push(finding('Page served over HTTPS', 'Info', url, 'Transport', 'Final request URL uses https:// — connection is encrypted.', 'Traffic is encrypted in transit.', 'None.'));
+    }
+
+    const acao = getHeader(headers, 'Access-Control-Allow-Origin');
+    if (acao === '*') {
+      findings.push(finding(
+        'CORS allows any origin (*)',
+        'Low',
+        url,
+        'Headers',
+        `Access-Control-Allow-Origin: ${acao}. Any website can make cross-origin requests.`,
+        'With credentials, data could be exposed to any origin.',
+        'Restrict to specific origins or avoid credentials with *.',
+        `Access-Control-Allow-Origin: ${acao}`
+      ));
+    }
+
+    const allow = getHeader(headers, 'Allow');
+    if (allow) {
+      findings.push(finding(
+        'HTTP Allow header (methods)',
+        'Info',
+        url,
+        'Headers',
+        `Server reports allowed methods: ${allow}.`,
+        'Useful for knowing what methods the server accepts (GET, POST, PUT, DELETE, etc.).',
+        'Restrict methods to what is actually needed.',
+        allow
+      ));
+    }
+
+    return findings;
+  }
+
+  function extractForms(html) {
+    const forms = [];
+    const formRe = /<form[^>]*>[\s\S]*?<\/form>/gi;
+    let m;
+    while ((m = formRe.exec(html)) !== null) {
+      const block = m[0];
+      const action = (block.match(/action\s*=\s*["']([^"']*)["']/i) || [null, ''])[1];
+      const method = (block.match(/method\s*=\s*["']?(\w+)["']?/i) || [null, 'GET'])[1].toUpperCase();
+      const inputs = (block.match(/<input[^>]*name\s*=\s*["']([^"']*)["']/gi) || []).map(s => (s.match(/name\s*=\s*["']([^"']*)["']/i) || [null, '?'])[1]);
+      forms.push({ action: action || '(same page)', method, inputs });
+    }
+    return forms;
+  }
+
+  function extractScriptSrcs(html) {
+    return (html.match(/<script[^>]*src\s*=\s*["']([^"']+)["']/gi) || []).map(s => (s.match(/src\s*=\s*["']([^"']+)["']/i) || [null, ''])[1]);
+  }
+
+  function extractLinks(html) {
+    const hrefs = (html.match(/<a[^>]*href\s*=\s*["']([^"']+)["']/gi) || []).map(s => (s.match(/href\s*=\s*["']([^"']+)["']/i) || [null, ''])[1]);
+    return hrefs;
+  }
+
+  function analyzeHtml(url, html) {
+    const findings = [];
+    if (!html || typeof html !== 'string') return findings;
+
+    const forms = extractForms(html);
+    const scriptSrcs = extractScriptSrcs(html);
+    const links = extractLinks(html);
+    const inlineScriptCount = (html.match(/<script[^>]*>[\s\S]*?<\/script>/gi) || []).length;
+    const iframeCount = (html.match(/<iframe/gi) || []).length;
+    const metaTags = (html.match(/<meta[^>]+>/gi) || []).length;
+
+    const formDetail = forms.map((f, i) => `Form ${i + 1}: action="${f.action}", method=${f.method}, inputs=[${f.inputs.join(', ')}]`).join('\n');
+    if (forms.length > 0) {
+      const hasToken = /csrf|_token|authenticity_token|__requestverificationtoken/i.test(html);
+      findings.push(finding(
+        `Page has ${forms.length} form(s)`,
+        hasToken ? 'Info' : 'Medium',
+        url,
+        'Page Structure',
+        `Forms: ${forms.length}. ${hasToken ? 'Common CSRF token name found in page.' : 'No common CSRF token name (csrf, _token, authenticity_token) found — verify manually.'} Each form's action, method, and input names are listed in the detail section.`,
+        hasToken ? 'Forms present; token name detected.' : 'If state-changing forms lack CSRF protection, they may be vulnerable to CSRF.',
+        'Implement CSRF tokens for state-changing forms; verify in browser.',
+        formDetail
+      ));
+    }
+
+    if (inlineScriptCount > 0 || scriptSrcs.length > 0) {
+      const externalList = scriptSrcs.slice(0, 20).join('\n');
+      findings.push(finding(
+        `Scripts: ${inlineScriptCount} inline, ${scriptSrcs.length} external`,
+        'Info',
+        url,
+        'Page Structure',
+        `Inline <script> blocks: ${inlineScriptCount}. External script srcs: ${scriptSrcs.length}. Inline scripts are harder to lock down with CSP. First 20 external URLs in detail.`,
+        'Inline scripts increase XSS surface; external scripts should be from trusted origins.',
+        'Move scripts to external files; use CSP script-src to restrict.',
+        externalList || '(none)'
+      ));
+    }
+
+    if (links.length > 0) {
+      const externalLinks = links.filter(h => h.startsWith('http') && !h.startsWith(new URL(url).origin));
+      findings.push(finding(
+        `Page has ${links.length} link(s), ${externalLinks.length} to external origins`,
+        'Info',
+        url,
+        'Page Structure',
+        `Total <a href>: ${links.length}. External: ${externalLinks.length}. Review for open redirect or untrusted targets.`,
+        'External links can be phished or lead to untrusted sites.',
+        'Validate redirect targets; use rel="noopener" for target="_blank".',
+        externalLinks.slice(0, 30).join('\n') || '(none)'
+      ));
+    }
+
+    if (url.startsWith('https://') && /(?:src|href)\s*=\s*["']http:\/\//i.test(html)) {
+      const count = (html.match(/(?:src|href)\s*=\s*["']http:\/\//gi) || []).length;
+      const examples = (html.match(/(?:src|href)\s*=\s*["'](http:\/\/[^"']+)["']/gi) || []).slice(0, 10).join(', ');
+      findings.push(finding(
+        'Mixed content: HTTP resources on HTTPS page',
+        'Medium',
+        url,
+        'Page Structure',
+        `Found ${count} resource(s) loaded over http://. Browsers may block or warn. Example attributes: ${examples}`,
+        'Insecure resources can be tampered with; some browsers block them.',
+        'Load all resources over HTTPS.',
+        `Count: ${count}. Search the page for src="http:// or href="http://`
+      ));
+    }
+
+    const passwordInputs = (html.match(/<input[^>]*type\s*=\s*["']?password["']?[^>]*>/gi) || []);
+    const withoutOff = passwordInputs.filter(block => !/autocomplete\s*=\s*["']?off["']?/i.test(block));
+    if (withoutOff.length > 0) {
+      findings.push(finding(
+        `${withoutOff.length} password input(s) without autocomplete=off`,
+        'Low',
+        url,
+        'Page Structure',
+        'Password fields may allow browser autocomplete. Some sites allow this by design.',
+        'On shared devices, consider disabling autocomplete for sensitive inputs.',
+        'Add autocomplete="off" only if consistent with product requirements.',
+        `Count: ${withoutOff.length}. Inspect <input type="password"> in DevTools.`
+      ));
+    }
+
+    if (iframeCount > 0 || metaTags > 0) {
+      findings.push(finding(
+        `Page structure: ${iframeCount} iframe(s), ${metaTags} meta tag(s)`,
+        'Info',
+        url,
+        'Page Structure',
+        `iframes can load third-party content; meta tags may include viewport, description, or refresh. Review for sensitive meta (e.g. refresh redirects).`,
+        'iframes can be used for clickjacking or loading untrusted content.',
+        'Use X-Frame-Options/CSP frame-ancestors; validate meta refresh targets.',
+        `iframes: ${iframeCount}, meta tags: ${metaTags}`
+      ));
+    }
+
+    return findings;
+  }
+
+  const PROBE_PATHS = [
+    { path: '/.env', label: 'Env file' },
+    { path: '/.git/config', label: 'Git config' },
+    { path: '/config.json', label: 'Config JSON' },
+    { path: '/.env.local', label: 'Env local' },
+    { path: '/api', label: 'API root' },
+    { path: '/api/v1', label: 'API v1' },
+    { path: '/api/v2', label: 'API v2' },
+    { path: '/graphql', label: 'GraphQL' },
+    { path: '/admin', label: 'Admin' },
+    { path: '/administrator', label: 'Administrator' },
+    { path: '/wp-admin', label: 'WordPress admin' },
+    { path: '/phpmyadmin', label: 'phpMyAdmin' },
+    { path: '/server-status', label: 'Server status' },
+    { path: '/debug', label: 'Debug' },
+    { path: '/actuator', label: 'Spring actuator' },
+    { path: '/actuator/health', label: 'Actuator health' },
+    { path: '/.well-known/security.txt', label: 'Security.txt' },
+    { path: '/backup', label: 'Backup' },
+    { path: '/backups', label: 'Backups' },
+    { path: '/storage', label: 'Storage' },
+    { path: '/uploads', label: 'Uploads' },
+    { path: '/swagger', label: 'Swagger' },
+    { path: '/openapi.json', label: 'OpenAPI JSON' },
+    { path: '/.htaccess', label: 'htaccess' },
+    { path: '/web.config', label: 'Web config' },
+    { path: '/robots.txt', label: 'Robots' },
+    { path: '/sitemap.xml', label: 'Sitemap' },
+    { path: '/crossdomain.xml', label: 'Crossdomain' },
+    { path: '/client-access-policy.xml', label: 'Client access policy' },
+    { path: '/.DS_Store', label: 'DS_Store' },
+    { path: '/wp-json', label: 'WordPress REST' },
+    { path: '/api/docs', label: 'API docs' },
+    { path: '/api-docs', label: 'API docs alt' },
+    { path: '/health', label: 'Health' },
+    { path: '/status', label: 'Status' },
+    { path: '/metrics', label: 'Metrics' },
+    { path: '/info', label: 'Info' },
+    { path: '/env', label: 'Env' },
+    { path: '/config', label: 'Config' },
+    { path: '/console', label: 'Console' },
+    { path: '/manager/html', label: 'Tomcat manager' },
+    { path: '/.well-known/change-password', label: 'Change password' },
+    { path: '/checkout', label: 'Checkout' },
+    { path: '/order', label: 'Order' },
+    { path: '/cart', label: 'Cart' },
+    { path: '/payment', label: 'Payment' },
+    { path: '/billing', label: 'Billing' },
+    { path: '/login', label: 'Login' },
+    { path: '/signin', label: 'Sign in' },
+  ];
+
+  /** Path subsets for option scan when API is unavailable. Goal → path labels to include. */
+  const GOAL_PATH_FILTER = {
+    'admin panel': ['Admin', 'Administrator', 'wp-admin', 'phpMyAdmin', 'Debug', 'Actuator', 'manager', 'Console'],
+    'payment bypass': ['Checkout', 'Order', 'Cart', 'Payment', 'Billing', 'Backup'],
+    'auth': ['Admin', 'Login', 'Actuator', 'Sign in'],
+    'recon': ['Robots', 'Sitemap', 'API', 'GraphQL', 'Swagger', 'OpenAPI', 'security.txt', 'Backup', 'config', 'Env'],
+    'headers': [],
+    'client-side': [],
+    'sql injection': ['api', 'API', 'GraphQL', 'Admin', 'Swagger', 'OpenAPI'],
+    'full audit': null,
+  };
+
+  function getPathsForGoal(goal) {
+    const key = (goal || '').toLowerCase().trim();
+    const filter = GOAL_PATH_FILTER[key];
+    if (filter === null || key === 'full audit') return PROBE_PATHS;
+    if (!filter || filter.length === 0) return [];
+    return PROBE_PATHS.filter((p) => filter.some((f) => p.label.toLowerCase().includes(f.toLowerCase()) || p.path.toLowerCase().includes(f.toLowerCase())));
+  }
+
+  const PROBE_CONCURRENCY = 12;
+
+  async function probeOnePath(origin, path, label) {
+    const url = origin + (path.startsWith('/') ? path : '/' + path);
+    try {
+      const res = await fetch(url, { method: 'GET', redirect: 'follow', credentials: 'omit', mode: 'cors' });
+      const status = res.status;
+      let bodyPreview = '';
+      try {
+        const text = await res.text();
+        bodyPreview = text.length > 200 ? text.substring(0, 200) + '…' : text;
+      } catch (_) {}
+      return { path, label, status, len: bodyPreview.length, preview: bodyPreview.substring(0, 120), resUrl: res.url || url };
+    } catch (_) {
+      return { path, label, status: 0, len: 0, preview: '', resUrl: url };
+    }
+  }
+
+  async function probePathsInParallel(origin, pathsToProbe) {
+    const pathResults = [];
+    for (let i = 0; i < pathsToProbe.length; i += PROBE_CONCURRENCY) {
+      const batch = pathsToProbe.slice(i, i + PROBE_CONCURRENCY);
+      const results = await Promise.all(batch.map(({ path, label }) => probeOnePath(origin, path, label)));
+      pathResults.push(...results);
+    }
+    return pathResults;
+  }
+
+  async function runOptionScan(targetUrl, goal) {
+    const key = (goal || '').toLowerCase().trim();
+    const start = Date.now();
+
+    if (key === 'headers' || key === 'ssl' || key === '') {
+      const findings = [];
+      let finalUrl = targetUrl;
+      try {
+        const response = await fetch(targetUrl, { method: 'GET', redirect: 'follow', credentials: 'omit', mode: 'cors' });
+        finalUrl = response.url || targetUrl;
+        findings.push(...analyzeHeaders(finalUrl, response));
+      } catch (err) {
+        findings.push(finding('Scan request failed', 'Info', targetUrl, 'Scan', err.message || String(err), 'Headers check could not complete.', 'Ensure the target is reachable.', err.stack || ''));
+      }
+      const duration_ms = Date.now() - start;
+      return {
+        target_url: finalUrl,
+        scan_type: 'option',
+        findings,
+        scanned_at: new Date().toISOString(),
+        scan_meta: { goal: key || 'headers', headers_only: true, duration_ms, request_count: 1 },
+      };
+    }
+
+    const base = await runStandardScan(targetUrl);
+    const findings = [...(base.findings || [])];
+    const finalUrl = base.target_url || targetUrl;
+    const origin = new URL(finalUrl).origin;
+    const pathsToProbe = getPathsForGoal(goal);
+    const pathResults = pathsToProbe.length ? await probePathsInParallel(origin, pathsToProbe) : [];
+    const pathsProbed = pathResults.length;
+    let pathsHit = 0;
+    for (const p of pathResults) {
+      if (p.status >= 200 && p.status < 400) {
+        pathsHit++;
+        findings.push(finding(
+          `Path accessible: ${p.path} (${p.label}) → ${p.status}`,
+          p.status === 200 ? 'Low' : 'Info',
+          p.resUrl,
+          'Path probe',
+          `GET ${p.path} returned ${p.status}. Label: ${p.label}. Verify if this path should be public.`,
+          'Sensitive or internal paths may be exposed.',
+          'Restrict access (auth, IP, or remove) for sensitive routes.',
+          `Status: ${p.status}. First 120 chars:\n${p.preview}`
+        ));
+      }
+    }
+
+    if (pathsProbed > 0) {
+      findings.push(finding(
+        'Option scan path summary',
+        'Info',
+        finalUrl,
+        'Scan',
+        `Probed ${pathsProbed} paths for "${goal}"; ${pathsHit} returned 2xx/3xx.`,
+        'Use this to see which paths exist for this focus.',
+        'Restrict or remove unnecessary endpoints.',
+        pathResults.map((p) => `${p.path} (${p.label}): ${p.status}`).join('\n')
+      ));
+    }
+
+    const duration_ms = Date.now() - start;
+    return {
+      target_url: finalUrl,
+      scan_type: 'option',
+      findings,
+      scanned_at: new Date().toISOString(),
+      scan_meta: { goal: key, paths_probed: pathsProbed, paths_with_2xx_3xx: pathsHit, duration_ms, request_count: 1 + pathsProbed },
+    };
+  }
+
+  async function runStandardScan(targetUrl) {
+    const findings = [];
+    let finalUrl = targetUrl;
+    const start = Date.now();
+
+    try {
+      const response = await fetch(targetUrl, { method: 'GET', redirect: 'follow', credentials: 'omit', mode: 'cors' });
+      finalUrl = response.url || targetUrl;
+      findings.push(...analyzeHeaders(finalUrl, response));
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('text/html')) {
+        const html = await response.text();
+        findings.push(...analyzeHtml(finalUrl, html));
+      }
+    } catch (err) {
+      findings.push(finding(
+        'Scan request failed',
+        'Info',
+        targetUrl,
+        'Scan',
+        err.message || String(err),
+        'Header and page checks could not be completed (e.g. CORS or network error).',
+        'Ensure the target is reachable; some checks require same-origin or permissive CORS.',
+        err.stack || ''
+      ));
+    }
+
+    const duration_ms = Date.now() - start;
+    return {
+      target_url: finalUrl,
+      scan_type: 'standard',
+      findings,
+      scanned_at: new Date().toISOString(),
+      scan_meta: { headers_checked: true, paths_probed: 0, duration_ms, request_count: 1 },
+    };
+  }
+
+  async function runExtendedScan(targetUrl) {
+    const start = Date.now();
+    const base = await runStandardScan(targetUrl);
+    const findings = [...(base.findings || [])];
+    const finalUrl = base.target_url || targetUrl;
+    const origin = new URL(finalUrl).origin;
+
+    try {
+      const optRes = await fetch(finalUrl, { method: 'OPTIONS', redirect: 'follow', credentials: 'omit', mode: 'cors' });
+      const allow = optRes.headers.get('Allow');
+      if (allow) {
+        findings.push(finding(
+          'Base URL allows HTTP methods (OPTIONS)',
+          'Info',
+          finalUrl,
+          'Headers',
+          `OPTIONS request returned Allow: ${allow}. Use this to see which methods the server accepts.`,
+          'Knowing allowed methods helps assess attack surface (e.g. PUT/DELETE without auth).',
+          'Restrict to GET/POST only if other methods are not needed.',
+          `Allow: ${allow}`
+        ));
+      }
+    } catch (_) {}
+
+    const pathResults = await probePathsInParallel(origin, PROBE_PATHS);
+    const pathsProbed = pathResults.length;
+    const pathsHit = pathResults.filter((p) => p.status >= 200 && p.status < 400).length;
+    for (const p of pathResults) {
+      if (p.status >= 200 && p.status < 400) {
+        findings.push(finding(
+          `Path accessible: ${p.path} (${p.label}) → ${p.status}`,
+          p.status === 200 ? 'Low' : 'Info',
+          p.resUrl,
+          'Path probe',
+          `GET ${p.path} returned ${p.status}. Label: ${p.label}. Verify if this path should be public. Response length: ${p.len} chars.`,
+          'Sensitive or internal paths may be exposed; review each for necessity.',
+          'Restrict access (auth, IP, or remove) for sensitive routes.',
+          `Status: ${p.status}. First 120 chars of body:\n${p.preview}`
+        ));
+      }
+    }
+
+    const lenCounts = {};
+    pathResults.filter(p => p.status === 200 && p.len > 0).forEach(p => {
+      lenCounts[p.len] = (lenCounts[p.len] || 0) + 1;
+    });
+    const sameLenCount = Math.max(0, ...Object.values(lenCounts));
+    if (sameLenCount >= 4) {
+      findings.push(finding(
+        'Path probe: possible SPA — many paths returned same response size',
+        'Info',
+        finalUrl,
+        'Path probe',
+        `${sameLenCount} paths returned the same response size. The site may be a single-page app (SPA) where every path serves the same shell; verify whether 2xx path findings are real backend endpoints or client-side routes.`,
+        'Reduces confidence that each "path accessible" finding is a distinct backend endpoint.',
+        'If the site is an SPA, treat path probe 2xx as "app shell" unless response content clearly differs (e.g. API JSON).',
+        `Same response size seen for ${sameLenCount} paths.`
+      ));
+    }
+
+    const duration_ms = Date.now() - start;
+    findings.push(finding(
+      'Path probe summary',
+      'Info',
+      finalUrl,
+      'Scan',
+      `Probed ${pathsProbed} paths; ${pathsHit} returned 2xx/3xx. Full list of probed paths and status in detail.`,
+      'Use this to see which common paths exist on the server.',
+      'Restrict or remove unnecessary endpoints.',
+      pathResults.map(p => `${p.path} (${p.label}): ${p.status}`).join('\n')
+    ));
+
+    return {
+      target_url: finalUrl,
+      scan_type: 'extended',
+      findings,
+      scanned_at: new Date().toISOString(),
+      scan_meta: {
+        headers_checked: true,
+        paths_probed: pathsProbed,
+        paths_with_2xx_3xx: pathsHit,
+        duration_ms,
+        request_count: 1 + pathsProbed,
+      },
+    };
+  }
+
+  const api = { runStandardScan, runExtendedScan, runOptionScan };
+  global.DivergScan = api;
+  if (typeof window !== 'undefined') window.DivergScan = api;
+  } catch (e) {
+    const msg = (e && e.message) ? e.message : String(e);
+    const stub = async function () { throw new Error('Scan engine failed: ' + msg); };
+    global.DivergScan = { runStandardScan: stub, runExtendedScan: stub, runOptionScan: stub };
+    if (typeof window !== 'undefined') window.DivergScan = global.DivergScan;
+  }
+})(typeof window !== 'undefined' ? window : self);
