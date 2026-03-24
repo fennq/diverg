@@ -494,6 +494,8 @@
       renderSolError('Enter a token mint.');
       return;
     }
+    if (solAnalyze.disabled) return;
+
     chrome.storage.local.set({ [SOL_MINT_KEY]: mint, [SOL_WALLET_KEY]: wallet || '' });
     solState.textContent = 'Calling Helius…';
     solState.className = 'popup-sol-status scanning';
@@ -511,6 +513,8 @@
         renderSolError('Add your Helius API key in Options.');
         return;
       }
+      solAnalyze.disabled = true;
+      solAnalyze.textContent = 'Analyzing…';
       bundle
         .runBundleSnapshot(key, mint, { wallet: wallet || null })
         .then((data) => {
@@ -522,6 +526,10 @@
         })
         .catch((e) => {
           renderSolError(e.message || 'Network error');
+        })
+        .finally(() => {
+          solAnalyze.disabled = false;
+          solAnalyze.textContent = 'Analyze bundle';
         });
     });
   });

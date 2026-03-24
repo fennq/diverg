@@ -9,7 +9,7 @@
 
   function normalizeAddress(s) {
     if (!s || typeof s !== 'string') return null;
-    var t = s.trim();
+    var t = s.trim().replace(/\s+/g, '');
     return ADDR_RE.test(t) ? t : null;
   }
 
@@ -27,17 +27,32 @@
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params }),
     })
       .then(function (r) {
-        return r.json();
-      })
-      .then(function (data) {
-        if (data.error) {
-          var msg = (data.error && data.error.message) || JSON.stringify(data.error);
-          return { result: null, error: msg };
-        }
-        return { result: data.result, error: null };
+        return r.text().then(function (text) {
+          var data;
+          try {
+            data = text ? JSON.parse(text) : {};
+          } catch (parseErr) {
+            return {
+              result: null,
+              error: (r.ok ? 'Invalid JSON from RPC' : 'HTTP ' + r.status) + (text ? ': ' + String(text).slice(0, 200) : ''),
+            };
+          }
+          if (!r.ok) {
+            var httpMsg =
+              (data.error && (data.error.message || data.error)) ||
+              (typeof data === 'object' && data.message) ||
+              'HTTP ' + r.status;
+            return { result: null, error: String(httpMsg) };
+          }
+          if (data.error) {
+            var msg = (data.error && data.error.message) || JSON.stringify(data.error);
+            return { result: null, error: msg };
+          }
+          return { result: data.result, error: null };
+        });
       })
       .catch(function (e) {
-        return { result: null, error: e.message || 'RPC failed' };
+        return { result: null, error: e.message || 'RPC network error' };
       });
   }
 
@@ -193,6 +208,13 @@
       var dec0 = parseInt(supplyVal.decimals, 10) || 0;
       totalUi = dec0 >= 0 ? amt0 / Math.pow(10, dec0) : 0;
     }
+    if (totalUi <= 0) {
+      return {
+        ok: false,
+        error:
+          'Token supply is zero or unreadable. This mint may be invalid, not an SPL token on mainnet, or the RPC returned no data.',
+      };
+    }
 
     var lg = await heliusRpc(key, 'getTokenLargestAccounts', [mintNorm]);
     if (lg.error) return { ok: false, error: 'getTokenLargestAccounts: ' + lg.error };
@@ -224,8 +246,12 @@
         var ta = batch[j];
         var owner = parseTokenAccountOwner(acc);
         if (!owner) continue;
-        var uiTa = uiFromLargest[ta] || 0;
-        var amt = uiTa || parseTokenAccountUiAmount(acc);
+        var uiTa = uiFromLargest[ta];
+        var parsedAmt = parseTokenAccountUiAmount(acc);
+        var amt =
+          uiTa != null && !isNaN(parseFloat(uiTa)) && parseFloat(uiTa) > 0
+            ? parseFloat(uiTa)
+            : parsedAmt;
         ownerAmount[owner] = (ownerAmount[owner] || 0) + amt;
       }
     }

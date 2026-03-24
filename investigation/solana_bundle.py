@@ -180,6 +180,15 @@ def run_bundle_snapshot(
         except (TypeError, ValueError):
             total_ui = 0.0
 
+    if total_ui <= 0:
+        return {
+            "ok": False,
+            "error": (
+                "Token supply is zero or unreadable. This mint may be invalid, not an SPL token on mainnet, "
+                "or the RPC returned no data."
+            ),
+        }
+
     largest_raw, err2 = helius_json_rpc_ex("getTokenLargestAccounts", [mint])
     if err2:
         return {"ok": False, "error": f"getTokenLargestAccounts: {err2}"}
@@ -225,14 +234,20 @@ def run_bundle_snapshot(
         for j, acc in enumerate(acc_list):
             ta = batch[j] if j < len(batch) else None
             owner = _parse_token_account_owner(acc)
-            ui_ta = ui_from_largest.get(ta or "", 0.0)
+            ui_ta = ui_from_largest.get(ta or "")
+            parsed_amt = _parse_token_account_ui_amount(acc)
             if not owner:
                 continue
+            try:
+                uif = float(ui_ta) if ui_ta is not None and ui_ta != "" else 0.0
+            except (TypeError, ValueError):
+                uif = 0.0
+            amount_ui = uif if uif > 0 else parsed_amt
             owner_rows.append(
                 {
                     "token_account": ta,
                     "owner": owner,
-                    "amount_ui": ui_ta if ui_ta else _parse_token_account_ui_amount(acc),
+                    "amount_ui": amount_ui,
                 }
             )
 
