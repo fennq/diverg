@@ -1,0 +1,17 @@
+---
+description: Auto commit and push after diverg extension (extension/) changes
+globs: extension/**
+alwaysApply: false
+---
+
+# Diverg extension — commit and push (automatic)
+
+This folder mirrors **[diverg-extension](https://github.com/fennq/diverg-extension)** Chrome UX (`sidepanel.*`, `solana_bundle.js`, `options.*`, `icons/`, `popup.*`, `manifest.json`, etc.).
+
+When you **change any file under `extension/`** in this repo:
+
+1. **Perform** (do not only suggest) `git status` → intentional `git add` for `extension/` paths touched → `git commit` with a clear prefix such as `fix(ext): …` or `feat(ext): …` → `git push` to the default remote/branch.
+2. Skip commit/push only if the user explicitly asked not to, or if there is nothing to commit.
+3. Do not commit secrets (API keys pasted into tracked files, `.env`).
+
+Pair with the workspace rule **Git — commit and push habit** (`git-commit-push.mdc`).

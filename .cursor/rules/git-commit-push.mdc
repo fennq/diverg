@@ -15,3 +15,7 @@ After **any substantive change** to this repository (code, docs, config template
 If the session produced multiple unrelated changes, prefer **multiple small commits** over one huge commit.
 
 When the user asks for work that touches the repo, **end the task by offering or performing** `git status` → commit → push unless they explicitly asked not to.
+
+## Diverg Chrome extension (`extension/`)
+
+Edits under **`extension/`** (mirrors [diverg-extension](https://github.com/fennq/diverg-extension)) should end with **performing** commit + push, not only offering — see **`.cursor/rules/diverg-extension-commit.mdc`** when those files are in scope.
