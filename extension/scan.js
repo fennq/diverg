@@ -240,6 +240,79 @@
     return hrefs;
   }
 
+  const SHORTENER_HOSTS = new Set([
+    'bit.ly', 't.co', 'tinyurl.com', 'goo.gl', 'ow.ly', 'buff.ly', 'is.gd', 'cutt.ly', 'rb.gy', 'rebrand.ly',
+  ]);
+  const SUSPICIOUS_TLDS = new Set(['top', 'xyz', 'click', 'gq', 'tk', 'ml', 'cf', 'work', 'zip', 'country']);
+
+  function isIpHost(host) {
+    return /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
+  }
+
+  function analyzeLinkCredibility(pageUrl, links) {
+    const origin = new URL(pageUrl).origin;
+    const seen = new Set();
+    const scored = [];
+
+    for (const raw of (links || [])) {
+      if (!raw || typeof raw !== 'string') continue;
+      let abs;
+      try {
+        abs = new URL(raw, pageUrl);
+      } catch (_) {
+        continue;
+      }
+      if (!/^https?:$/i.test(abs.protocol)) continue;
+      const href = abs.toString();
+      if (seen.has(href)) continue;
+      seen.add(href);
+
+      let score = 0;
+      const reasons = [];
+      const host = abs.hostname.toLowerCase();
+      const tld = host.includes('.') ? host.split('.').pop() : '';
+      const hay = (host + ' ' + abs.pathname.toLowerCase());
+
+      if (host.startsWith('xn--')) {
+        score += 45;
+        reasons.push('punycode-domain');
+      }
+      if (isIpHost(host)) {
+        score += 40;
+        reasons.push('ip-host');
+      }
+      if (SHORTENER_HOSTS.has(host)) {
+        score += 30;
+        reasons.push('url-shortener');
+      }
+      if (SUSPICIOUS_TLDS.has(tld)) {
+        score += 22;
+        reasons.push('suspicious-tld');
+      }
+      if (/\b(airdrop|claim|bonus|giveaway|walletconnect|seed|private[-_ ]?key|drainer|free)\b/i.test(hay)) {
+        score += 18;
+        reasons.push('phishing-keywords');
+      }
+      if (abs.protocol === 'http:') {
+        score += 15;
+        reasons.push('insecure-http');
+      }
+      if (abs.origin !== origin) {
+        score += 8;
+        reasons.push('external-origin');
+      }
+
+      const severity = score >= 70 ? 'High' : score >= 40 ? 'Medium' : score >= 20 ? 'Low' : 'Info';
+      scored.push({ url: href, host, score, severity, reasons });
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    const risky = scored.filter((x) => x.score >= 40);
+    const caution = scored.filter((x) => x.score >= 20);
+
+    return { total: scored.length, riskyCount: risky.length, cautionCount: caution.length, top: scored.slice(0, 25) };
+  }
+
   function analyzeHtml(url, html) {
     const findings = [];
     if (!html || typeof html !== 'string') return findings;
@@ -292,6 +365,39 @@
         'Validate redirect targets; use rel="noopener" for target="_blank".',
         externalLinks.slice(0, 30).join('\n') || '(none)'
       ));
+
+      const cred = analyzeLinkCredibility(url, links);
+      if (cred.riskyCount > 0) {
+        findings.push(finding(
+          `Link credibility risk: ${cred.riskyCount} risky link(s)`,
+          'High',
+          url,
+          'Link credibility',
+          `Detected ${cred.riskyCount} high-confidence risky link(s) out of ${cred.total} scanned.`,
+          'Users can be redirected to phishing/malicious destinations.',
+          'Remove suspicious links, validate partner domains, and add allowlists.',
+          cred.top
+            .filter((x) => x.score >= 40)
+            .slice(0, 20)
+            .map((x) => `${x.url} | score=${x.score} | ${x.reasons.join(',')}`)
+            .join('\n')
+        ));
+      } else if (cred.cautionCount > 0) {
+        findings.push(finding(
+          `Link credibility caution: ${cred.cautionCount} suspicious link(s)`,
+          'Medium',
+          url,
+          'Link credibility',
+          `Detected ${cred.cautionCount} suspicious link(s) out of ${cred.total} scanned.`,
+          'Potential trust and phishing risk from outbound links.',
+          'Review and keep only trusted outbound domains.',
+          cred.top
+            .filter((x) => x.score >= 20)
+            .slice(0, 20)
+            .map((x) => `${x.url} | score=${x.score} | ${x.reasons.join(',')}`)
+            .join('\n')
+        ));
+      }
     }
 
     if (url.startsWith('https://') && /(?:src|href)\s*=\s*["']http:\/\//i.test(html)) {

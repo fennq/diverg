@@ -58,12 +58,52 @@
     return findings;
   }
 
+  const SHORTENER_HOSTS = new Set([
+    'bit.ly', 't.co', 'tinyurl.com', 'goo.gl', 'ow.ly', 'buff.ly', 'is.gd', 'cutt.ly', 'rb.gy', 'rebrand.ly',
+  ]);
+  const SUSPICIOUS_TLDS = new Set(['top', 'xyz', 'click', 'gq', 'tk', 'ml', 'cf', 'work', 'zip', 'country']);
+
+  function isIpHost(host) {
+    return /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
+  }
+
+  function scoreLinkCredibility(pageUrl, href) {
+    let u;
+    try {
+      u = new URL(href, pageUrl);
+    } catch (_) {
+      return null;
+    }
+    if (!/^https?:$/i.test(u.protocol)) return null;
+    const origin = new URL(pageUrl).origin;
+    const host = (u.hostname || '').toLowerCase();
+    const tld = host.includes('.') ? host.split('.').pop() : '';
+    const hay = host + ' ' + (u.pathname || '').toLowerCase();
+    let score = 0;
+    const reasons = [];
+
+    if (host.startsWith('xn--')) { score += 45; reasons.push('punycode-domain'); }
+    if (isIpHost(host)) { score += 40; reasons.push('ip-host'); }
+    if (SHORTENER_HOSTS.has(host)) { score += 30; reasons.push('url-shortener'); }
+    if (SUSPICIOUS_TLDS.has(tld)) { score += 22; reasons.push('suspicious-tld'); }
+    if (/\b(airdrop|claim|bonus|giveaway|walletconnect|seed|private[-_ ]?key|drainer|free)\b/i.test(hay)) {
+      score += 18; reasons.push('phishing-keywords');
+    }
+    if (u.protocol === 'http:') { score += 15; reasons.push('insecure-http'); }
+    if (u.origin !== origin) { score += 8; reasons.push('external-origin'); }
+
+    return { url: u.toString(), score: score, reasons: reasons };
+  }
+
   function getPageSecurityData() {
     const scripts = Array.from(document.querySelectorAll('script')).map(function (s) {
       return { src: s.src || null, integrity: s.getAttribute('integrity'), inline: !s.src };
     });
     const forms = Array.from(document.querySelectorAll('form')).map(function (f) {
       return { action: f.action || '', method: (f.method || 'get').toLowerCase() };
+    });
+    const links = Array.from(document.querySelectorAll('a[href]')).map(function (a) {
+      return a.href || a.getAttribute('href') || '';
     });
     const cookies = document.cookie ? document.cookie.length : 0;
     let bodyText = '';
@@ -74,7 +114,7 @@
     if (/api[_-]?key\s*[:=]\s*['"]?[a-zA-Z0-9_\-]{20,}/i.test(bodyText)) suspicious.push('Possible API key in page');
     if (/password\s*[:=]\s*['"]?[^'"]{8,}/i.test(bodyText)) suspicious.push('Possible password in page');
     if (/bearer\s+[a-zA-Z0-9_\-.]{20,}/i.test(bodyText)) suspicious.push('Possible Bearer token in page');
-    return { scripts: scripts, forms: forms, cookies: cookies, suspicious: suspicious };
+    return { scripts: scripts, forms: forms, links: links, cookies: cookies, suspicious: suspicious };
   }
 
   function findingsFromPageData(url, pageData) {
@@ -95,6 +135,39 @@
     suspicious.forEach(function (s) {
       findings.push({ severity: 'High', title: s, url: url, category: 'Sensitive data', evidence: 'Possible secret in page content.' });
     });
+
+    const links = Array.isArray(pageData.links) ? pageData.links : [];
+    if (links.length > 0) {
+      const uniq = Array.from(new Set(links)).slice(0, 400);
+      const scored = uniq.map(function (h) { return scoreLinkCredibility(url, h); }).filter(Boolean).sort(function (a, b) { return b.score - a.score; });
+      const risky = scored.filter(function (x) { return x.score >= 40; });
+      const caution = scored.filter(function (x) { return x.score >= 20; });
+      if (risky.length > 0) {
+        findings.push({
+          severity: 'High',
+          title: 'Link credibility risk (' + risky.length + ')',
+          url: url,
+          category: 'Link credibility',
+          evidence: 'Risky outbound links detected from live DOM links. Top: ' + risky.slice(0, 10).map(function (x) { return x.url + ' [' + x.reasons.join(',') + ']'; }).join(' | '),
+        });
+      } else if (caution.length > 0) {
+        findings.push({
+          severity: 'Medium',
+          title: 'Link credibility caution (' + caution.length + ')',
+          url: url,
+          category: 'Link credibility',
+          evidence: 'Suspicious outbound links detected from live DOM links. Top: ' + caution.slice(0, 10).map(function (x) { return x.url + ' [' + x.reasons.join(',') + ']'; }).join(' | '),
+        });
+      } else {
+        findings.push({
+          severity: 'Info',
+          title: 'Link credibility: no risky patterns',
+          url: url,
+          category: 'Link credibility',
+          evidence: 'Analyzed ' + scored.length + ' link(s) from live DOM; no risky patterns found.',
+        });
+      }
+    }
 
     return findings;
   }
