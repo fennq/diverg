@@ -29,7 +29,7 @@ Rewrote Diverg's Solana bundle scanner.
 
 Root cause of bad data: Helius DAS `getTokenAccounts` needs object params, not array — silent fail meant we were scanning 20 wallets max and calling it done.
 
-Now mirrors Godmode exactly: paginated holders → oldest sig per wallet → batch-parsed first SOL funder → cluster → verdict.
+Now does it right: paginated holders → oldest sig per wallet → batch-parsed first SOL funder → cluster → verdict.
 
 Actually finds bundles now.
 
@@ -40,14 +40,14 @@ Actually finds bundles now.
 **1/**  
 Rebuilt the Solana token bundle scanner in Diverg.
 
-Was giving clean verdicts on tokens Godmode flagged as bundled. Found the root cause. Fixed it.
+Was giving clean verdicts on bundled tokens. Found the root cause. Fixed it.
 
 **2/**  
 The bug: `getTokenAccounts` (Helius DAS) requires **object params** in the JSON-RPC body — not the standard array params. We were wrapping it wrong, it silently fell back to `getTokenLargestAccounts`, which caps at **20 accounts**. We thought we were scanning 100 wallets. We weren't.
 
 **3/**  
 New flow: `getAsset` → `getTokenAccounts` paginated (up to 500 holders) → `getSignaturesForAddress` concurrent → `/v0/transactions` batch parse for first inbound SOL funder → `batch-identity` exchange filter → cluster → risk score.  
-Same methodology as Godmode, same results.
+Industry-standard methodology, real results.
 
 ---
 
