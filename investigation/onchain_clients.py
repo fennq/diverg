@@ -185,7 +185,13 @@ def helius_enhanced_transactions(
     out = _helius_get(f"/v0/addresses/{address}/transactions", params, base=HELIUS_RPC_BASE)
     if out is None:
         out = _helius_get(f"/v0/addresses/{address}/transactions", params, base=HELIUS_WALLET_BASE)
-    return out if isinstance(out, list) else None
+    if isinstance(out, list):
+        return out
+    if isinstance(out, dict):
+        txs = out.get("transactions")
+        if isinstance(txs, list):
+            return txs
+    return None
 
 
 def helius_batch_identity(addresses: list[str]) -> Optional[list]:

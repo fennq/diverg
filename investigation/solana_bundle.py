@@ -1,5 +1,6 @@
 """
-Solana token bundle snapshot: top holders + shared-funder clustering (Helius).
+Solana token bundle snapshot: top holders + shared-funder clustering (Helius), plus
+multi-signal coordination heuristics (solana_bundle_signals.compute_coordination_bundle).
 
 The Chrome extension runs the same logic client-side (extension/solana_bundle.js) with a
 user-supplied Helius key. This module remains for Python callers (scripts, investigations)
@@ -19,6 +20,7 @@ from onchain_clients import (
     helius_wallet_balances,
     helius_wallet_funded_by,
 )
+from solana_bundle_signals import compute_coordination_bundle
 
 # Base58 Solana address (rough)
 _ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
@@ -354,6 +356,22 @@ def run_bundle_snapshot(
             "Optional: enter a wallet to focus that address’s funder-linked group."
         )
 
+    bundle_signals: Optional[dict[str, Any]] = None
+    try:
+        bundle_signals = compute_coordination_bundle(
+            lookup_wallets=lookup_order,
+            funded_by=funded_by,
+            owner_amount=dict(owner_amount),
+            mint=mint,
+            focus_wallets=sorted(focus_members),
+        )
+    except Exception as e:
+        bundle_signals = {
+            "coordination_score": 0.0,
+            "coordination_reasons": [],
+            "error": str(e),
+        }
+
     return {
         "ok": True,
         "mint": mint,
@@ -371,4 +389,5 @@ def run_bundle_snapshot(
         "params": {"max_holders": mh, "max_funded_by_lookups": mf},
         "disclaimer": disclaimer,
         "pnl_note": "PnL not computed here; use an explorer or portfolio tool for full buy/sell history.",
+        "bundle_signals": bundle_signals,
     }

@@ -473,6 +473,16 @@
     parts.push(
       `<div class="sol-card-mini highlight"><div class="sol-k-mini">Cluster (same funder)</div><div class="sol-v-mini">${escapeHtml(String((data.focus_cluster_wallets || []).length))} wallets · ${escapeHtml(String(data.focus_cluster_pct_supply != null ? data.focus_cluster_pct_supply : '—'))}%</div><div class="sol-k-mini" style="margin-top:6px">Cluster balance</div><div class="sol-v-mini">${escapeHtml(String(data.focus_cluster_supply_ui != null ? data.focus_cluster_supply_ui : '—'))}</div></div>`
     );
+    if (data.bundle_signals && data.bundle_signals.coordination_score != null) {
+      const bs = data.bundle_signals;
+      const rs = Array.isArray(bs.coordination_reasons) ? bs.coordination_reasons.join(', ') : '';
+      parts.push(
+        `<div class="sol-card-mini"><div class="sol-k-mini">Coordination score</div><div class="sol-v-mini">${escapeHtml(String(bs.coordination_score))}/100</div>${rs ? `<div class="sol-k-mini" style="margin-top:6px">Signals</div><div class="sol-v-mini" style="font-size:11px">${escapeHtml(rs)}</div>` : ''}</div>`
+      );
+      if (bs.error) {
+        parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(String(bs.error))}</p>`);
+      }
+    }
     if (data.top_holders && data.top_holders.length) {
       parts.push('<div class="sol-h3-mini">Top holders</div><ul class="sol-list-mini">');
       data.top_holders.slice(0, 6).forEach((h) => {
