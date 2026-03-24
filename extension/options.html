@@ -1,36 +1,62 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diverg Extension — Options</title>
   <link rel="stylesheet" href="popup.css">
   <style>
-    body { padding: 20px; max-width: 440px; background: #0d1117; color: #e7e9ea; }
-    .apiHint { font-size: 12px; color: #8b949e; margin: 0 0 14px; line-height: 1.45; }
-    .apiHint code { background: #21262d; padding: 2px 6px; border-radius: 4px; }
-    label { display: block; font-size: 12px; color: #8b949e; margin-bottom: 6px; }
-    input[type="password"], input[type="text"] {
-      width: 100%; padding: 8px 10px; font-size: 12px; border-radius: 6px;
-      border: 1px solid #30363d; background: #0d1117; color: #e7e9ea; font-family: ui-monospace, monospace;
-      box-sizing: border-box;
+    :root {
+      --bg-input: #161b22;
+      --border: #30363d;
+      --text: #e7e9ea;
+      --text-secondary: #8b949e;
+      --text-tertiary: #6e7681;
+      --primary: #1f6feb;
+      --primary-hover: #388bfd;
+      --critical: #f85149;
+      --low: #3fb950;
+      --radius-sm: 4px;
     }
-    button.save {
-      margin-top: 12px; padding: 8px 14px; font-size: 13px; font-weight: 600;
-      border: none; border-radius: 8px; background: #238636; color: #fff; cursor: pointer;
+    body { width: 100%; max-width: 520px; margin: 0 auto; padding: 24px; min-height: auto; background: #0d1117; color: var(--text); }
+    h1 { font-size: 18px; margin-bottom: 8px; }
+    .options-section { margin-bottom: 28px; }
+    .options-section h2 { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .options-section label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+    .options-section input[type="url"],
+    .options-section input[type="password"],
+    .options-section input[type="text"] {
+      width: 100%; padding: 10px 12px; font-size: 13px; border-radius: var(--radius-sm);
+      border: 1px solid var(--border); background: var(--bg-input); color: var(--text);
+      box-sizing: border-box; font-family: ui-monospace, monospace;
     }
-    button.save:hover { background: #2ea043; }
-    .status { margin-top: 10px; font-size: 12px; color: #7ee787; min-height: 1.2em; }
+    .options-section p { font-size: 12px; color: var(--text-tertiary); margin-top: 8px; line-height: 1.5; }
+    .btn-save { margin-top: 12px; padding: 10px 20px; background: var(--primary); color: #fff; border: none; border-radius: var(--radius-sm); font-weight: 500; cursor: pointer; }
+    .btn-save:hover { background: var(--primary-hover); }
+    .status { font-size: 12px; margin-top: 12px; color: var(--low); min-height: 1.2em; }
   </style>
 </head>
 <body>
-  <h1>Diverg Options</h1>
-  <p class="apiHint">Auto-scan on visit is in the popup: click <strong>Options ▾</strong> and toggle it there.</p>
+  <h1>Diverg Extension Options</h1>
 
-  <label for="heliusKey">Helius API key (Solana tab)</label>
-  <p class="apiHint">Required for <strong>Solana → Analyze bundle</strong> in the side panel. The key stays in this browser (Chrome storage); it is sent directly to Helius from the extension — no Python server. Get a key at <a href="https://www.helius.dev/" target="_blank" rel="noopener">helius.dev</a>.</p>
-  <input type="password" id="heliusKey" autocomplete="off" spellcheck="false" placeholder="Paste Helius API key" />
-  <button type="button" class="save" id="saveHelius">Save</button>
-  <div id="status" class="status"></div>
+  <section class="options-section">
+    <h2>Web scan API</h2>
+    <label for="api-url">Diverg API URL (optional)</label>
+    <input type="url" id="api-url" placeholder="http://127.0.0.1:5000 or leave empty">
+    <p>If set, full scans use this URL. If empty, the extension auto-detects <code>http://127.0.0.1:5000</code> or <code>http://localhost:5000</code> when you run the API locally.</p>
+    <p><strong>Auto-scan on visit</strong> is in the popup under <strong>Options ▾</strong>. It runs in the browser (headers, scripts, forms) and shows results in the side panel.</p>
+    <button type="button" id="save-api" class="btn-save">Save API URL</button>
+  </section>
 
+  <section class="options-section">
+    <h2>Solana (side panel)</h2>
+    <label for="helius-key">Helius API key</label>
+    <p>Required for the <strong>Solana</strong> tab → <em>Analyze bundle</em>. The key is stored only in this browser and sent directly to Helius. <a href="https://www.helius.dev/" target="_blank" rel="noopener">Get a key</a>.</p>
+    <input type="password" id="helius-key" autocomplete="off" spellcheck="false" placeholder="Paste Helius API key" />
+    <button type="button" id="save-helius" class="btn-save">Save Helius key</button>
+  </section>
+
+  <p id="status" class="status" role="status"></p>
   <script src="options.js"></script>
 </body>
 </html>

@@ -4,11 +4,13 @@
   const risksEl = document.getElementById('risks');
   const footerEl = document.getElementById('footer');
 
-  function onlyTrueRisks(findings) {
+  function allRisks(findings) {
     if (!Array.isArray(findings)) return [];
-    return findings.filter(function (f) {
-      var s = (f.severity || '').toLowerCase();
-      return s === 'critical' || s === 'high';
+    var order = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+    return findings.slice().sort(function (a, b) {
+      var sa = (a.severity || 'info').toLowerCase();
+      var sb = (b.severity || 'info').toLowerCase();
+      return (order[sa] !== undefined ? order[sa] : 5) - (order[sb] !== undefined ? order[sb] : 5);
     });
   }
 
@@ -38,26 +40,47 @@
 
     if (state === 'error') {
       stateEl.className = 'state error';
-      stateEl.textContent = data && data.error ? data.error : 'Scan failed.';
-      footerEl.innerHTML = 'Run <code>python api_server.py</code> in your Diverg folder. · <a href="options.html" target="_blank">Options</a>';
+      stateEl.textContent = data && data.error ? data.error : 'Could not complete scan for this tab.';
+      footerEl.innerHTML = '<a href="options.html" target="_blank">Options</a>';
       return;
     }
 
     if (state === 'done' && data) {
       var origin = data.origin || data.url || '';
-      stateEl.textContent = 'Site: ' + origin;
-      var risks = onlyTrueRisks(data.findings || []);
+      var risks = allRisks(data.findings || []);
+      var durationStr = data.scanDurationMs != null ? ' · ' + (data.scanDurationMs < 1000 ? data.scanDurationMs + 'ms' : (data.scanDurationMs / 1000).toFixed(1) + 's') : '';
+      if (data.score != null && data.verdict != null) {
+        var score = data.score;
+        var verdict = data.verdict;
+        var summaryText =
+          data.summaryText != null && data.summaryText !== ''
+            ? data.summaryText
+            : data.safeToRun
+              ? 'Safe to run'
+              : 'Proceed with caution';
+        var scoreColor = verdict === 'Risky' ? '#b91c1c' : (verdict === 'Caution' ? '#a16207' : '#15803d');
+        stateEl.innerHTML = '<div class="scoreVerdict">' +
+          '<div class="scoreVerdict-label">Scan score</div>' +
+          '<div class="scoreVerdict-value" style="color:' + scoreColor + '">' + score + '<span class="scoreVerdict-total">/100</span></div>' +
+          '<div class="scoreVerdict-summary">' + escapeHtml(summaryText) + '</div>' +
+          '<div class="scoreVerdict-verdict">Verdict: ' + escapeHtml(verdict) + '</div>' +
+          '</div>' +
+          '<div class="state-meta">' + escapeHtml(origin) + ' · ' + risks.length + ' findings' + durationStr + '</div>';
+      } else {
+        stateEl.innerHTML = '<div class="state-meta">' + escapeHtml(origin) + ' · ' + risks.length + ' findings' + durationStr + '</div>';
+      }
 
       if (risks.length === 0) {
-        risksEl.innerHTML = '<p class="noRisks">No Critical or High risks found for this site.</p>';
+        risksEl.innerHTML = '<p class="noRisks">No security issues found for this site.</p>';
       } else {
         risks.forEach(function (f) {
           var li = document.createElement('div');
-          li.className = 'risk ' + (f.severity || 'high').toLowerCase();
+          var sev = (f.severity || 'info').toLowerCase();
+          li.className = 'risk ' + sev;
           li.innerHTML =
             '<div class="riskTitle">' + escapeHtml(f.title || 'Finding') + '</div>' +
             (f.url ? '<p class="riskUrl">' + escapeHtml(f.url) + '</p>' : '') +
-            '<span class="riskSeverity ' + (f.severity || 'high').toLowerCase() + '">' + escapeHtml(f.severity || 'High') + '</span>';
+            '<span class="riskSeverity ' + sev + '">' + escapeHtml(f.severity || 'Info') + '</span>';
           risksEl.appendChild(li);
         });
       }
@@ -236,8 +259,8 @@
   }
 
   solAnalyze.addEventListener('click', function () {
-    var mint = (solMint && solMint.value) ? solMint.value.trim() : '';
-    var wallet = (solWallet && solWallet.value) ? solWallet.value.trim() : '';
+    var mint = solMint && solMint.value ? solMint.value.trim() : '';
+    var wallet = solWallet && solWallet.value ? solWallet.value.trim() : '';
     if (!mint) {
       renderSolError('Enter a token mint.');
       return;
@@ -256,11 +279,10 @@
     chrome.storage.local.get(['heliusApiKey'], function (o) {
       var key = (o.heliusApiKey || '').trim();
       if (!key) {
-        renderSolError('Add your Helius API key in Options (linked below).');
+        renderSolError('Add your Helius API key in Options.');
         return;
       }
-      var opts = { wallet: wallet || null };
-      bundle.runBundleSnapshot(key, mint, opts).then(function (data) {
+      bundle.runBundleSnapshot(key, mint, { wallet: wallet || null }).then(function (data) {
         if (!data || !data.ok) {
           renderSolError((data && data.error) || 'Request failed');
           return;

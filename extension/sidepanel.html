@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <link rel="stylesheet" href="sidepanel.css">
@@ -7,33 +7,40 @@
 <body>
   <div class="panel">
     <header class="panelHeader">
-      <h1 class="panelTitle">Diverg</h1>
-      <p class="panelSub">Security &amp; Solana intel</p>
+      <div class="headerBrand">
+        <img src="icons/32.png" alt="" class="headerLogo" width="28" height="28" />
+        <div class="headerTitles">
+          <h1 class="panelTitle">Diverg</h1>
+          <p class="panelSub">Security scan &amp; Solana bundle intel</p>
+        </div>
+      </div>
     </header>
 
-    <div class="tabs" role="tablist">
-      <button type="button" class="tabBtn active" data-tab="web" role="tab" aria-selected="true">Site</button>
+    <div class="tabs" role="tablist" aria-label="Side panel mode">
+      <button type="button" class="tabBtn active" data-tab="web" role="tab" aria-selected="true">This site</button>
       <button type="button" class="tabBtn" data-tab="sol" role="tab" aria-selected="false">Solana</button>
     </div>
 
-    <section id="panelWeb" class="tabPanel" role="tabpanel">
-      <p class="panelSub panelSubInline">Risks for this tab’s site</p>
+    <section id="panelWeb" class="tabPanel" role="tabpanel" aria-labelledby="tab-web">
+      <p class="panelHint">Findings for the active tab</p>
       <div id="state" class="state"></div>
       <div id="risks" class="risksList"></div>
       <div id="footer" class="panelFooter"></div>
     </section>
 
-    <section id="panelSol" class="tabPanel hidden" role="tabpanel">
-      <p class="panelSub panelSubInline">Token mint + optional wallet — set your <a href="options.html" target="_blank">Helius API key</a> in Options (calls Helius from this browser only).</p>
+    <section id="panelSol" class="tabPanel hidden" role="tabpanel" aria-labelledby="tab-sol">
+      <p class="panelHint">Token mint + optional wallet. Add your <strong>Helius</strong> key in <a href="options.html" target="_blank" rel="noopener">Options</a> — runs in the browser only.</p>
       <label class="fieldLabel" for="solMint">Token mint</label>
-      <input type="text" id="solMint" class="fieldInput" placeholder="Solana token mint address" autocomplete="off" spellcheck="false" />
-      <label class="fieldLabel" for="solWallet">Wallet (optional)</label>
-      <input type="text" id="solWallet" class="fieldInput" placeholder="Focus cluster &amp; balance on this wallet" autocomplete="off" spellcheck="false" />
+      <input type="text" id="solMint" class="fieldInput" placeholder="SPL mint address" autocomplete="off" spellcheck="false" />
+      <label class="fieldLabel" for="solWallet">Wallet <span class="fieldOptional">(optional)</span></label>
+      <input type="text" id="solWallet" class="fieldInput" placeholder="Focus cluster &amp; balance" autocomplete="off" spellcheck="false" />
       <button type="button" id="solAnalyze" class="primaryBtn">Analyze bundle</button>
-      <div id="solState" class="state solState"></div>
+      <div id="solState" class="state solState" aria-live="polite"></div>
       <div id="solOut" class="solOut"></div>
       <div class="panelFooter solFooter">
-        <a href="options.html" target="_blank">Helius key</a> · helius.dev
+        <a href="options.html" target="_blank" rel="noopener">Helius API key</a>
+        ·
+        <a href="https://www.helius.dev/" target="_blank" rel="noopener">helius.dev</a>
       </div>
     </section>
   </div>

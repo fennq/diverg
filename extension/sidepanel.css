@@ -1,86 +1,223 @@
-* { box-sizing: border-box; }
-body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 13px; background: #0d1117; color: #e7e9ea; }
-.panel { padding: 16px; max-width: 360px; }
-.panelHeader { margin-bottom: 12px; border-bottom: 1px solid #21262d; padding-bottom: 12px; }
-.panelTitle { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
-.panelSub { margin: 0; font-size: 12px; color: #8b949e; }
-.panelSubInline { margin-bottom: 10px; }
-.panelSubInline code { background: #21262d; padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+/* Diverg Side Panel — matches report styling */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
-.tabs { display: flex; gap: 0; margin-bottom: 12px; border-radius: 8px; overflow: hidden; border: 1px solid #30363d; }
+:root {
+  --bg: #0d0d0d;
+  --bg-elevated: #141414;
+  --bg-card: #1a1a1a;
+  --bg-input: #1a1a1a;
+  --border: #262626;
+  --text: #e5e5e5;
+  --text-secondary: #737373;
+  --text-muted: #525252;
+  --primary: #2563eb;
+  --critical: #b91c1c;
+  --high: #c2410c;
+  --medium: #a16207;
+  --low: #0369a1;
+  --info: #525252;
+  --safe: #15803d;
+  --radius-sm: 4px;
+  --radius: 6px;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+.panel { padding: 14px 16px; max-width: 360px; }
+
+.panelHeader {
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+.panelTitle { margin: 0 0 4px; font-size: 16px; font-weight: 600; color: var(--text); }
+.panelSub { margin: 0; font-size: 12px; color: var(--text-muted); font-weight: 400; }
+
+.state { margin-bottom: 12px; font-size: 13px; color: var(--text-secondary); }
+.state.scanning { color: var(--primary); }
+.state.error { color: var(--critical); }
+.state.noTab { color: var(--text-muted); }
+
+.scoreVerdict { padding: 12px 0; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.scoreVerdict-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
+.scoreVerdict-value { font-size: 22px; font-weight: 600; margin: 4px 0; }
+.scoreVerdict-total { font-size: 12px; color: var(--text-muted); font-weight: 400; }
+.scoreVerdict-summary { font-size: 13px; font-weight: 500; margin-top: 4px; color: var(--text); }
+.scoreVerdict-verdict { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.state-meta { font-size: 12px; color: var(--text-muted); }
+
+.risksList { list-style: none; padding: 0; margin: 0; }
+
+.risk {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  transition: background 0.15s ease;
+}
+.risk:hover { background: #222; }
+.risk.critical { border-left-color: var(--critical); }
+.risk.high { border-left-color: var(--high); }
+.risk.medium { border-left-color: var(--medium); }
+.risk.low { border-left-color: var(--low); }
+.risk.info { border-left-color: var(--info); }
+
+.riskTitle { font-weight: 500; font-size: 13px; margin: 0 0 4px; color: var(--text); }
+.riskUrl { font-size: 11px; color: var(--text-muted); word-break: break-all; margin: 0; }
+
+.riskSeverity {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  display: inline-block;
+  margin-top: 6px;
+  border: 1px solid transparent;
+}
+.riskSeverity.critical { background: rgba(185,28,28,0.12); color: #f87171; border-color: var(--critical); }
+.riskSeverity.high { background: rgba(194,65,12,0.12); color: #fb923c; border-color: var(--high); }
+.riskSeverity.medium { background: rgba(161,98,7,0.12); color: #facc15; border-color: var(--medium); }
+.riskSeverity.low { background: rgba(3,105,161,0.12); color: #38bdf8; border-color: var(--low); }
+.riskSeverity.info { background: rgba(115,115,115,0.12); color: var(--text-secondary); border-color: var(--border); }
+
+.panelFooter {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.panelFooter a { color: var(--primary); text-decoration: none; }
+.panelFooter a:hover { text-decoration: underline; }
+.panelFooter code { background: var(--bg-card); padding: 2px 6px; border-radius: var(--radius-sm); font-size: 11px; border: 1px solid var(--border); }
+
+.noRisks { color: var(--safe); font-size: 13px; padding: 12px 0; font-weight: 500; }
+
+/* Header + tabs + Solana (aligned with popup) */
+.headerBrand {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.headerLogo { border-radius: var(--radius-sm); flex-shrink: 0; }
+.headerTitles { min-width: 0; }
+.panelHeader .panelTitle { font-size: 17px; }
+.panelHeader .panelSub { margin-top: 2px; }
+
+.tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 12px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
 .tabBtn {
   flex: 1;
-  padding: 8px 10px;
+  padding: 9px 10px;
   font-size: 12px;
   font-weight: 600;
+  font-family: var(--font);
   border: none;
-  background: #161b22;
-  color: #8b949e;
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
+  transition: color 0.15s, background 0.15s;
 }
-.tabBtn:hover { background: #21262d; color: #e7e9ea; }
-.tabBtn.active { background: #21262d; color: #58a6ff; }
+.tabBtn:hover { background: var(--bg-card); color: var(--text-secondary); }
+.tabBtn.active {
+  background: var(--bg-card);
+  color: var(--primary);
+  box-shadow: inset 0 -2px 0 var(--primary);
+}
 .tabPanel.hidden { display: none; }
 
-.fieldLabel { display: block; font-size: 11px; color: #8b949e; margin-bottom: 4px; margin-top: 8px; }
+.panelHint {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0 0 12px;
+}
+.panelHint a { color: var(--primary); text-decoration: none; }
+.panelHint a:hover { text-decoration: underline; }
+
+.fieldLabel {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  margin-top: 10px;
+}
+.fieldLabel:first-of-type { margin-top: 0; }
+.fieldOptional { font-weight: 400; color: var(--text-muted); }
 .fieldInput {
   width: 100%;
-  padding: 8px 10px;
+  padding: 9px 11px;
   font-size: 12px;
-  border-radius: 6px;
-  border: 1px solid #30363d;
-  background: #0d1117;
-  color: #e7e9ea;
-  font-family: ui-monospace, monospace;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
 }
-.fieldInput:focus { outline: none; border-color: #58a6ff; }
+.fieldInput:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+}
 .primaryBtn {
   width: 100%;
   margin-top: 12px;
-  padding: 10px 12px;
+  padding: 10px 14px;
   font-size: 13px;
   font-weight: 600;
+  font-family: var(--font);
   border: none;
-  border-radius: 8px;
-  background: #238636;
+  border-radius: var(--radius);
+  background: var(--safe);
   color: #fff;
   cursor: pointer;
 }
-.primaryBtn:hover { background: #2ea043; }
+.primaryBtn:hover { filter: brightness(1.08); }
 .solState { margin-top: 10px; min-height: 1.2em; }
+.solState.scanning { color: var(--primary); }
 .solOut { margin-top: 10px; font-size: 12px; }
 .solCard {
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   padding: 10px 12px;
   margin-bottom: 8px;
 }
-.solCard.highlight { border-color: #388bfd66; }
-.solK { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #8b949e; margin-bottom: 4px; }
-.solV { font-size: 13px; word-break: break-all; }
+.solCard.highlight { border-color: rgba(37, 99, 235, 0.45); }
+.solK {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+.solV { font-size: 13px; word-break: break-all; color: var(--text); }
 .solV.mono { font-family: ui-monospace, monospace; font-size: 11px; }
-.solH3 { font-size: 11px; font-weight: 600; margin: 12px 0 6px; color: #c9d1d9; }
-.solList { margin: 0; padding-left: 18px; color: #8b949e; font-size: 11px; }
+.solH3 { font-size: 11px; font-weight: 600; margin: 12px 0 6px; color: var(--text-secondary); }
+.solList { margin: 0; padding-left: 18px; color: var(--text-muted); font-size: 11px; }
 .solList li { margin-bottom: 4px; }
-.tag { font-size: 10px; color: #58a6ff; }
-.solDisclaimer { font-size: 10px; color: #6e7681; line-height: 1.4; margin-top: 8px; }
+.tag { font-size: 10px; color: var(--primary); font-weight: 500; }
+.solDisclaimer { font-size: 10px; color: var(--text-muted); line-height: 1.45; margin-top: 8px; }
 .solFooter { margin-top: 12px; }
-.state { margin-bottom: 12px; font-size: 13px; color: #8b949e; }
-.state.scanning { color: #58a6ff; }
-.state.error { color: #f85149; }
-.state.noTab { color: #6e7681; }
-.risksList { list-style: none; padding: 0; margin: 0; }
-.risk { padding: 10px 12px; margin-bottom: 8px; border-radius: 8px; background: #161b22; border-left: 4px solid #30363d; }
-.risk.critical { border-left-color: #f85149; }
-.risk.high { border-left-color: #ff7b72; }
-.riskTitle { font-weight: 600; font-size: 13px; margin: 0 0 4px; }
-.riskUrl { font-size: 11px; color: #8b949e; word-break: break-all; margin: 0; }
-.riskSeverity { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 600; display: inline-block; margin-top: 4px; }
-.riskSeverity.critical { background: #f85149; color: #fff; }
-.riskSeverity.high { background: #ff7b72; color: #fff; }
-.panelFooter { margin-top: 16px; padding-top: 12px; border-top: 1px solid #21262d; font-size: 11px; color: #6e7681; }
-.panelFooter a { color: #58a6ff; text-decoration: none; }
-.panelFooter a:hover { text-decoration: underline; }
-.panelFooter code { background: #21262d; padding: 2px 6px; border-radius: 4px; font-size: 11px; }
-.noRisks { color: #7ee787; font-size: 13px; padding: 12px 0; }
