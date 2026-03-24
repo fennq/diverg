@@ -149,15 +149,15 @@ def run_bundle_snapshot(
         if not sw:
             return {"ok": False, "error": "Invalid wallet address"}
 
-    mh = max_holders if max_holders is not None else int(os.environ.get("SOLANA_BUNDLE_MAX_HOLDERS", "50"))
+    mh = max_holders if max_holders is not None else int(os.environ.get("SOLANA_BUNDLE_MAX_HOLDERS", "100"))
     mf = (
         max_funded_by_lookups
         if max_funded_by_lookups is not None
-        else int(os.environ.get("SOLANA_BUNDLE_MAX_FUNDED_BY", "40"))
+        else int(os.environ.get("SOLANA_BUNDLE_MAX_FUNDED_BY", "80"))
     )
-    mh = max(5, min(mh, 100))
-    mf = max(5, min(mf, 100))
-    tr_limit = int(os.environ.get("SOLANA_BUNDLE_FUNDER_TRANSFERS_LIMIT", "120"))
+    mh = max(5, min(mh, 200))
+    mf = max(5, min(mf, 200))
+    tr_limit = int(os.environ.get("SOLANA_BUNDLE_FUNDER_TRANSFERS_LIMIT", "200"))
 
     supply_raw, err = helius_json_rpc_ex("getTokenSupply", [mint])
     if err:

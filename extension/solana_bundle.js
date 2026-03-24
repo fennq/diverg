@@ -166,8 +166,8 @@
   var BUNDLE_SIGNAL_DEFAULTS = {
     fundingBucketSec: 5,
     lamportsRelTol: 0.002,
-    maxTransferFetch: 18,
-    maxEnhancedFetch: 10,
+    maxTransferFetch: 40,
+    maxEnhancedFetch: 14,
     maxFunderIdentity: 24,
   };
 
@@ -528,6 +528,37 @@
     return { shared_sender_to_wallets: hot, top_shared: topShared.slice(0, 12) };
   }
 
+  function sharedOutboundReceivers(lookupOrder, transfersCache) {
+    var recvToWallets = {};
+    for (var wi = 0; wi < lookupOrder.length; wi++) {
+      var w = lookupOrder[wi];
+      var rows = iterTransferRows(transfersCache[w]);
+      if (!rows.length) continue;
+      var seenForWallet = {};
+      for (var i = 0; i < rows.length; i++) {
+        var t = rows[i];
+        var direction = String(t.direction || t.type || t.transferType || '').toLowerCase();
+        if (direction !== 'out' && direction !== 'outgoing' && direction !== 'sent' && direction !== 'send' && direction !== 'withdraw') continue;
+        var toA = t.to || t.toUserAccount || t.toAddress || t.toUser || t.recipient || t.destination || t.destinationAccount;
+        if (toA && typeof toA === 'object') toA = toA.address || toA.pubkey;
+        if (typeof toA !== 'string' || !ADDR_RE.test(toA)) continue;
+        if (toA === w || seenForWallet[toA]) continue;
+        if (!recvToWallets[toA]) recvToWallets[toA] = {};
+        recvToWallets[toA][w] = true;
+        seenForWallet[toA] = true;
+      }
+    }
+    var hot = {};
+    Object.keys(recvToWallets).forEach(function (k) {
+      var wallets = Object.keys(recvToWallets[k]).sort();
+      if (wallets.length >= 2) hot[k] = wallets;
+    });
+    var top = Object.keys(hot).sort(function (a, b) {
+      return hot[b].length - hot[a].length;
+    }).slice(0, 20);
+    return { shared_receiver_to_wallets: hot, top_shared_receivers: top };
+  }
+
   function programsFromEnhanced(tx) {
     var progs = {};
     function fromList(arr) {
@@ -690,6 +721,7 @@
     }
 
     var sharedInc = sharedInboundSenders(metaByWallet);
+    var sharedOut = sharedOutboundReceivers(lookupOrder, transfersCache);
 
     var coSlotsByW = {};
     var programSets = {};
@@ -775,6 +807,10 @@
       score += Math.min(15, 5 + sharedInc.top_shared.length * 2);
       reasons.push('shared_inbound_counterparty');
     }
+    if (sharedOut.top_shared_receivers && sharedOut.top_shared_receivers.length) {
+      score += Math.min(16, 6 + sharedOut.top_shared_receivers.length * 2);
+      reasons.push('shared_outbound_receiver');
+    }
     if (coMovePairs.length) {
       score += Math.min(18, 6 + Math.min(coMovePairs.length, 4) * 3);
       reasons.push('mint_activity_same_slot');
@@ -792,6 +828,7 @@
       funding_same_amount_clusters: amountClusters,
       funder_cex_flags: cexFunders,
       shared_inbound_senders: sharedInc,
+      shared_outbound_receivers: sharedOut,
       mint_co_movement: { same_slot_groups: coMovePairs.slice(0, 15), enhanced: enhancedSample },
       program_overlap_pairs: pOverlap.slice(0, 20),
       coordination_score: score,
@@ -817,10 +854,10 @@
     if (opts.wallet && !sw) {
       return { ok: false, error: 'Invalid wallet address' };
     }
-    var mh = opts.maxHolders != null ? opts.maxHolders : 50;
-    var mf = opts.maxFundedBy != null ? opts.maxFundedBy : 40;
-    mh = Math.max(5, Math.min(mh, 100));
-    mf = Math.max(5, Math.min(mf, 100));
+    var mh = opts.maxHolders != null ? opts.maxHolders : 100;
+    var mf = opts.maxFundedBy != null ? opts.maxFundedBy : 80;
+    mh = Math.max(5, Math.min(mh, 200));
+    mf = Math.max(5, Math.min(mf, 200));
 
     var mintNorm = normalizeAddress(mint);
     if (!mintNorm) return { ok: false, error: 'Invalid mint address' };
@@ -914,7 +951,7 @@
     for (var i = 0; i < lookupOrder.length; i++) {
       var w = lookupOrder[i];
       fundedBy[w] = await heliusFundedBy(key, w);
-      transfersBy[w] = await heliusTransfers(key, w, 120);
+      transfersBy[w] = await heliusTransfers(key, w, 200);
       if (i < lookupOrder.length - 1) await sleep(50);
     }
 
@@ -1024,7 +1061,7 @@
       focus_cluster_note: focusNote,
       top_holders: holdersOut,
       identities: identities,
-      params: { max_holders: mh, max_funded_by_lookups: mf, funder_transfers_limit: 120 },
+      params: { max_holders: mh, max_funded_by_lookups: mf, funder_transfers_limit: 200 },
       disclaimer:
         'Heuristic only: clusters use the same *direct* funder where possible from first inbound SOL (Helius /transfers), else funded-by. Aligns better with explorer-style "funded by" graphs. Wallets not in the sampled top holders may be missing. Not financial advice.',
       pnl_note: 'PnL not computed here; use an explorer or portfolio tool for full buy/sell history.',

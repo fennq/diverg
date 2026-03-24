@@ -33,8 +33,8 @@ from onchain_clients import (
 # Tunables via env
 FUNDING_TIME_BUCKET_SEC = float(os.environ.get("SOLANA_BUNDLE_FUNDING_BUCKET_SEC", "5"))
 LAMPORTS_REL_TOL = float(os.environ.get("SOLANA_BUNDLE_LAMPORTS_REL_TOL", "0.002"))  # 0.2%
-MAX_TRANSFER_FETCH = int(os.environ.get("SOLANA_BUNDLE_MAX_TRANSFER_FETCH", "18"))
-MAX_ENHANCED_FETCH = int(os.environ.get("SOLANA_BUNDLE_MAX_ENHANCED_FETCH", "10"))
+MAX_TRANSFER_FETCH = int(os.environ.get("SOLANA_BUNDLE_MAX_TRANSFER_FETCH", "40"))
+MAX_ENHANCED_FETCH = int(os.environ.get("SOLANA_BUNDLE_MAX_ENHANCED_FETCH", "14"))
 MAX_FUNDER_IDENTITY = int(os.environ.get("SOLANA_BUNDLE_MAX_FUNDER_IDENTITY", "24"))
 
 
@@ -372,6 +372,43 @@ def shared_inbound_senders(meta_by_wallet: dict[str, dict[str, Any]]) -> dict[st
     return {"shared_sender_to_wallets": hot, "top_shared": sorted(hot.keys(), key=lambda k: -len(hot[k]))[:12]}
 
 
+def shared_outbound_receivers(
+    lookup_wallets: list[str],
+    transfers_cache: dict[str, Optional[dict]],
+) -> dict[str, Any]:
+    """Find receiver addresses that collect outbound transfers from multiple sampled wallets."""
+    recv_to_wallets: dict[str, set[str]] = defaultdict(set)
+    for w in lookup_wallets:
+        rows = _iter_transfer_rows(transfers_cache.get(w))
+        if not rows:
+            continue
+        seen_for_wallet: set[str] = set()
+        for t in rows:
+            direction = str(t.get("direction") or t.get("type") or t.get("transferType") or "").lower()
+            if direction not in ("out", "outgoing", "sent", "send", "withdraw"):
+                continue
+            to_a = (
+                t.get("to")
+                or t.get("toUserAccount")
+                or t.get("toAddress")
+                or t.get("toUser")
+                or t.get("recipient")
+                or t.get("destination")
+                or t.get("destinationAccount")
+            )
+            if isinstance(to_a, dict):
+                to_a = to_a.get("address") or to_a.get("pubkey")
+            if not isinstance(to_a, str) or not _ADDR_RE.match(to_a):
+                continue
+            if to_a == w or to_a in seen_for_wallet:
+                continue
+            recv_to_wallets[to_a].add(w)
+            seen_for_wallet.add(to_a)
+    hot = {k: sorted(v) for k, v in recv_to_wallets.items() if len(v) >= 2}
+    top = sorted(hot.keys(), key=lambda k: -len(hot[k]))[:20]
+    return {"shared_receiver_to_wallets": hot, "top_shared_receivers": top}
+
+
 def _programs_from_enhanced(tx: dict) -> set[str]:
     progs: set[str] = set()
 
@@ -474,6 +511,7 @@ def compute_coordination_bundle(
     cex_funders = {f: is_cex_identity(funder_idents.get(f)) for f in funders}
 
     shared_inc = shared_inbound_senders(meta_by_wallet)
+    shared_out = shared_outbound_receivers(lookup_wallets, transfers_cache)
 
     enhanced_sample: dict[str, Any] = {}
     co_slots_by_w: dict[str, list[int]] = {}
@@ -530,6 +568,9 @@ def compute_coordination_bundle(
     if shared_inc.get("top_shared"):
         score += min(15, 5 + len(shared_inc["top_shared"]) * 2)
         reasons.append("shared_inbound_counterparty")
+    if shared_out.get("top_shared_receivers"):
+        score += min(16, 6 + len(shared_out["top_shared_receivers"]) * 2)
+        reasons.append("shared_outbound_receiver")
     if co_move_pairs:
         score += min(18, 6 + min(len(co_move_pairs), 4) * 3)
         reasons.append("mint_activity_same_slot")
@@ -545,6 +586,7 @@ def compute_coordination_bundle(
         "funding_same_amount_clusters": amount_clusters,
         "funder_cex_flags": cex_funders,
         "shared_inbound_senders": shared_inc,
+        "shared_outbound_receivers": shared_out,
         "mint_co_movement": {"same_slot_groups": co_move_pairs[:15], "enhanced": enhanced_sample},
         "program_overlap_pairs": p_overlap[:20],
         "coordination_score": score,
