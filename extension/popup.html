@@ -123,16 +123,36 @@
     <div id="popup-panel-sol" class="popup-panel popup-panel-sol hidden">
       <section class="sol-section">
         <div class="sol-card">
-          <p class="sol-intro">Bundle detection via Helius. Add your <a href="options.html" target="_blank" rel="noopener">API key</a> in Options.</p>
+          <p class="sol-intro">Bundle heuristic: token snapshot + deep wallet graph (up to depth 4) when a wallet is provided. Add your <a href="options.html" target="_blank" rel="noopener">Helius API key</a> in Options.</p>
 
-          <label class="sol-field-label" for="popup-sol-mint">Token mint</label>
-          <div class="sol-input-wrap">
-            <input type="text" id="popup-sol-mint" class="sol-field-input" placeholder="SPL mint address" autocomplete="off" spellcheck="false" />
+          <div class="sol-mode-tabs">
+            <label class="sol-mode-option">
+              <input type="radio" name="sol-scan-mode" value="token" id="sol-mode-token" checked>
+              <span>Token scan</span>
+            </label>
+            <label class="sol-mode-option">
+              <input type="radio" name="sol-scan-mode" value="address" id="sol-mode-address">
+              <span>Address scan</span>
+            </label>
           </div>
 
-          <label class="sol-field-label" for="popup-sol-wallet">Focus wallet <span class="sol-optional">(optional)</span></label>
-          <div class="sol-input-wrap">
-            <input type="text" id="popup-sol-wallet" class="sol-field-input" placeholder="Analyze cluster &amp; holdings" autocomplete="off" spellcheck="false" />
+          <div id="sol-token-fields">
+            <label class="sol-field-label" for="popup-sol-mint">Token mint</label>
+            <div class="sol-input-wrap">
+              <input type="text" id="popup-sol-mint" class="sol-field-input" placeholder="SPL mint address" autocomplete="off" spellcheck="false" />
+            </div>
+
+            <label class="sol-field-label" for="popup-sol-wallet">Wallet <span class="sol-optional">(optional)</span></label>
+            <div class="sol-input-wrap">
+              <input type="text" id="popup-sol-wallet" class="sol-field-input" placeholder="Focus cluster &amp; balance" autocomplete="off" spellcheck="false" />
+            </div>
+          </div>
+
+          <div id="sol-address-fields" hidden>
+            <label class="sol-field-label" for="popup-sol-wallet-only">Wallet address</label>
+            <div class="sol-input-wrap">
+              <input type="text" id="popup-sol-wallet-only" class="sol-field-input" placeholder="Analyze wallet cluster" autocomplete="off" spellcheck="false" />
+            </div>
           </div>
         </div>
 
@@ -140,7 +160,7 @@
           <svg class="btn-icon-left" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M8 3V13M8 3L4 7M8 3L12 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <span>Analyze Solana Bundle</span>
+          <span>Analyze Solana</span>
         </button>
 
         <div id="popup-sol-state" class="popup-sol-status" aria-live="polite"></div>

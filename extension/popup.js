@@ -391,17 +391,39 @@
   const POPUP_TAB_KEY = 'divergPopupTab';
   const SOL_MINT_KEY = 'solanaBundleMint';
   const SOL_WALLET_KEY = 'solanaBundleWallet';
+  const SOL_MODE_KEY = 'solanaScanMode';
 
   const tabBtns = document.querySelectorAll('.popup-tab');
   const panelWeb = document.getElementById('popup-panel-web');
   const panelSol = document.getElementById('popup-panel-sol');
   const solMint = document.getElementById('popup-sol-mint');
   const solWallet = document.getElementById('popup-sol-wallet');
+  const solWalletOnly = document.getElementById('popup-sol-wallet-only');
   const solAnalyze = document.getElementById('popup-sol-analyze');
   const solState = document.getElementById('popup-sol-state');
   const solOut = document.getElementById('popup-sol-out');
+  const solModeToken = document.getElementById('sol-mode-token');
+  const solModeAddress = document.getElementById('sol-mode-address');
+  const solTokenFields = document.getElementById('sol-token-fields');
+  const solAddressFields = document.getElementById('sol-address-fields');
 
   if (!panelSol || !solAnalyze) return;
+
+  function getSolScanMode() {
+    return solModeAddress?.checked ? 'address' : 'token';
+  }
+
+  function updateSolFieldVisibility() {
+    const mode = getSolScanMode();
+    if (solTokenFields) solTokenFields.hidden = mode !== 'token';
+    if (solAddressFields) solAddressFields.hidden = mode !== 'address';
+  }
+
+  function saveSolMode() {
+    const mode = getSolScanMode();
+    chrome.storage.local.set({ [SOL_MODE_KEY]: mode });
+    updateSolFieldVisibility();
+  }
 
   function escapeHtml(s) {
     const div = document.createElement('div');
@@ -431,9 +453,16 @@
     } catch (_) {}
   }
 
-  chrome.storage.local.get([POPUP_TAB_KEY, SOL_MINT_KEY, SOL_WALLET_KEY], (o) => {
+  chrome.storage.local.get([POPUP_TAB_KEY, SOL_MINT_KEY, SOL_WALLET_KEY, SOL_MODE_KEY], (o) => {
     if (o[SOL_MINT_KEY] && solMint) solMint.value = o[SOL_MINT_KEY];
     if (o[SOL_WALLET_KEY] && solWallet) solWallet.value = o[SOL_WALLET_KEY];
+    if (o[SOL_WALLET_KEY] && solWalletOnly) solWalletOnly.value = o[SOL_WALLET_KEY];
+
+    const mode = o[SOL_MODE_KEY] || 'token';
+    if (solModeToken) solModeToken.checked = mode === 'token';
+    if (solModeAddress) solModeAddress.checked = mode === 'address';
+    updateSolFieldVisibility();
+
     const tab = o[POPUP_TAB_KEY] === 'sol' ? 'sol' : 'web';
     setTab(tab);
     if (tab === 'sol') tryFillMintFromActiveTab();
@@ -446,6 +475,9 @@
       if (w === 'sol') tryFillMintFromActiveTab();
     });
   });
+
+  if (solModeToken) solModeToken.addEventListener('change', saveSolMode);
+  if (solModeAddress) solModeAddress.addEventListener('change', saveSolMode);
 
   function renderSolError(msg) {
     solState.textContent = msg;
@@ -498,15 +530,29 @@
   }
 
   solAnalyze.addEventListener('click', () => {
+    const mode = getSolScanMode();
     const mint = solMint && solMint.value ? solMint.value.trim() : '';
     const wallet = solWallet && solWallet.value ? solWallet.value.trim() : '';
-    if (!mint) {
-      renderSolError('Enter a token mint.');
-      return;
+    const walletOnly = solWalletOnly && solWalletOnly.value ? solWalletOnly.value.trim() : '';
+
+    if (mode === 'token') {
+      if (!mint) {
+        renderSolError('Enter a token mint.');
+        return;
+      }
+    } else {
+      if (!walletOnly) {
+        renderSolError('Enter a wallet address.');
+        return;
+      }
     }
+
     if (solAnalyze.disabled) return;
 
-    chrome.storage.local.set({ [SOL_MINT_KEY]: mint, [SOL_WALLET_KEY]: wallet || '' });
+    chrome.storage.local.set({
+      [SOL_MINT_KEY]: mint,
+      [SOL_WALLET_KEY]: mode === 'token' ? (wallet || '') : walletOnly
+    });
     solState.textContent = 'Calling Helius…';
     solState.className = 'popup-sol-status scanning';
     solOut.innerHTML = '';
@@ -524,23 +570,53 @@
         return;
       }
       solAnalyze.disabled = true;
-      solAnalyze.textContent = 'Analyzing…';
-      bundle
-        .runBundleSnapshot(key, mint, { wallet: wallet || null })
-        .then((data) => {
-          if (!data || !data.ok) {
-            renderSolError((data && data.error) || 'Request failed');
-            return;
-          }
-          renderSolResult(data);
-        })
-        .catch((e) => {
-          renderSolError(e.message || 'Network error');
-        })
-        .finally(() => {
+      const btnText = solAnalyze.querySelector('span');
+      if (btnText) btnText.textContent = 'Analyzing…';
+
+      if (mode === 'token') {
+        bundle
+          .runBundleSnapshot(key, mint, { wallet: wallet || null })
+          .then((data) => {
+            if (!data || !data.ok) {
+              renderSolError((data && data.error) || 'Request failed');
+              return;
+            }
+            renderSolResult(data);
+          })
+          .catch((e) => {
+            renderSolError(e.message || 'Network error');
+          })
+          .finally(() => {
+            solAnalyze.disabled = false;
+            if (btnText) btnText.textContent = 'Analyze Solana';
+          });
+      } else {
+        // Address scan mode - run deep wallet analysis
+        if (typeof bundle.analyzeWalletBundle === 'function') {
+          bundle
+            .analyzeWalletBundle(key, walletOnly, { onProgress: (msg) => {
+              solState.textContent = msg;
+            }})
+            .then((data) => {
+              if (!data || !data.ok) {
+                renderSolError((data && data.error) || 'Request failed');
+                return;
+              }
+              renderSolResult({ ...data, mode: 'wallet_deep_graph' });
+            })
+            .catch((e) => {
+              renderSolError(e.message || 'Network error');
+            })
+            .finally(() => {
+              solAnalyze.disabled = false;
+              if (btnText) btnText.textContent = 'Analyze Solana';
+            });
+        } else {
+          renderSolError('Wallet analysis not available in this version.');
           solAnalyze.disabled = false;
-          solAnalyze.textContent = 'Analyze bundle';
-        });
+          if (btnText) btnText.textContent = 'Analyze Solana';
+        }
+      }
     });
   });
 })();
