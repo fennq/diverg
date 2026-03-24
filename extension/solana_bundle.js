@@ -4,7 +4,8 @@
  */
 (function (global) {
   var ADDR_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-  var HELIUS_RPC = 'https://api-mainnet.helius-rpc.com';
+  /** Official Helius Solana RPC (OpenAPI); api-mainnet.* can return method not found for some calls. */
+  var HELIUS_RPC = 'https://mainnet.helius-rpc.com';
   var HELIUS_WALLET = 'https://api.helius.xyz';
 
   function normalizeAddress(s) {
@@ -193,6 +194,13 @@
       return { ok: false, error: 'Missing Helius API key' };
     }
     var key = apiKey.trim();
+    if (ADDR_RE.test(key)) {
+      return {
+        ok: false,
+        error:
+          'Options → Helius key looks like a Solana address (often a token mint was pasted there by mistake). Use your API key from dashboard.helius.dev. Put the mint address only in the Mint field.',
+      };
+    }
 
     var sup = await heliusRpc(key, 'getTokenSupply', [mintNorm]);
     if (sup.error) return { ok: false, error: 'getTokenSupply: ' + sup.error };

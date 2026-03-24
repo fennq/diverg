@@ -2,7 +2,7 @@
 On-chain data clients for any blockchain investigation (Solana).
 - Solana RPC (public): getAccountInfo, getSignaturesForAddress — no key.
 - Helius: wallet history, transfers, identity, funded-by, balances; optional DAS and enhanced transactions.
-  Requires HELIUS_API_KEY. Base: api.helius.xyz (Wallet API), api-mainnet.helius-rpc.com (RPC/DAS/Enhanced).
+  Requires HELIUS_API_KEY. Base: api.helius.xyz (Wallet API), mainnet.helius-rpc.com (RPC/DAS).
 """
 import os
 from typing import Any, Optional
@@ -12,9 +12,9 @@ import requests
 # Public Solana RPC (rate limited but no key)
 RPC_URL = os.environ.get("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 
-# Helius: Wallet API (REST); RPC/DAS/Enhanced use api-mainnet.helius-rpc.com
+# Helius: Wallet API (REST); JSON-RPC/DAS use mainnet.helius-rpc.com (see Helius docs)
 HELIUS_WALLET_BASE = "https://api.helius.xyz"
-HELIUS_RPC_BASE = "https://api-mainnet.helius-rpc.com"
+HELIUS_RPC_BASE = "https://mainnet.helius-rpc.com"
 
 
 def _rpc(method: str, params: list) -> dict:
