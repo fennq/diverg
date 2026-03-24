@@ -5,4 +5,4 @@ Background worker and API auto-detect logic. Same code is kept in sync with the 
 **Side panel tabs**
 
 - **Site** — Auto-scan header/inline risks for the active tab (unchanged).
-- **Solana** — Token mint + optional wallet; calls `POST /api/solana/bundle-snapshot` on the local API (`python api_server.py`). Requires `HELIUS_API_KEY` in the server environment. Heuristic: top holders + wallets sharing the same direct funder (Helius funded-by).
+- **Solana** — Token mint + optional wallet; runs **in the extension** via `solana_bundle.js` (Helius RPC + Wallet API). Set your **Helius API key** under **Options** (stored in `chrome.storage.local`, sent only to Helius — no Python server). Heuristic: top holders + wallets sharing the same direct funder (Helius funded-by).

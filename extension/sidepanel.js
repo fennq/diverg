@@ -243,59 +243,32 @@
       return;
     }
     chrome.storage.local.set({ [SOL_MINT_KEY]: mint, [SOL_WALLET_KEY]: wallet || '' });
-    solState.textContent = 'Calling API…';
+    solState.textContent = 'Calling Helius…';
     solState.className = 'state solState scanning';
     solOut.innerHTML = '';
 
-    var api = typeof globalThis !== 'undefined' && globalThis.DivergAPI ? globalThis.DivergAPI : null;
-    var base = (api && api.DEFAULT_BASE) ? api.DEFAULT_BASE : 'http://127.0.0.1:5000';
-
-    function post(baseUrl) {
-      var body = { mint: mint };
-      if (wallet) body.wallet = wallet;
-      return fetch(baseUrl.replace(/\/$/, '') + '/api/solana/bundle-snapshot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }).then(function (r) {
-        return r.json().then(function (j) {
-          return { ok: r.ok, status: r.status, json: j };
-        });
-      });
+    var bundle = typeof globalThis !== 'undefined' && globalThis.divergSolanaBundle ? globalThis.divergSolanaBundle : null;
+    if (!bundle || typeof bundle.runBundleSnapshot !== 'function') {
+      renderSolError('Solana module missing — reload the extension.');
+      return;
     }
 
-    if (api && api.detectApiBase) {
-      api.detectApiBase().then(function (detected) {
-        return post(detected || base);
-      }).then(function (res) {
-        if (!res.ok) {
-          var err = (res.json && (res.json.error || res.json.message)) || 'Request failed';
-          renderSolError(typeof err === 'string' ? err : JSON.stringify(err));
+    chrome.storage.local.get(['heliusApiKey'], function (o) {
+      var key = (o.heliusApiKey || '').trim();
+      if (!key) {
+        renderSolError('Add your Helius API key in Options (linked below).');
+        return;
+      }
+      var opts = { wallet: wallet || null };
+      bundle.runBundleSnapshot(key, mint, opts).then(function (data) {
+        if (!data || !data.ok) {
+          renderSolError((data && data.error) || 'Request failed');
           return;
         }
-        if (res.json && res.json.ok === false) {
-          renderSolError(res.json.error || 'Unknown error');
-          return;
-        }
-        renderSolResult(res.json);
-      }).catch(function (e) {
-        renderSolError(e.message || 'Network error — is api_server.py running?');
-      });
-    } else {
-      post(base).then(function (res) {
-        if (!res.ok) {
-          var err2 = (res.json && res.json.error) || 'Request failed';
-          renderSolError(typeof err2 === 'string' ? err2 : JSON.stringify(err2));
-          return;
-        }
-        if (res.json && res.json.ok === false) {
-          renderSolError(res.json.error || 'Unknown error');
-          return;
-        }
-        renderSolResult(res.json);
+        renderSolResult(data);
       }).catch(function (e) {
         renderSolError(e.message || 'Network error');
       });
-    }
+    });
   });
 })();

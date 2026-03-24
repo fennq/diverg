@@ -1,6 +1,9 @@
 """
 Solana token bundle snapshot: top holders + shared-funder clustering (Helius).
-Inspired by wallet-intel / bundle-detection flows; server-side only (API keys stay on backend).
+
+The Chrome extension runs the same logic client-side (extension/solana_bundle.js) with a
+user-supplied Helius key. This module remains for Python callers (scripts, investigations)
+with HELIUS_API_KEY in the environment.
 """
 from __future__ import annotations
 

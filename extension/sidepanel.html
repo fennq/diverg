@@ -24,7 +24,7 @@
     </section>
 
     <section id="panelSol" class="tabPanel hidden" role="tabpanel">
-      <p class="panelSub panelSubInline">Token mint + optional wallet — requires local API + <code>HELIUS_API_KEY</code></p>
+      <p class="panelSub panelSubInline">Token mint + optional wallet — set your <a href="options.html" target="_blank">Helius API key</a> in Options (calls Helius from this browser only).</p>
       <label class="fieldLabel" for="solMint">Token mint</label>
       <input type="text" id="solMint" class="fieldInput" placeholder="Solana token mint address" autocomplete="off" spellcheck="false" />
       <label class="fieldLabel" for="solWallet">Wallet (optional)</label>
@@ -33,11 +33,11 @@
       <div id="solState" class="state solState"></div>
       <div id="solOut" class="solOut"></div>
       <div class="panelFooter solFooter">
-        <a href="options.html" target="_blank">Options</a> · run <code>python api_server.py</code>
+        <a href="options.html" target="_blank">Helius key</a> · helius.dev
       </div>
     </section>
   </div>
-  <script src="api.js"></script>
+  <script src="solana_bundle.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

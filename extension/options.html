@@ -4,16 +4,33 @@
   <meta charset="utf-8">
   <link rel="stylesheet" href="popup.css">
   <style>
-    body { padding: 20px; max-width: 400px; background: #0d1117; color: #e7e9ea; }
-    .apiHint { font-size: 12px; color: #8b949e; margin: 0 0 14px; }
+    body { padding: 20px; max-width: 440px; background: #0d1117; color: #e7e9ea; }
+    .apiHint { font-size: 12px; color: #8b949e; margin: 0 0 14px; line-height: 1.45; }
     .apiHint code { background: #21262d; padding: 2px 6px; border-radius: 4px; }
+    label { display: block; font-size: 12px; color: #8b949e; margin-bottom: 6px; }
+    input[type="password"], input[type="text"] {
+      width: 100%; padding: 8px 10px; font-size: 12px; border-radius: 6px;
+      border: 1px solid #30363d; background: #0d1117; color: #e7e9ea; font-family: ui-monospace, monospace;
+      box-sizing: border-box;
+    }
+    button.save {
+      margin-top: 12px; padding: 8px 14px; font-size: 13px; font-weight: 600;
+      border: none; border-radius: 8px; background: #238636; color: #fff; cursor: pointer;
+    }
+    button.save:hover { background: #2ea043; }
+    .status { margin-top: 10px; font-size: 12px; color: #7ee787; min-height: 1.2em; }
   </style>
 </head>
 <body>
   <h1>Diverg Options</h1>
-  <p class="apiHint">API runs locally — start it with <code>python api_server.py</code> in your Diverg folder. No URL to configure.</p>
   <p class="apiHint">Auto-scan on visit is in the popup: click <strong>Options ▾</strong> and toggle it there.</p>
+
+  <label for="heliusKey">Helius API key (Solana tab)</label>
+  <p class="apiHint">Required for <strong>Solana → Analyze bundle</strong> in the side panel. The key stays in this browser (Chrome storage); it is sent directly to Helius from the extension — no Python server. Get a key at <a href="https://www.helius.dev/" target="_blank" rel="noopener">helius.dev</a>.</p>
+  <input type="password" id="heliusKey" autocomplete="off" spellcheck="false" placeholder="Paste Helius API key" />
+  <button type="button" class="save" id="saveHelius">Save</button>
   <div id="status" class="status"></div>
+
   <script src="options.js"></script>
 </body>
 </html>
