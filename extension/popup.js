@@ -4,6 +4,9 @@
  */
 
 (function () {
+  const BUILD_ID = 'sectester-extension@2a7157e';
+  const buildEl = document.getElementById('popup-build-id');
+  if (buildEl) buildEl.textContent = `build: ${BUILD_ID}`;
   const scanUrlEl = document.getElementById('scan-url');
   const useCurrentTabBtn = document.getElementById('use-current-tab');
   const runScanBtn = document.getElementById('run-scan');
