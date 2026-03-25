@@ -489,6 +489,9 @@ def run_skill_variant(
         elif skill_name == "entity_reputation":
             import entity_reputation
             raw = entity_reputation.run(target, scan_type=scan_type, osint_json=ctx.get("osint_json"))
+        elif skill_name == "domain_age":
+            import domain_age
+            raw = domain_age.run(target_url, scan_type=scan_type, osint_json=ctx.get("osint_json"))
         elif skill_name == "chain_validation_abuse":
             import chain_validation_abuse
             raw = chain_validation_abuse.run(
@@ -1312,7 +1315,7 @@ WEB_SCAN_PHASE1 = [
     "company_exposure", "web_vulns", "auth_test", "api_test", "high_value_flaws",
     "workflow_probe", "race_condition", "payment_financial", "client_surface",
 ]
-WEB_SCAN_PHASE2 = ["dependency_audit", "logic_abuse", "entity_reputation"]
+WEB_SCAN_PHASE2 = ["dependency_audit", "logic_abuse", "entity_reputation", "domain_age"]
 WEB_SCAN_PROFILE = WEB_SCAN_PHASE1 + WEB_SCAN_PHASE2
 
 # Phase 3 (attack-style probing): targeted scan_type passes for high-signal checks.
