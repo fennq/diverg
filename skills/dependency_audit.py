@@ -37,6 +37,10 @@ HEADER_VERSION_RE = [
     (re.compile(r"PHP(?:/?\s*([0-9]+\.[0-9]+\.[0-9]+))?", re.I), "PHP"),
     (re.compile(r"WordPress(?:/?\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?))?", re.I), "WordPress"),
     (re.compile(r"Django(?:/?\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?))?", re.I), "Django"),
+    (re.compile(r"node\.?js(?:/?\s*v?([0-9]+\.[0-9]+\.[0-9]+))?", re.I), "Node.js"),
+    (re.compile(r"Tomcat(?:/?\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?))?", re.I), "Tomcat"),
+    (re.compile(r"cloudflare", re.I), "Cloudflare"),
+    (re.compile(r"Varnish(?:\s+([0-9]+\.[0-9]+\.[0-9]+))?", re.I), "Varnish"),
 ]
 
 
@@ -83,23 +87,52 @@ def _version_in_affected(version: str, affected_list: list[str], match_mode: str
     return False
 
 
+def _versions_from_sec_ch_ua(val: str) -> list[dict]:
+    """Parse Sec-CH-UA for framework hints (e.g. Next.js / React reported by the stack)."""
+    out: list[dict] = []
+    if not val or not val.strip():
+        return out
+    for m in re.finditer(r'"([^"]+)"\s*;\s*v="([^"]*)"', val):
+        name, ver = m.group(1), m.group(2)
+        if not ver or ver in ("?", ""):
+            continue
+        low = name.lower()
+        if "next" in low:
+            out.append({"product": "Next.js", "version": ver, "source": "header:Sec-CH-UA"})
+        elif "react" in low:
+            out.append({"product": "React", "version": ver, "source": "header:Sec-CH-UA"})
+    return out
+
+
 def _collect_versions_from_headers(url: str) -> list[dict]:
     versions: list[dict] = []
     try:
         r = SESSION.head(url, timeout=TIMEOUT, allow_redirects=True)
         if r.status_code >= 400:
             r = SESSION.get(url, timeout=TIMEOUT, allow_redirects=True)
-        for header_name in ("Server", "X-Powered-By", "X-AspNet-Version", "X-Version"):
-            val = r.headers.get(header_name)
+        h = r.headers
+        sec = h.get("Sec-CH-UA") or h.get("sec-ch-ua")
+        if sec:
+            for item in _versions_from_sec_ch_ua(sec):
+                key = (item.get("product"), item.get("version"))
+                if key[0] and key[1] and not any((v.get("product"), v.get("version")) == key for v in versions):
+                    versions.append(item)
+        for header_name in ("Server", "X-Powered-By", "X-AspNet-Version", "X-Version", "Via"):
+            val = h.get(header_name)
             if not val:
                 continue
             for pattern, product in HEADER_VERSION_RE:
                 m = pattern.search(val)
                 if m:
-                    ver = (m.group(1) or "").strip()
+                    ver = ""
+                    if m.lastindex:
+                        ver = (m.group(1) or "").strip()
                     if not ver:
                         ver = "unknown"
-                    versions.append({"product": product, "version": ver, "source": f"header:{header_name}"})
+                    entry = {"product": product, "version": ver, "source": f"header:{header_name}"}
+                    key = (entry["product"], entry["version"])
+                    if not any((v.get("product"), v.get("version")) == key for v in versions):
+                        versions.append(entry)
                     break
     except requests.RequestException:
         pass
@@ -149,6 +182,7 @@ def run(
     products = watchlist.get("products", {})
     match_mode = watchlist.get("version_match", "prefix")
 
+    cve_seen: set[tuple[str, str, str]] = set()
     for d in all_versions:
         product = d.get("product", "")
         version = d.get("version", "")
@@ -161,8 +195,13 @@ def run(
         for entry in entries:
             affected = entry.get("affected_versions") or entry.get("affected") or []
             if _version_in_affected(version, affected, match_mode):
+                cve_id = str(entry.get("cve_id", "CVE"))
+                dedupe_key = (product_key, version, cve_id)
+                if dedupe_key in cve_seen:
+                    break
+                cve_seen.add(dedupe_key)
                 report.findings.append(Finding(
-                    title=f"Detected {product} {version}; {entry.get('cve_id', 'CVE')} may apply",
+                    title=f"Detected {product} {version}; {cve_id} may apply",
                     severity="High",
                     url=target_url,
                     category="Dependency / CVE",

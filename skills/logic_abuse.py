@@ -13,6 +13,7 @@ Authorized use only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sys
@@ -33,7 +34,10 @@ MAX_ENDPOINTS = 12
 MAX_REQUESTS_PER_ENDPOINT = 14  # cap total requests per URL
 
 # Param names that control amount, quantity, or bounds
-AMOUNT_PARAMS = ["amount", "quantity", "qty", "total", "price", "sum", "balance", "value", "size", "count"]
+AMOUNT_PARAMS = [
+    "amount", "quantity", "qty", "total", "price", "sum", "balance", "value", "size", "count",
+    "credit", "debit", "points", "fee", "tip", "tax", "discount", "subtotal", "usd", "eth",
+]
 LIMIT_PARAMS = ["limit", "offset", "per_page", "page_size", "max", "take", "top", "first"]
 NUMERIC_PROBES = [
     0, -1, 1,
@@ -74,6 +78,46 @@ def _over_budget(start: float) -> bool:
     return (time.time() - start) > RUN_BUDGET_SEC
 
 
+def _body_fp(text: str) -> str:
+    raw = (text or "")[:3500]
+    return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()[:20]
+
+
+def _baseline_for_url(session: requests.Session, url: str, run_start: float) -> dict | None:
+    try:
+        r = session.get(url, timeout=TIMEOUT, allow_redirects=False)
+        if _over_budget(run_start):
+            return None
+        return {
+            "status": r.status_code,
+            "fp": _body_fp(r.text),
+            "len": len(r.text or ""),
+        }
+    except requests.RequestException:
+        return None
+
+
+def _success_in_response(r: requests.Response) -> bool:
+    body = (r.text or "").lower()
+    ct = (r.headers.get("Content-Type") or "").lower()
+    if "application/json" in ct or (r.text or "").lstrip().startswith("{"):
+        return bool(SUCCESS_INDICATOR.search(body))
+    if len(r.text or "") > 14000:
+        return False
+    return bool(SUCCESS_INDICATOR.search(body))
+
+
+def _tamper_not_benign(r: requests.Response, baseline: dict | None) -> bool:
+    """Avoid flagging identical marketing pages when only a query param changes."""
+    if not baseline:
+        return True
+    if r.status_code != baseline.get("status"):
+        return True
+    if r.status_code in (200, 201) and _body_fp(r.text) != baseline.get("fp"):
+        return True
+    return False
+
+
 def _collect_endpoints(base_url: str, extracted_endpoints: list[str] | None, run_start: float) -> list[str]:
     """Build full URLs to probe. Prefer extracted_endpoints; else use built-in paths."""
     parsed = urlparse(base_url)
@@ -102,7 +146,14 @@ def _collect_endpoints(base_url: str, extracted_endpoints: list[str] | None, run
     return urls[:MAX_ENDPOINTS]
 
 
-def _probe_numeric(url: str, param: str, value: object, run_start: float, session: requests.Session) -> Finding | None:
+def _probe_numeric(
+    url: str,
+    param: str,
+    value: object,
+    run_start: float,
+    session: requests.Session,
+    baseline: dict | None,
+) -> Finding | None:
     """Send one param tampering; return finding if success-like or unexpected."""
     try:
         parsed = urlparse(url)
@@ -114,14 +165,13 @@ def _probe_numeric(url: str, param: str, value: object, run_start: float, sessio
         r = session.get(test_url, timeout=TIMEOUT, allow_redirects=False)
         if _over_budget(run_start):
             return None
-        body = (r.text or "").lower()
-        if r.status_code in (200, 201) and SUCCESS_INDICATOR.search(body):
+        if r.status_code in (200, 201) and _success_in_response(r) and _tamper_not_benign(r, baseline):
             return Finding(
                 title=f"Logic/numeric: Server accepted {param}={value} with success-like response [CONFIRMED]",
                 severity="High",
                 url=test_url,
                 category="Logic / Numeric Abuse",
-                evidence=f"GET {param}={value} returned {r.status_code} and success indicator. Server may not validate numeric bounds.",
+                evidence=f"GET {param}={value} returned {r.status_code} and success indicator (baseline-filtered). Server may not validate numeric bounds.",
                 impact="Attackers may complete actions with zero/negative/large values (free order, overflow, or DoS).",
                 remediation="Validate all amount/quantity/limit server-side; reject out-of-range and non-numeric values.",
             )
@@ -130,15 +180,34 @@ def _probe_numeric(url: str, param: str, value: object, run_start: float, sessio
         r = session.post(url, json=payload, timeout=TIMEOUT, allow_redirects=False)
         if _over_budget(run_start):
             return None
-        body = (r.text or "").lower()
-        if r.status_code in (200, 201) and SUCCESS_INDICATOR.search(body):
+        if r.status_code in (200, 201) and _success_in_response(r) and _tamper_not_benign(r, baseline):
             return Finding(
-                title=f"Logic/numeric: Server accepted POST {param}={value} with success-like response [CONFIRMED]",
+                title=f"Logic/numeric: Server accepted POST JSON {param}={value} with success-like response [CONFIRMED]",
                 severity="High",
                 url=url,
                 category="Logic / Numeric Abuse",
-                evidence=f"POST body {param}={value} returned {r.status_code} and success indicator.",
+                evidence=f"POST JSON {param}={value} returned {r.status_code} and success indicator.",
                 impact="Same as above: zero/negative/large values accepted.",
+                remediation="Validate all numeric fields server-side; enforce min/max and type.",
+            )
+        # POST form-urlencoded (common for older APIs)
+        r = session.post(
+            url,
+            data={param: str(value)},
+            timeout=TIMEOUT,
+            allow_redirects=False,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        if _over_budget(run_start):
+            return None
+        if r.status_code in (200, 201) and _success_in_response(r) and _tamper_not_benign(r, baseline):
+            return Finding(
+                title=f"Logic/numeric: Server accepted POST form {param}={value} with success-like response [CONFIRMED]",
+                severity="High",
+                url=url,
+                category="Logic / Numeric Abuse",
+                evidence=f"POST form {param}={value} returned {r.status_code} and success indicator.",
+                impact="Same as above: zero/negative/large values accepted via form body.",
                 remediation="Validate all numeric fields server-side; enforce min/max and type.",
             )
     except requests.RequestException:
@@ -146,7 +215,14 @@ def _probe_numeric(url: str, param: str, value: object, run_start: float, sessio
     return None
 
 
-def _probe_bounds(url: str, param: str, value: int, run_start: float, session: requests.Session) -> Finding | None:
+def _probe_bounds(
+    url: str,
+    param: str,
+    value: int,
+    run_start: float,
+    session: requests.Session,
+    baseline: dict | None,
+) -> Finding | None:
     """Probe limit/offset; report if we get 200 with very large limit (possible data dump)."""
     try:
         parsed = urlparse(url)
@@ -161,13 +237,17 @@ def _probe_bounds(url: str, param: str, value: int, run_start: float, session: r
             return None
         # Large limit returned 200 — check if response looks like a list
         body = r.text or ""
-        if LIST_INDICATOR.search(body) and len(body) > 500:
+        blen = len(body)
+        base_len = int((baseline or {}).get("len") or 0)
+        if baseline and base_len > 400 and blen <= int(base_len * 1.08):
+            return None
+        if LIST_INDICATOR.search(body) and blen > 500:
             return Finding(
                 title=f"Logic/bounds: Large {param}={value} returned 200 with list-like body [POSSIBLE]",
                 severity="Medium",
                 url=test_url,
                 category="Logic / Numeric Abuse",
-                evidence=f"GET {param}={value} returned 200 and array/list-like content ({len(body)} bytes). Server may not cap limit.",
+                evidence=f"GET {param}={value} returned 200 and array/list-like content ({blen} bytes). Server may not cap limit.",
                 impact="Attackers could request very large limits and export more data than intended.",
                 remediation="Enforce maximum limit and offset server-side (e.g. cap at 100).",
             )
@@ -204,13 +284,13 @@ def run(
         requests_per_url[url] = requests_per_url.get(url, 0)
         if requests_per_url[url] >= MAX_REQUESTS_PER_ENDPOINT:
             continue
-        path_lower = urlparse(url).path.lower()
+        baseline = _baseline_for_url(session, url, run_start)
         # Amount-style params (fewer probes per param)
-        for param in AMOUNT_PARAMS[:4]:
+        for param in AMOUNT_PARAMS[:6]:
             if requests_per_url[url] >= MAX_REQUESTS_PER_ENDPOINT or _over_budget(run_start):
                 break
-            for val in NUMERIC_PROBES[:4]:
-                f = _probe_numeric(url, param, val, run_start, session)
+            for val in NUMERIC_PROBES[:5]:
+                f = _probe_numeric(url, param, val, run_start, session, baseline)
                 requests_per_url[url] = requests_per_url.get(url, 0) + 1
                 if f and f.evidence not in seen_evidence:
                     seen_evidence.add(f.evidence)
@@ -221,7 +301,7 @@ def run(
             if requests_per_url[url] >= MAX_REQUESTS_PER_ENDPOINT or _over_budget(run_start):
                 break
             for val in BOUNDS_PROBES:
-                f = _probe_bounds(url, param, val, run_start, session)
+                f = _probe_bounds(url, param, val, run_start, session, baseline)
                 requests_per_url[url] = requests_per_url.get(url, 0) + 1
                 if f and f.evidence not in seen_evidence:
                     seen_evidence.add(f.evidence)

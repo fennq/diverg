@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import quote_plus
 
 import requests
 
@@ -151,6 +152,44 @@ def _relevance_and_severity(snippet: str) -> tuple[str, str]:
     return "reputation", "Low"
 
 
+def _canonical_findings(domain: str, reputation_findings: list[ReputationFinding]) -> list[dict]:
+    """Normalize reputation hits into the shared Diverg finding schema for aggregation and UI."""
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    impact_map = {
+        "criminal": "Public reporting references criminal, arrest, indictment, or guilty plea context; corroborate with court or government sources.",
+        "regulatory": "Public reporting references regulatory or enforcement actions; verify dockets and official releases.",
+        "breach": "Public reporting references data breach or leak context tied to the entity or domain mail host.",
+        "lawsuit": "Public reporting references civil litigation; review filings for relevance to your assessment.",
+        "foul_play": "Public reporting references fraud, scam, or serious trust allegations.",
+        "reputation": "Generic news or reputation hit; treat as a lead until corroborated.",
+    }
+    for rf in reputation_findings:
+        u = (rf.url or "").strip()
+        t = ((rf.title or "").strip())[:180]
+        key = (u, t) if u else ("", t + rf.entity)
+        if key in seen:
+            continue
+        seen.add(key)
+        rel = (rf.relevance_hint or "reputation").strip()
+        sev = str(rf.severity or "Medium")
+        impact = impact_map.get(rel, impact_map["reputation"])
+        ev_parts = [x for x in (rf.snippet or "", f"Query: {rf.query}", f"Timeline: {rf.date_hint}" if rf.date_hint else "") if x]
+        evidence = " | ".join(ev_parts)
+        search_url = f"https://duckduckgo.com/?q={quote_plus(rf.query)}"
+        out.append({
+            "title": f"Entity / reputation ({rel}): {(rf.entity or domain)[:80]} — {(rf.title or 'Result')[:90]}",
+            "severity": sev,
+            "url": u or search_url,
+            "category": "Entity / Reputation",
+            "evidence": (evidence or "See search query in title context.")[:4000],
+            "impact": impact,
+            "remediation": "Corroborate with primary sources. Third-party search snippets are not legal or factual conclusions.",
+            "confidence": "low" if sev == "Low" else "medium",
+        })
+    return out
+
+
 def _run_reputation_search(entity: str, query_suffix: str) -> list[ReputationFinding]:
     """Run one external reputation search for entity; return structured findings with severity and date_hint."""
     findings = []
@@ -184,10 +223,19 @@ def run(
     """
     domain = (target or "").replace("https://", "").replace("http://", "").split("/")[0].split(":")[0].strip()
     if not domain:
-        return json.dumps(asdict(EntityReputationReport(target_domain="", errors=["No domain provided"])))
+        return json.dumps({
+            "target_domain": "",
+            "target_url": "",
+            "findings": [],
+            "entities_searched": [],
+            "recommended_queries": [],
+            "summary": "",
+            "errors": ["No domain provided"],
+        })
 
     report = EntityReputationReport(target_domain=domain)
     run_start = time.time()
+    raw_findings: list[ReputationFinding] = []
 
     def _over_budget() -> bool:
         return (time.time() - run_start) > RUN_BUDGET_SEC
@@ -209,38 +257,50 @@ def run(
                 entities.append(str(name).strip())
         except Exception as e:
             report.errors.append(f"WHOIS fallback: {e}")
-        if not entities:
-            report.entities_searched.append(domain)
-            report.recommended_queries.append(f'"{domain}" {REPUTATION_QUERY_SUFFIX}')
-    else:
-        report.entities_searched = list(entities)
+    if not entities:
+        entities = [domain]
+
+    report.entities_searched = list(entities[:MAX_ENTITIES])
 
     for entity in entities[:MAX_ENTITIES]:
         if _over_budget():
             break
-        report.findings.extend(_run_reputation_search(entity, REPUTATION_QUERY_SUFFIX))
+        raw_findings.extend(_run_reputation_search(entity, REPUTATION_QUERY_SUFFIX))
         report.recommended_queries.append(f'"{entity}" {REPUTATION_QUERY_SUFFIX}')
         time.sleep(0.8)
         if _over_budget():
             break
-        report.findings.extend(_run_reputation_search(entity, REPUTATION_QUERY_EXECUTIVE))
+        raw_findings.extend(_run_reputation_search(entity, REPUTATION_QUERY_EXECUTIVE))
         report.recommended_queries.append(f'"{entity}" {REPUTATION_QUERY_EXECUTIVE}')
         time.sleep(0.8)
 
     for email_domain in email_domains:
         if _over_budget():
             break
-        report.entities_searched.append(f"email_domain:{email_domain}")
-        report.findings.extend(_run_reputation_search(email_domain, "data breach OR leak OR pwned OR exposed"))
+        label = f"email_domain:{email_domain}"
+        if label not in report.entities_searched:
+            report.entities_searched.append(label)
+        raw_findings.extend(_run_reputation_search(email_domain, "data breach OR leak OR pwned OR exposed"))
         report.recommended_queries.append(f'"{email_domain}" data breach OR leak')
         time.sleep(0.8)
 
-    high = sum(1 for f in report.findings if getattr(f, "severity", "") == "High")
+    high = sum(1 for f in raw_findings if getattr(f, "severity", "") == "High")
     report.summary = (
-        f"{len(report.entities_searched)} entities researched, {len(report.findings)} findings ({high} high-severity). "
-        + ("Review relevance_hint and date_hint for timeline." if report.findings else "No public reputation hits; see recommended_queries for manual search.")
+        f"{len(report.entities_searched)} entities researched, {len(raw_findings)} raw hits ({high} high-severity signals). "
+        + ("Corroborate top items in findings." if raw_findings else "No public hits; use recommended_queries for manual follow-up.")
     )
-    if report.entities_searched and report.entities_searched[0] and not report.entities_searched[0].startswith("email_domain:"):
+    if report.entities_searched and not str(report.entities_searched[0]).startswith("email_domain:"):
         report.recommended_queries.append(f'"{report.entities_searched[0]}" 2019..2024 fraud OR lawsuit OR breach')
 
-    return json.dumps(asdict(report), indent=2)
+    canonical = _canonical_findings(domain, raw_findings)
+    payload = {
+        "target_domain": domain,
+        "target_url": f"https://{domain}",
+        "entities_searched": report.entities_searched,
+        "findings": canonical,
+        "recommended_queries": report.recommended_queries,
+        "summary": report.summary,
+        "errors": report.errors,
+        "reputation_hits_count": len(raw_findings),
+    }
+    return json.dumps(payload, indent=2)
