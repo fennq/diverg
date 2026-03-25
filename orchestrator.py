@@ -513,29 +513,21 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
     all_findings: list[dict] = []
 
     for skill_name, result in results.items():
-        base_skill = str(skill_name).split(":", 1)[0]
-        variant_suffix = str(skill_name).split(":", 1)[1] if ":" in str(skill_name) else ""
-        variant_note = f" (variant: {variant_suffix})" if variant_suffix else ""
         if "error" in result and isinstance(result["error"], str):
             all_findings.append(normalize_finding({
-                "title": f"Skill '{base_skill}' encountered an error{variant_note}",
+                "title": f"Skill '{skill_name}' encountered an error",
                 "severity": "Info",
                 "evidence": result["error"],
                 "impact": "Some tests could not be completed.",
                 "remediation": "Check skill configuration and try again.",
-            }, base_skill, "findings"))
+            }, skill_name, "findings"))
             continue
 
         for key in ("findings", "header_findings", "ssl_findings"):
             for raw in result.get(key, []):
                 if not isinstance(raw, dict):
                     continue
-                # Keep base skill for attribution; preserve variant in evidence for triage.
-                if variant_suffix and isinstance(raw, dict):
-                    raw = dict(raw)
-                    if raw.get("evidence") and isinstance(raw.get("evidence"), str) and "variant:" not in raw["evidence"]:
-                        raw["evidence"] = f"{raw['evidence']} (variant: {variant_suffix})"
-                all_findings.append(normalize_finding(raw, base_skill, key))
+                all_findings.append(normalize_finding(raw, skill_name, key))
 
         for port in result.get("ports", []):
             if port.get("state") == "open":
@@ -547,7 +539,7 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
                     "evidence": f"Port {port['port']}: {port.get('service', '')} {port.get('version', '')}",
                     "impact": "Open ports increase the attack surface.",
                     "remediation": "Close unnecessary ports and services.",
-                }, base_skill, "findings"))
+                }, skill_name, "findings"))
 
         for ep in result.get("endpoints_found", []):
             if not ep.get("auth_required") and ep.get("status_code") == 200:
@@ -559,7 +551,7 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
                     "evidence": f"Status: {ep['status_code']}, Methods: {', '.join(ep.get('methods', []))}",
                     "impact": "Publicly accessible endpoints may leak information.",
                     "remediation": "Review if this endpoint should require authentication.",
-                }, base_skill, "findings"))
+                }, skill_name, "findings"))
 
     deduped = dedupe_findings(all_findings)
     enriched = enrich_findings_with_exploits(deduped)
@@ -1313,25 +1305,32 @@ WEB_SCAN_PROFILE = WEB_SCAN_PHASE1 + WEB_SCAN_PHASE2
 # Phase 3 (attack-style probing): targeted scan_type passes for high-signal checks.
 # This is opt-in via scope="attack" for the API/extension so default scans stay fast.
 WEB_SCAN_PHASE3: list[tuple[str, str, str]] = [
+    # Web vulns: include full pass with deeper crawl (runner sets crawl_depth=3)
+    ("web_vulns", "full", "medium"),
     ("web_vulns", "files", "medium"),
+
+    # API probing: expand into the heavier/higher-signal passes
     ("api_test", "info_disclosure", "medium"),
     ("api_test", "auth_bypass", "small"),
     ("api_test", "cors", "small"),
-    ("api_test", "methods", "medium"),
+    ("api_test", "host_header", "small"),
     ("api_test", "rate_limit", "small"),
     ("api_test", "param_fuzz", "medium"),
     ("api_test", "mass_assign", "medium"),
-    ("api_test", "graphql", "small"),
+    ("api_test", "contract_drift", "small"),
+
+    # Auth probing (targeted submodules; full scan already runs auth_test:full)
     ("auth_test", "enumeration", "medium"),
     ("auth_test", "jwt", "medium"),
-    ("auth_test", "cookies", "medium"),
-    ("auth_test", "credentials", "medium"),
-    ("auth_test", "password_policy", "medium"),
+
+    # Company surface: prioritize high-value operational buckets
     ("company_exposure", "business", "medium"),
     ("company_exposure", "debug", "medium"),
+    ("company_exposure", "docs", "medium"),
     ("company_exposure", "staging", "medium"),
     ("company_exposure", "support", "medium"),
-    ("company_exposure", "docs", "medium"),
+    ("company_exposure", "admin", "medium"),
+    ("company_exposure", "identity", "medium"),
     ("company_exposure", "observability", "medium"),
 ]
 
@@ -1383,9 +1382,15 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
             skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
             chain_validation_abuse_reason = "goal"
     else:
-        skills_phase1 = WEB_SCAN_PHASE1 if scope == "full" else SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])
-        skills_phase2 = WEB_SCAN_PHASE2 if scope == "full" else []
-        skills_phase3 = WEB_SCAN_PHASE3 if scope == "attack" else []
+        if scope == "attack":
+            # Attack profile = full Phase 1 + Phase 2 context skills + Phase 3 probe passes.
+            skills_phase1 = WEB_SCAN_PHASE1
+            skills_phase2 = WEB_SCAN_PHASE2
+            skills_phase3 = WEB_SCAN_PHASE3
+        else:
+            skills_phase1 = WEB_SCAN_PHASE1 if scope == "full" else SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])
+            skills_phase2 = WEB_SCAN_PHASE2 if scope == "full" else []
+            skills_phase3 = []
         if scope == "crypto":
             if "chain_validation_abuse" not in skills_phase2:
                 skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
@@ -1459,7 +1464,7 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
                     target_url,
                     scan_type=stype,
                     wordlist=wl,
-                    crawl_depth=2,
+                    crawl_depth=3 if (skill == "web_vulns" and stype == "full") else 2,
                     context=ctx3,
                 ): f"{skill}:{stype}:{wl}"
                 for (skill, stype, wl) in skills_phase3
@@ -1523,9 +1528,14 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
             skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
             chain_validation_abuse_reason = "goal"
     else:
-        skills_phase1 = WEB_SCAN_PHASE1 if scope == "full" else SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])
-        skills_phase2 = WEB_SCAN_PHASE2 if scope == "full" else []
-        skills_phase3 = WEB_SCAN_PHASE3 if scope == "attack" else []
+        if scope == "attack":
+            skills_phase1 = WEB_SCAN_PHASE1
+            skills_phase2 = WEB_SCAN_PHASE2
+            skills_phase3 = WEB_SCAN_PHASE3
+        else:
+            skills_phase1 = WEB_SCAN_PHASE1 if scope == "full" else SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])
+            skills_phase2 = WEB_SCAN_PHASE2 if scope == "full" else []
+            skills_phase3 = []
         if scope == "crypto":
             if "chain_validation_abuse" not in skills_phase2:
                 skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
@@ -1583,7 +1593,7 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
                     target_url,
                     scan_type=stype,
                     wordlist=wl,
-                    crawl_depth=2,
+                    crawl_depth=3 if (skill_name == "web_vulns" and stype == "full") else 2,
                     context=ctx3,
                 )
                 results[f"{skill_name}:{stype}:{wl}"] = out
