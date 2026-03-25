@@ -8,7 +8,7 @@ Endpoints:
   POST /api/scan
     Body: {"url": "https://example.com", "goal": "optional", "scope": "optional"}
     scope: "full" | "quick" | "crypto" (default "full"). goal: natural-language goal for option scan.
-    Returns: JSON with target_url, findings, scanned_at, summary, skills_run, site_classification.
+    Returns: JSON with target_url, findings, scanned_at, summary, skills_run, site_classification, evidence_summary.
 
   POST /api/scan/stream
     Same body as /api/scan. Returns NDJSON stream: one JSON object per line.
@@ -84,6 +84,7 @@ def api_scan():
             "summary": result.get("summary"),
             "skills_run": result.get("skills_run"),
             "site_classification": result.get("site_classification"),
+            "evidence_summary": result.get("evidence_summary"),
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500

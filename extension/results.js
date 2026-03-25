@@ -29,6 +29,20 @@
     li.className = 'finding ' + (finding.severity || 'info').toLowerCase();
     var severity = (finding.severity || 'Info').toLowerCase();
     var showSimulate = canSimulate(finding);
+    var ev = finding.evidence && String(finding.evidence).trim();
+    var im = finding.impact && String(finding.impact).trim();
+    var rem = finding.remediation && String(finding.remediation).trim();
+    var hasDetails = !!(ev || im || rem);
+    var detailsBlock = '';
+    if (hasDetails) {
+      detailsBlock =
+        '<details class="findingDetails">' +
+          '<summary>Evidence &amp; remediation</summary>' +
+          (ev ? '<div class="findingBlock"><strong>Evidence</strong><pre class="findingPre">' + escapeHtml(ev) + '</pre></div>' : '') +
+          (im ? '<div class="findingBlock"><strong>Impact</strong><p class="findingPara">' + escapeHtml(im) + '</p></div>' : '') +
+          (rem ? '<div class="findingBlock"><strong>Remediation</strong><p class="findingPara">' + escapeHtml(rem) + '</p></div>' : '') +
+        '</details>';
+    }
     li.innerHTML =
       '<div class="findingHeader">' +
         '<span class="findingTitle">' + escapeHtml(finding.title || 'Untitled') + '</span>' +
@@ -47,6 +61,7 @@
           '</p>'
         : '') +
       (finding.proof ? '<p class="findingUrl">proof: ' + escapeHtml(String(finding.proof).substring(0, 220)) + '</p>' : '') +
+      detailsBlock +
       (showSimulate
         ? '<div class="findingActions"><button type="button" class="btnSimulate" data-index="' + index + '">Simulate</button></div>'
         : '');
@@ -109,9 +124,13 @@
     if (e.target === pocModal) pocModal.style.display = 'none';
   });
 
-  chrome.storage.local.get(['lastReport', 'lastReportUrl'], function (o) {
+  chrome.storage.local.get(['lastReport', 'lastReportUrl', 'diverg_last_scan'], function (o) {
     var report = o.lastReport;
     var url = o.lastReportUrl || '';
+    if ((!report || !report.findings) && o.diverg_last_scan && Array.isArray(o.diverg_last_scan.findings)) {
+      report = o.diverg_last_scan;
+      url = report.target_url || url;
+    }
     targetUrlEl.textContent = url || '—';
     if (!report || !report.findings || !report.findings.length) {
       noFindingsEl.style.display = 'block';

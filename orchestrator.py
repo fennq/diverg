@@ -190,6 +190,125 @@ def dedupe_findings(findings: list[dict]) -> list[dict]:
     return list(by_key.values())
 
 
+def _normalize_confidence_value(value) -> str | None:
+    if value is None:
+        return None
+    c = str(value).strip().lower()
+    if c in ("high", "medium", "low"):
+        return c
+    if c in ("confirmed", "confirm"):
+        return "high"
+    if c in ("unconfirmed", "possible", "inferential", "low confidence"):
+        return "low"
+    return None
+
+
+def _default_finding_source(f: dict) -> str:
+    existing = str(f.get("source") or "").strip()
+    if existing:
+        return existing
+    skill = str(f.get("_source_skill") or "").strip().lower()
+    category = str(f.get("category") or "").strip().lower()
+    if skill == "headers_ssl" or ("transport" in category and "browser" in category):
+        return "header_analysis"
+    if skill == "client_surface" or "client" in category:
+        return "dom_scan"
+    if skill == "data_leak_risks" or "sensitive" in category:
+        return "regex_match"
+    if skill == "entity_reputation":
+        return "entity_reputation"
+    if skill == "dependency_audit":
+        return "dependency_audit"
+    if skill == "logic_abuse":
+        return "logic_abuse"
+    if skill:
+        return skill.replace(" ", "_")
+    return "analysis"
+
+
+def _default_finding_confidence(f: dict, source: str) -> str:
+    sev = str(f.get("severity") or "").strip().lower()
+    if source == "header_analysis":
+        return "high"
+    if source == "regex_match":
+        return "medium" if sev == "high" else "low"
+    if source in ("dom_scan", "entity_reputation", "dependency_audit", "logic_abuse"):
+        return "medium" if sev in ("critical", "high") else ("low" if sev == "info" else "medium")
+    if source == "analysis":
+        return "low" if sev == "info" else "medium"
+    return "medium"
+
+
+def _infer_verified(f: dict, source: str) -> bool:
+    if f.get("verified") is not None:
+        return bool(f["verified"])
+    raw_conf = str(f.get("confidence") or "").strip().lower()
+    if raw_conf in ("confirmed", "confirm"):
+        return True
+    title = str(f.get("title") or "")
+    ev = str(f.get("evidence") or "")
+    if "[confirmed]" in title.lower() or "[confirmed]" in ev.lower():
+        return True
+    if source == "header_analysis":
+        return True
+    return False
+
+
+def finalize_api_findings(findings: list[dict]) -> list[dict]:
+    """Normalize confidence, source, proof, and verified for API/extension clients."""
+    out: list[dict] = []
+    for raw in findings:
+        f = dict(raw)
+        source = _default_finding_source(f)
+        verified = _infer_verified(f, source)
+        conf = _normalize_confidence_value(f.get("confidence")) or _default_finding_confidence(f, source)
+        f["source"] = source
+        f["confidence"] = conf
+        proof = str(f.get("proof") or "").strip()
+        if not proof:
+            ev = str(f.get("evidence") or "")
+            proof = ev[:280] if ev else ""
+        f["proof"] = proof
+        f["verified"] = verified
+        out.append(f)
+    return out
+
+
+def build_evidence_summary(findings: list[dict]) -> dict:
+    """Roll-up aligned with extension `buildEvidenceSummary` (+ optional top_sources)."""
+    confidence_counts = {"high": 0, "medium": 0, "low": 0}
+    source_breakdown: dict[str, int] = {}
+    verified_count = 0
+    for f in findings:
+        conf = _normalize_confidence_value(f.get("confidence")) or "medium"
+        if conf not in confidence_counts:
+            conf = "medium"
+        confidence_counts[conf] += 1
+        src = str(f.get("source") or "unknown").strip() or "unknown"
+        source_breakdown[src] = source_breakdown.get(src, 0) + 1
+        if f.get("verified"):
+            verified_count += 1
+    total = len(findings)
+    verified_ratio = round((verified_count / total), 2) if total else 0.0
+    if confidence_counts["high"] >= 3 or verified_ratio >= 0.5:
+        quality = "strong"
+    elif confidence_counts["high"] >= 1 or confidence_counts["medium"] >= 3:
+        quality = "moderate"
+    else:
+        quality = "limited"
+    top_sources = [name for name, _ in sorted(source_breakdown.items(), key=lambda x: (-x[1], x[0]))[:5]]
+    return {
+        "total_findings": total,
+        "confidence_counts": confidence_counts,
+        "verified_count": verified_count,
+        "unverified_count": max(0, total - verified_count),
+        "verified_ratio": verified_ratio,
+        "source_breakdown": dict(sorted(source_breakdown.items(), key=lambda item: (-item[1], item[0]))),
+        "top_sources": top_sources,
+        "quality": quality,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Exploit catalog — map findings to known exploits and prevention
 # ---------------------------------------------------------------------------
@@ -425,7 +544,7 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
         enrich_findings_with_citations(enriched)
     except Exception:
         pass
-    return enriched
+    return finalize_api_findings(enriched)
 
 
 def aggregate_company_surfaces(results: dict[str, dict]) -> list[dict]:
@@ -1273,6 +1392,7 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     findings = aggregate_findings(results)
     company_surfaces = aggregate_company_surfaces(results)
     timestamp = datetime.now(timezone.utc).isoformat()
+    evidence_summary = build_evidence_summary(findings)
 
     return {
         "target_url": target_url,
@@ -1293,6 +1413,7 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
             "low": sum(1 for f in findings if f.get("severity") == "Low"),
             "info": sum(1 for f in findings if f.get("severity") == "Info"),
         },
+        "evidence_summary": evidence_summary,
     }
 
 
@@ -1361,6 +1482,7 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
     findings = aggregate_findings(results)
     company_surfaces = aggregate_company_surfaces(results)
     timestamp = datetime.now(timezone.utc).isoformat()
+    evidence_summary = build_evidence_summary(findings)
     report = {
         "target_url": target_url,
         "findings": findings,
@@ -1380,6 +1502,7 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
             "low": sum(1 for f in findings if f.get("severity") == "Low"),
             "info": sum(1 for f in findings if f.get("severity") == "Info"),
         },
+        "evidence_summary": evidence_summary,
     }
     yield {"event": "done", "report": report}
 
