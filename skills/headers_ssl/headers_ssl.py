@@ -38,6 +38,8 @@ class HeaderFinding:
     value: Optional[str]
     severity: str
     recommendation: str
+    finding_type: str = ""
+    context: str = ""
 
 
 @dataclass
@@ -64,38 +66,56 @@ SECURITY_HEADERS = {
     "Strict-Transport-Security": {
         "severity": "High",
         "recommendation": "Add 'Strict-Transport-Security: max-age=31536000; includeSubDomains; preload' to enforce HTTPS.",
+        "finding_type": "hardening",
+        "context": "If the site already redirects HTTP to HTTPS (common behind Cloudflare/CDN), real risk is lower. HSTS prevents downgrade attacks and is expected on production sites.",
     },
     "Content-Security-Policy": {
         "severity": "Medium",
         "recommendation": "Implement a Content-Security-Policy header to mitigate XSS and data injection attacks.",
+        "finding_type": "hardening",
+        "context": "CSP matters most on sites with user input, forms, or third-party scripts. Static sites benefit less but CSP limits damage from supply-chain compromises.",
     },
     "X-Content-Type-Options": {
         "severity": "Low",
         "recommendation": "Add 'X-Content-Type-Options: nosniff' to prevent MIME-type sniffing.",
+        "finding_type": "hardening",
+        "context": "Prevents browsers from guessing content types. Trivial to add and universally recommended. Low real-world risk on most sites.",
     },
     "X-Frame-Options": {
         "severity": "Medium",
         "recommendation": "Add 'X-Frame-Options: DENY' or 'SAMEORIGIN' to prevent clickjacking.",
+        "finding_type": "hardening",
+        "context": "Real clickjacking risk requires the page to have authenticated actions or sensitive forms. For static or marketing pages this is a best-practice gap, not an active threat.",
     },
     "X-XSS-Protection": {
         "severity": "Low",
         "recommendation": "Add 'X-XSS-Protection: 1; mode=block' (legacy browsers) or rely on CSP.",
+        "finding_type": "hardening",
+        "context": "Deprecated in modern browsers. CSP is the real XSS defense. Only relevant for legacy IE/Edge clients.",
     },
     "Referrer-Policy": {
         "severity": "Low",
         "recommendation": "Add 'Referrer-Policy: strict-origin-when-cross-origin' to limit referrer leakage.",
+        "finding_type": "hardening",
+        "context": "Mainly matters if URLs contain tokens, session IDs, or sensitive paths. Low-risk for public pages with clean URLs.",
     },
     "Permissions-Policy": {
         "severity": "Low",
         "recommendation": "Add a Permissions-Policy header to restrict browser feature access (camera, mic, geolocation).",
+        "finding_type": "hardening",
+        "context": "Restricts browser APIs. Low-priority unless the site embeds third-party iframes or scripts that might request device permissions.",
     },
     "Cross-Origin-Opener-Policy": {
         "severity": "Low",
         "recommendation": "Add 'Cross-Origin-Opener-Policy: same-origin' to isolate browsing context.",
+        "finding_type": "hardening",
+        "context": "Isolates browsing context from cross-origin windows. Mainly relevant for sites handling sensitive data. Often unnecessary for public or static sites.",
     },
     "Cross-Origin-Resource-Policy": {
         "severity": "Low",
         "recommendation": "Add 'Cross-Origin-Resource-Policy: same-origin' to prevent cross-origin resource loading.",
+        "finding_type": "hardening",
+        "context": "Controls which origins can load this resource. Mainly matters for assets behind auth. Public CDN assets intentionally use cross-origin.",
     },
 }
 
@@ -122,6 +142,8 @@ def check_headers(target_url: str) -> list[HeaderFinding]:
                     value=value,
                     severity="Info",
                     recommendation=f"Header is present: {value}",
+                    finding_type="positive",
+                    context=meta.get("context", ""),
                 ))
             else:
                 findings.append(HeaderFinding(
@@ -130,6 +152,8 @@ def check_headers(target_url: str) -> list[HeaderFinding]:
                     value=None,
                     severity=meta["severity"],
                     recommendation=meta["recommendation"],
+                    finding_type=meta.get("finding_type", "hardening"),
+                    context=meta.get("context", ""),
                 ))
 
         if "Strict-Transport-Security" in headers:

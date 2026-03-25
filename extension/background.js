@@ -35,7 +35,7 @@
 
   function bgFinding(title, severity, url, category, evidence, meta) {
     var m = meta || {};
-    return {
+    var f = {
       title: title,
       severity: severity,
       url: url,
@@ -46,6 +46,9 @@
       proof: m.proof || '',
       verified: m.verified !== undefined ? !!m.verified : false,
     };
+    if (m.context) f.context = m.context;
+    if (m.finding_type) f.finding_type = m.finding_type;
+    return f;
   }
 
   function normalizeConfidence(value) {
@@ -154,17 +157,17 @@
     };
 
     if (!get('strict-transport-security'))
-      findings.push(bgFinding('Missing Strict-Transport-Security (HSTS)', 'High', url, 'Headers', 'Header not set. Enables HTTPS enforcement.', { confidence: 'high', source: 'header_analysis', proof: 'strict-transport-security absent', verified: true }));
+      findings.push(bgFinding('Missing Strict-Transport-Security (HSTS)', 'High', url, 'Headers', 'Header not set. Browsers will not enforce HTTPS on future visits.', { confidence: 'high', source: 'header_analysis', proof: 'strict-transport-security absent', verified: true, finding_type: 'hardening', context: 'HSTS tells browsers to only connect over HTTPS. If the site already redirects HTTP to HTTPS (common on Cloudflare/CDN), the real-world risk is lower, but adding HSTS prevents downgrade attacks and is expected for any production site.' }));
     if (!get('x-frame-options'))
-      findings.push(bgFinding('Missing X-Frame-Options', 'Medium', url, 'Headers', 'Site can be embedded in iframes; clickjacking possible.', { confidence: 'high', source: 'header_analysis', proof: 'x-frame-options absent', verified: true }));
+      findings.push(bgFinding('Missing X-Frame-Options', 'Medium', url, 'Headers', 'Site can be embedded in iframes; clickjacking possible.', { confidence: 'high', source: 'header_analysis', proof: 'x-frame-options absent', verified: true, finding_type: 'hardening', context: 'Mainly matters if the site has authenticated sessions or sensitive actions. For static/marketing sites the real clickjacking risk is minimal, but the header is cheap to add and expected.' }));
     if (!get('x-content-type-options'))
-      findings.push(bgFinding('Missing X-Content-Type-Options: nosniff', 'Medium', url, 'Headers', 'Browser may MIME-sniff content.', { confidence: 'high', source: 'header_analysis', proof: 'x-content-type-options absent', verified: true }));
+      findings.push(bgFinding('Missing X-Content-Type-Options: nosniff', 'Low', url, 'Headers', 'Browser may MIME-sniff content.', { confidence: 'high', source: 'header_analysis', proof: 'x-content-type-options absent', verified: true, finding_type: 'hardening', context: 'Prevents browsers from guessing content types. Low risk on most sites but trivial to add and a universal best practice.' }));
     if (!get('content-security-policy'))
-      findings.push(bgFinding('Missing Content-Security-Policy', 'Medium', url, 'Headers', 'No CSP; XSS and injection harder to mitigate.', { confidence: 'high', source: 'header_analysis', proof: 'content-security-policy absent', verified: true }));
+      findings.push(bgFinding('Missing Content-Security-Policy', 'Medium', url, 'Headers', 'No CSP; XSS and injection harder to mitigate.', { confidence: 'high', source: 'header_analysis', proof: 'content-security-policy absent', verified: true, finding_type: 'hardening', context: 'CSP is the primary browser-side defense against XSS. Impact depends on whether the site accepts user input or loads third-party scripts. Static sites benefit less but it still limits damage if a supply-chain script is compromised.' }));
     if (!get('referrer-policy'))
-      findings.push(bgFinding('Missing Referrer-Policy', 'Low', url, 'Headers', 'Referrer may leak to third parties.', { confidence: 'high', source: 'header_analysis', proof: 'referrer-policy absent', verified: true }));
+      findings.push(bgFinding('Missing Referrer-Policy', 'Low', url, 'Headers', 'Referrer may leak full URL to third parties.', { confidence: 'high', source: 'header_analysis', proof: 'referrer-policy absent', verified: true, finding_type: 'hardening', context: 'Controls how much URL info the browser sends to other sites. Mainly matters if URLs contain tokens, IDs, or sensitive paths. Low-risk for public pages but good hygiene.' }));
     if (!get('permissions-policy') && !get('feature-policy'))
-      findings.push(bgFinding('Missing Permissions-Policy', 'Low', url, 'Headers', 'Browser features not restricted.', { confidence: 'high', source: 'header_analysis', proof: 'permissions-policy/feature-policy absent', verified: true }));
+      findings.push(bgFinding('Missing Permissions-Policy', 'Low', url, 'Headers', 'Browser features like camera, mic, geolocation not restricted.', { confidence: 'high', source: 'header_analysis', proof: 'permissions-policy/feature-policy absent', verified: true, finding_type: 'hardening', context: 'Restricts browser APIs the page can use. Low-priority unless the site embeds third-party iframes or scripts that might request these permissions.' }));
 
     return findings;
   }
@@ -235,16 +238,16 @@
     const scripts = pageData.scripts || [];
     const withoutSri = scripts.filter(function (s) { return s.src && !s.integrity; });
     if (withoutSri.length > 0)
-      findings.push(bgFinding('External scripts without SRI (' + withoutSri.length + ')', 'Medium', url, 'Client-side', 'Subresource Integrity missing; scripts can be tampered.', { confidence: 'high', source: 'dom_scan', proof: withoutSri.slice(0, 5).map(function (s) { return s.src; }).join(', '), verified: true }));
+      findings.push(bgFinding('External scripts without SRI (' + withoutSri.length + ')', 'Medium', url, 'Client-side', 'Subresource Integrity missing; scripts can be tampered.', { confidence: 'high', source: 'dom_scan', proof: withoutSri.slice(0, 5).map(function (s) { return s.src; }).join(', '), verified: true, finding_type: 'hardening', context: 'SRI ensures CDN-hosted scripts haven\'t been tampered with. Important if you load scripts from third-party CDNs. Lower risk if all scripts are first-party or bundled.' }));
 
     const forms = pageData.forms || [];
     const httpForms = forms.filter(function (f) { return f.action && f.action.toLowerCase().startsWith('http:'); });
     if (httpForms.length > 0)
-      findings.push(bgFinding('Form submits over HTTP', 'High', url, 'Client-side', 'Form action uses http://; credentials may be sent in cleartext.', { confidence: 'high', source: 'dom_scan', proof: httpForms.slice(0, 5).map(function (f) { return f.action; }).join(', '), verified: true }));
+      findings.push(bgFinding('Form submits over HTTP', 'High', url, 'Client-side', 'Form action uses http://; credentials may be sent in cleartext.', { confidence: 'high', source: 'dom_scan', proof: httpForms.slice(0, 5).map(function (f) { return f.action; }).join(', '), verified: true, finding_type: 'vulnerability', context: 'This is a real problem. Form data sent over plain HTTP can be intercepted by anyone on the network. Should be fixed immediately.' }));
 
     const suspicious = pageData.suspicious || [];
     suspicious.forEach(function (s) {
-      findings.push(bgFinding(s, 'High', url, 'Sensitive data', 'Possible secret in page content.', { confidence: 'medium', source: 'regex_match', proof: s, verified: false }));
+      findings.push(bgFinding(s, 'High', url, 'Sensitive data', 'Possible secret in page content.', { confidence: 'medium', source: 'regex_match', proof: s, verified: false, finding_type: 'vulnerability', context: 'Pattern matches a known secret format. Verify whether this is a real credential or a false positive (e.g. example/placeholder value, public key).' }));
     });
 
     const links = Array.isArray(pageData.links) ? pageData.links : [];
@@ -260,7 +263,7 @@
           url,
           'Link credibility',
           'Risky outbound links detected from live DOM links. Top: ' + risky.slice(0, 10).map(function (x) { return x.url + ' [' + x.reasons.join(',') + ']'; }).join(' | '),
-          { confidence: 'medium', source: 'link_analysis', proof: risky.slice(0, 5).map(function (x) { return x.url + ' [' + x.reasons.join(',') + ']'; }).join(' | '), verified: false }
+          { confidence: 'medium', source: 'link_analysis', proof: risky.slice(0, 5).map(function (x) { return x.url + ' [' + x.reasons.join(',') + ']'; }).join(' | '), verified: false, finding_type: 'vulnerability', context: 'Links to IP addresses, known shortener domains, or suspicious TLDs may indicate phishing or malicious redirects. Verify these are intentional.' }
         ));
       } else if (caution.length > 0) {
         findings.push(bgFinding(
@@ -269,10 +272,10 @@
           url,
           'Link credibility',
           'Suspicious outbound links detected from live DOM links. Top: ' + caution.slice(0, 10).map(function (x) { return x.url + ' [' + x.reasons.join(',') + ']'; }).join(' | '),
-          { confidence: 'low', source: 'link_analysis', proof: caution.slice(0, 5).map(function (x) { return x.url + ' [' + x.reasons.join(',') + ']'; }).join(' | '), verified: false }
+          { confidence: 'low', source: 'link_analysis', proof: caution.slice(0, 5).map(function (x) { return x.url + ' [' + x.reasons.join(',') + ']'; }).join(' | '), verified: false, finding_type: 'informational', context: 'Minor patterns flagged (unusual TLD, URL shortener). Often benign — review the specific links to determine if they are intentional.' }
         ));
       } else {
-        findings.push(bgFinding('Link credibility: no risky patterns', 'Info', url, 'Link credibility', 'Analyzed ' + scored.length + ' link(s) from live DOM; no risky patterns found.', { confidence: 'medium', source: 'link_analysis', proof: 'analyzed ' + scored.length + ' links', verified: false }));
+        findings.push(bgFinding('Link credibility: no risky patterns', 'Info', url, 'Link credibility', 'Analyzed ' + scored.length + ' link(s) from live DOM; no risky patterns found.', { confidence: 'medium', source: 'link_analysis', proof: 'analyzed ' + scored.length + ' links', verified: false, finding_type: 'positive', context: 'All analyzed links follow expected patterns. No action needed.' }));
       }
     }
 

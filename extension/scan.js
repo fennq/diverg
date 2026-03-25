@@ -6,20 +6,20 @@
 (function (global) {
   try {
   const SECURITY_HEADERS = [
-    { name: 'Strict-Transport-Security', severity: 'High', missing: 'HSTS not set.', impact: 'Browser may allow HTTP; traffic not enforced as HTTPS.', remediation: 'Add Strict-Transport-Security: max-age=31536000; includeSubDomains; preload' },
-    { name: 'Content-Security-Policy', severity: 'Medium', missing: 'CSP not set.', impact: 'No browser-level XSS mitigation.', remediation: "Implement Content-Security-Policy (e.g. default-src 'self')" },
-    { name: 'X-Frame-Options', severity: 'Medium', missing: 'X-Frame-Options not set.', impact: 'Clickjacking possible.', remediation: "Add X-Frame-Options: DENY or SAMEORIGIN" },
-    { name: 'X-Content-Type-Options', severity: 'Low', missing: 'X-Content-Type-Options not set.', impact: 'MIME sniffing possible.', remediation: 'Add X-Content-Type-Options: nosniff' },
-    { name: 'Referrer-Policy', severity: 'Low', missing: 'Referrer-Policy not set.', impact: 'Full URL may leak in Referer.', remediation: 'Add Referrer-Policy: strict-origin-when-cross-origin' },
-    { name: 'Permissions-Policy', severity: 'Low', missing: 'Permissions-Policy not set.', impact: 'Browser features not restricted.', remediation: 'Add Permissions-Policy to restrict camera, mic, etc.' },
-    { name: 'Cross-Origin-Opener-Policy', severity: 'Low', missing: 'COOP not set.', impact: 'Cross-origin context sharing possible.', remediation: 'Add Cross-Origin-Opener-Policy: same-origin where appropriate' },
+    { name: 'Strict-Transport-Security', severity: 'High', missing: 'HSTS not set.', impact: 'Browser may allow HTTP; traffic not enforced as HTTPS.', remediation: 'Add Strict-Transport-Security: max-age=31536000; includeSubDomains; preload', finding_type: 'hardening', context: 'If the site already redirects HTTP→HTTPS (common behind Cloudflare/CDN), real risk is lower. HSTS prevents SSL-strip downgrade attacks and is expected on production sites.' },
+    { name: 'Content-Security-Policy', severity: 'Medium', missing: 'CSP not set.', impact: 'No browser-level XSS mitigation.', remediation: "Implement Content-Security-Policy (e.g. default-src 'self')", finding_type: 'hardening', context: 'CSP matters most on sites with user input, forms, or third-party scripts. Static sites benefit less but CSP still limits damage from supply-chain compromises.' },
+    { name: 'X-Frame-Options', severity: 'Medium', missing: 'X-Frame-Options not set.', impact: 'Clickjacking possible.', remediation: "Add X-Frame-Options: DENY or SAMEORIGIN", finding_type: 'hardening', context: 'Real clickjacking risk requires the page to have authenticated actions or sensitive forms. For static/marketing pages, this is a best-practice gap, not an active threat.' },
+    { name: 'X-Content-Type-Options', severity: 'Low', missing: 'X-Content-Type-Options not set.', impact: 'MIME sniffing possible.', remediation: 'Add X-Content-Type-Options: nosniff', finding_type: 'hardening', context: 'Prevents browsers from guessing content types. Trivial to add and universally recommended. Low real-world risk on most sites.' },
+    { name: 'Referrer-Policy', severity: 'Low', missing: 'Referrer-Policy not set.', impact: 'Full URL may leak in Referer.', remediation: 'Add Referrer-Policy: strict-origin-when-cross-origin', finding_type: 'hardening', context: 'Mainly matters if URLs contain tokens, session IDs, or sensitive paths. Low-risk for public pages with clean URLs.' },
+    { name: 'Permissions-Policy', severity: 'Low', missing: 'Permissions-Policy not set.', impact: 'Browser features not restricted.', remediation: 'Add Permissions-Policy to restrict camera, mic, etc.', finding_type: 'hardening', context: 'Restricts browser APIs (camera, mic, geolocation). Low-priority unless the site embeds third-party iframes or scripts.' },
+    { name: 'Cross-Origin-Opener-Policy', severity: 'Low', missing: 'COOP not set.', impact: 'Cross-origin context sharing possible.', remediation: 'Add Cross-Origin-Opener-Policy: same-origin where appropriate', finding_type: 'hardening', context: 'Isolates browsing context from cross-origin windows. Mainly relevant for sites handling sensitive data. Often unnecessary for public/static sites.' },
   ];
 
   const DANGEROUS_HEADERS = [
-    { name: 'Server', msg: 'Exposes server software/version.', severity: 'Low' },
-    { name: 'X-Powered-By', msg: 'Exposes backend framework.', severity: 'Low' },
-    { name: 'X-AspNet-Version', msg: 'Exposes ASP.NET version.', severity: 'Low' },
-    { name: 'X-AspNetMvc-Version', msg: 'Exposes ASP.NET MVC version.', severity: 'Low' },
+    { name: 'Server', msg: 'Exposes server software/version.', severity: 'Low', context: 'Common CDN values like "cloudflare" or "nginx" are expected and not a real disclosure. Only concerning if it reveals specific versions of custom/backend software.' },
+    { name: 'X-Powered-By', msg: 'Exposes backend framework.', severity: 'Low', context: 'Reveals the backend stack (e.g. Express, PHP). Useful to attackers for targeted exploits but low-risk alone. Easy to remove.' },
+    { name: 'X-AspNet-Version', msg: 'Exposes ASP.NET version.', severity: 'Low', context: 'Specific version disclosure helps attackers pick known CVEs. Should be removed in production.' },
+    { name: 'X-AspNetMvc-Version', msg: 'Exposes ASP.NET MVC version.', severity: 'Low', context: 'Same as X-AspNet-Version — specific version info aids targeted attacks. Remove in production.' },
   ];
 
   function getHeader(headers, name) {
@@ -50,6 +50,8 @@
       verified: !!m.verified,
     };
     if (detail) o.detail = detail;
+    if (m.context) o.context = m.context;
+    if (m.finding_type) o.finding_type = m.finding_type;
     return o;
   }
 
@@ -100,6 +102,7 @@
     const summary = {
       total_findings: 0,
       confidence_counts: { high: 0, medium: 0, low: 0 },
+      finding_type_counts: { vulnerability: 0, hardening: 0, informational: 0, positive: 0 },
       verified_count: 0,
       unverified_count: 0,
       source_breakdown: {},
@@ -112,6 +115,8 @@
       if (f.verified) summary.verified_count++;
       const src = String(f.source || 'unknown');
       summary.source_breakdown[src] = (summary.source_breakdown[src] || 0) + 1;
+      const ft = String(f.finding_type || '').toLowerCase();
+      if (summary.finding_type_counts[ft] !== undefined) summary.finding_type_counts[ft]++;
     });
     summary.unverified_count = Math.max(0, summary.total_findings - summary.verified_count);
     summary.verified_ratio = summary.total_findings ? Number((summary.verified_count / summary.total_findings).toFixed(2)) : 0;
@@ -122,11 +127,14 @@
 
   function buildScanSummary(findings) {
     const counts = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+    const typeCounts = { vulnerability: 0, hardening: 0, informational: 0, positive: 0 };
     (findings || []).forEach((f) => {
       const sev = String(f.severity || 'info').toLowerCase();
       if (counts[sev] !== undefined) counts[sev]++;
+      const ft = String(f.finding_type || '').toLowerCase();
+      if (typeCounts[ft] !== undefined) typeCounts[ft]++;
     });
-    return Object.assign({ total_findings: (findings || []).length }, counts);
+    return Object.assign({ total_findings: (findings || []).length, finding_types: typeCounts }, counts);
   }
 
   function finalizeScanOutput(targetUrl, scanType, findings, scanMeta) {
@@ -169,7 +177,9 @@
           'Headers',
           `'${def.name}' was not present in the response. Check the full header list above.`,
           def.impact,
-          def.remediation
+          def.remediation,
+          undefined,
+          { finding_type: def.finding_type || 'hardening', context: def.context || '' }
         ));
         continue;
       }
@@ -224,18 +234,19 @@
       }
     }
 
-    for (const { name, msg, severity } of DANGEROUS_HEADERS) {
-      const value = getHeader(headers, name);
+    for (const dh of DANGEROUS_HEADERS) {
+      const value = getHeader(headers, dh.name);
       if (value && value.trim()) {
         findings.push(finding(
-          `Information disclosure: ${name}`,
-          severity,
+          `Information disclosure: ${dh.name}`,
+          dh.severity,
           url,
           'Information Disclosure',
           `Header value: ${value}. This can be used to fingerprint the stack.`,
-          msg,
-          `Remove or genericize the ${name} header.`,
-          value
+          dh.msg,
+          `Remove or genericize the ${dh.name} header.`,
+          value,
+          { finding_type: 'hardening', context: dh.context || '' }
         ));
       }
     }
@@ -255,7 +266,8 @@
           'At least one cookie in the response does not include the Secure attribute. Raw Set-Cookie value(s) below for verification.',
           'Cookies can be sent over HTTP; risk of interception.',
           'Add the Secure attribute to all cookies on HTTPS.',
-          cookieStr.substring(0, 800)
+          cookieStr.substring(0, 800),
+          { finding_type: 'vulnerability', context: 'Without the Secure flag, cookies can be sent over plain HTTP, making them interceptable. This is a real issue if the site handles authentication or sensitive data.' }
         ));
       }
       if (!hasHttpOnly) {
@@ -267,7 +279,8 @@
           'Session or sensitive cookies should use HttpOnly so JavaScript cannot read them. Raw Set-Cookie value(s) below.',
           'XSS could steal session if cookies are readable by script.',
           'Add HttpOnly to session and sensitive cookies.',
-          cookieStr.substring(0, 800)
+          cookieStr.substring(0, 800),
+          { finding_type: 'hardening', context: 'HttpOnly prevents JavaScript from reading the cookie. Critical for session cookies, less important for non-sensitive cookies like analytics or UI preferences.' }
         ));
       }
       findings.push(finding(
@@ -283,9 +296,9 @@
     }
 
     if (url.startsWith('http://')) {
-      findings.push(finding('Page served over HTTP', 'High', url, 'Transport', 'Final request URL uses http:// — connection is not encrypted.', 'Traffic is visible to eavesdroppers.', 'Serve over HTTPS and redirect HTTP to HTTPS.'));
+      findings.push(finding('Page served over HTTP', 'High', url, 'Transport', 'Final request URL uses http:// — connection is not encrypted.', 'Traffic is visible to eavesdroppers.', 'Serve over HTTPS and redirect HTTP to HTTPS.', undefined, { finding_type: 'vulnerability', context: 'Serving over plain HTTP is a real security problem. All traffic is visible to anyone on the network. This should be fixed.' }));
     } else if (url.startsWith('https://')) {
-      findings.push(finding('Page served over HTTPS', 'Info', url, 'Transport', 'Final request URL uses https:// — connection is encrypted.', 'Traffic is encrypted in transit.', 'None.'));
+      findings.push(finding('Page served over HTTPS', 'Info', url, 'Transport', 'Final request URL uses https:// — connection is encrypted.', 'Traffic is encrypted in transit.', 'None.', undefined, { finding_type: 'positive', context: 'HTTPS is correctly configured. Traffic is encrypted.' }));
     }
 
     const acao = getHeader(headers, 'Access-Control-Allow-Origin');
@@ -298,7 +311,8 @@
         `Access-Control-Allow-Origin: ${acao}. Any website can make cross-origin requests.`,
         'With credentials, data could be exposed to any origin.',
         'Restrict to specific origins or avoid credentials with *.',
-        `Access-Control-Allow-Origin: ${acao}`
+        `Access-Control-Allow-Origin: ${acao}`,
+        { finding_type: 'hardening', context: 'CORS * is only dangerous if combined with credentials (Access-Control-Allow-Credentials: true). For public APIs or static assets, wildcard CORS is standard and expected. Check whether credentials are also allowed before treating this as a real risk.' }
       ));
     }
 
@@ -437,7 +451,8 @@
         `Forms: ${forms.length}. ${hasToken ? 'Common CSRF token name found in page.' : 'No common CSRF token name (csrf, _token, authenticity_token) found — verify manually.'} Each form's action, method, and input names are listed in the detail section.`,
         hasToken ? 'Forms present; token name detected.' : 'If state-changing forms lack CSRF protection, they may be vulnerable to CSRF.',
         'Implement CSRF tokens for state-changing forms; verify in browser.',
-        formDetail
+        formDetail,
+        { finding_type: hasToken ? 'positive' : 'hardening', context: hasToken ? 'CSRF token detected — forms appear protected.' : 'CSRF tokens are needed for forms that change state (login, payment, settings). Read-only search forms or contact forms sending to third-party APIs (Web3Forms, Formspree) may not need CSRF protection.' }
       ));
     }
 
@@ -674,18 +689,31 @@
     const pathResults = pathsToProbe.length ? await probePathsInParallel(origin, pathsToProbe) : [];
     const pathsProbed = pathResults.length;
     let pathsHit = 0;
+    const EXPECTED_PUBLIC_PATHS = new Set(['/robots.txt', '/sitemap.xml', '/.well-known/security.txt', '/.well-known/change-password', '/health', '/status']);
+    const SENSITIVE_PATHS = new Set(['/.env', '/.env.local', '/.git/config', '/config.json', '/.htaccess', '/web.config', '/.DS_Store', '/backup', '/backups', '/phpmyadmin', '/server-status', '/debug', '/actuator', '/console', '/manager/html']);
+
     for (const p of pathResults) {
       if (p.status >= 200 && p.status < 400) {
         pathsHit++;
+        const isExpected = EXPECTED_PUBLIC_PATHS.has(p.path);
+        const isSensitive = SENSITIVE_PATHS.has(p.path);
+        const sev = isSensitive ? 'High' : (isExpected ? 'Info' : (p.status === 200 ? 'Low' : 'Info'));
+        const ftype = isSensitive ? 'vulnerability' : (isExpected ? 'informational' : 'hardening');
+        const ctx = isSensitive
+          ? 'This path should never be publicly accessible. It may expose credentials, source code, or internal configuration. Restrict or remove immediately.'
+          : isExpected
+            ? 'This is a standard public file. Its presence is expected and not a security issue.'
+            : 'This path returned a response. Verify whether it should be publicly accessible or if it reveals internal functionality.';
         findings.push(finding(
           `Path accessible: ${p.path} (${p.label}) → ${p.status}`,
-          p.status === 200 ? 'Low' : 'Info',
+          sev,
           p.resUrl,
           'Path probe',
-          `GET ${p.path} returned ${p.status}. Label: ${p.label}. Verify if this path should be public.`,
-          'Sensitive or internal paths may be exposed.',
-          'Restrict access (auth, IP, or remove) for sensitive routes.',
-          `Status: ${p.status}. First 120 chars:\n${p.preview}`
+          `GET ${p.path} returned ${p.status}. Label: ${p.label}.${isExpected ? ' This is expected.' : ' Verify if this path should be public.'}`,
+          isSensitive ? 'Sensitive internal path is exposed; may leak credentials or config.' : (isExpected ? 'Standard public resource.' : 'Internal paths may reveal application structure.'),
+          isSensitive ? 'Block access immediately via server config or firewall.' : (isExpected ? 'No action needed.' : 'Restrict access if not intended to be public.'),
+          `Status: ${p.status}. First 120 chars:\n${p.preview}`,
+          { finding_type: ftype, context: ctx }
         ));
       }
     }

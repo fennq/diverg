@@ -88,6 +88,16 @@ def format_summary(target: str, findings: list[dict]) -> str:
         badge = SEVERITY_EMOJI.get(sev, "")
         lines.append(f"  {badge} {_escape_md(sev)}: {count}")
 
+    vuln_count = sum(1 for f in findings if f.get("finding_type") == "vulnerability")
+    hard_count = sum(1 for f in findings if f.get("finding_type") == "hardening")
+    if vuln_count or hard_count:
+        lines.append(f"")
+        lines.append(f"*Finding Classification:*")
+        if vuln_count:
+            lines.append(f"  \U0001f534 Real risks: {vuln_count}")
+        if hard_count:
+            lines.append(f"  \U0001f7e1 Hardening suggestions: {hard_count}")
+
     if findings:
         lines.append(f"")
         lines.append(f"*Top Findings:*")
@@ -97,7 +107,9 @@ def format_summary(target: str, findings: list[dict]) -> str:
             badge = SEVERITY_EMOJI.get(sev, "")
             title = _escape_md(f.get("title", "Untitled"))
             url = _escape_md(f.get("url", ""))
-            lines.append(f"  {i}\\. {badge} *{title}*")
+            ftype = f.get("finding_type", "")
+            ftype_tag = " \\[hardening\\]" if ftype == "hardening" else ""
+            lines.append(f"  {i}\\. {badge} *{title}*{ftype_tag}")
             if url:
                 lines.append(f"     `{url}`")
 
@@ -135,6 +147,11 @@ def format_detailed(target: str, findings: list[dict]) -> list[str]:
             lines.append(f"\U0001f4a5 *Impact:* {_escape_md(f['impact'])}")
         if f.get("remediation"):
             lines.append(f"\u2705 *Remediation:* {_escape_md(f['remediation'])}")
+        if f.get("context"):
+            lines.append(f"\U0001f4ac *Context:* {_escape_md(f['context'])}")
+        if f.get("finding_type"):
+            ftype_label = {"vulnerability": "Real risk", "hardening": "Hardening", "informational": "Informational", "positive": "Looks good"}.get(f["finding_type"], f["finding_type"])
+            lines.append(f"\U0001f3f7 *Type:* {_escape_md(ftype_label)}")
         if f.get("cvss"):
             lines.append(f"\U0001f4cf *CVSS:* {_escape_md(f['cvss'])}")
 
@@ -147,20 +164,30 @@ def format_detailed(target: str, findings: list[dict]) -> list[str]:
 def format_alert(target: str, findings: list[dict]) -> str:
     critical_high = [f for f in findings if f.get("severity") in ("Critical", "High")]
     if not critical_high:
-        return f"\u2705 *SecTester Alert*\n\nNo critical or high severity findings for `{_escape_md(target)}`\\."
+        hard_count = sum(1 for f in findings if f.get("finding_type") == "hardening")
+        suffix = f"  {hard_count} hardening suggestions noted\\." if hard_count else ""
+        return f"\u2705 *SecTester Alert*\n\nNo critical or high severity findings for `{_escape_md(target)}`\\.{suffix}"
+
+    real_risks = [f for f in critical_high if f.get("finding_type") != "hardening"]
+    hardening_only = [f for f in critical_high if f.get("finding_type") == "hardening"]
 
     lines = [
         f"\U0001f6a8 *SecTester Alert \\- Urgent Findings\\!*",
         f"",
         f"\U0001f3af *Target:* `{_escape_md(target)}`",
-        f"\u26a0\ufe0f *{len(critical_high)} critical/high findings detected*",
-        f"",
     ]
+    if real_risks:
+        lines.append(f"\u26a0\ufe0f *{len(real_risks)} real risk\\(s\\) detected*")
+    if hardening_only:
+        lines.append(f"\U0001f7e1 *{len(hardening_only)} hardening suggestion\\(s\\)*")
+    lines.append(f"")
+
     for i, f in enumerate(critical_high[:5], 1):
         sev = f.get("severity", "High")
         badge = SEVERITY_EMOJI.get(sev, "")
         title = _escape_md(f.get("title", "Untitled"))
-        lines.append(f"{i}\\. {badge} *{title}*")
+        ftype_tag = " \\[hardening\\]" if f.get("finding_type") == "hardening" else ""
+        lines.append(f"{i}\\. {badge} *{title}*{ftype_tag}")
         if f.get("url"):
             lines.append(f"   `{_escape_md(f['url'])}`")
 

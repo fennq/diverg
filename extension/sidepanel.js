@@ -66,6 +66,7 @@
           '<div class="scoreVerdict-summary">' + escapeHtml(summaryText) + '</div>' +
           '<div class="scoreVerdict-verdict">Verdict: ' + escapeHtml(verdict) + '</div>' +
           (evidence.quality ? '<div class="scoreVerdict-evidence">Evidence: ' + escapeHtml(evidence.quality) + ' · verified ' + escapeHtml(String(evidence.verified_count || 0)) + '/' + escapeHtml(String(evidence.total_findings || 0)) + '</div>' : '') +
+          (evidence.finding_type_counts ? '<div class="scoreVerdict-types">' + (evidence.finding_type_counts.vulnerability ? '<span class="findingType findingType--vulnerability">' + evidence.finding_type_counts.vulnerability + ' real risk</span> ' : '') + (evidence.finding_type_counts.hardening ? '<span class="findingType findingType--hardening">' + evidence.finding_type_counts.hardening + ' hardening</span>' : '') + '</div>' : '') +
           '</div>' +
           '<div class="state-meta">' + escapeHtml(origin) + ' · ' + risks.length + ' findings' + durationStr + '</div>';
       } else {
@@ -85,11 +86,21 @@
           if (conf) metaBits.push('confidence: ' + conf);
           if (f.verified) metaBits.push('verified');
           if (src) metaBits.push('source: ' + src);
+          var ftypeBadge = '';
+          if (f.finding_type) {
+            var ftypeLabel = f.finding_type === 'vulnerability' ? 'Real risk'
+              : f.finding_type === 'hardening' ? 'Hardening'
+              : f.finding_type === 'informational' ? 'Informational'
+              : f.finding_type === 'positive' ? 'Looks good'
+              : f.finding_type;
+            ftypeBadge = ' <span class="findingType findingType--' + escapeHtml(f.finding_type) + '">' + escapeHtml(ftypeLabel) + '</span>';
+          }
           li.innerHTML =
-            '<div class="riskTitle">' + escapeHtml(f.title || 'Finding') + '</div>' +
+            '<div class="riskTitle">' + escapeHtml(f.title || 'Finding') + ftypeBadge + '</div>' +
             (f.url ? '<p class="riskUrl">' + escapeHtml(f.url) + '</p>' : '') +
             '<span class="riskSeverity ' + sev + '">' + escapeHtml(f.severity || 'Info') + '</span>' +
-            (metaBits.length ? '<p class="riskUrl">' + escapeHtml(metaBits.join(' · ')) + '</p>' : '');
+            (metaBits.length ? '<p class="riskUrl">' + escapeHtml(metaBits.join(' · ')) + '</p>' : '') +
+            (f.context ? '<p class="riskContext">' + escapeHtml(f.context) + '</p>' : '');
           risksEl.appendChild(li);
         });
       }

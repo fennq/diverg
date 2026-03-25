@@ -147,6 +147,10 @@ def normalize_finding(raw: dict, source_skill: str, context_key: str = "findings
         out["evidence"] = f"Header: {header}; Value: {value}; Recommendation: {rec}"
         out["category"] = "Transport and Browser Security"
         out["remediation"] = rec or out["remediation"]
+        if raw.get("context"):
+            out["context"] = str(raw["context"]).strip()
+        if raw.get("finding_type"):
+            out["finding_type"] = str(raw["finding_type"]).strip()
         return out
     if context_key == "ssl_findings":
         check = str(raw.get("check", "")).strip()
@@ -170,6 +174,10 @@ def normalize_finding(raw: dict, source_skill: str, context_key: str = "findings
         out["verification_steps"] = raw["verification_steps"]
     if raw.get("confidence"):
         out["confidence"] = str(raw["confidence"]).strip()
+    if raw.get("context"):
+        out["context"] = str(raw["context"]).strip()
+    if raw.get("finding_type"):
+        out["finding_type"] = str(raw["finding_type"]).strip()
     return out
 
 
@@ -278,6 +286,7 @@ def build_evidence_summary(findings: list[dict]) -> dict:
     """Roll-up aligned with extension `buildEvidenceSummary` (+ optional top_sources)."""
     confidence_counts = {"high": 0, "medium": 0, "low": 0}
     source_breakdown: dict[str, int] = {}
+    finding_type_counts = {"vulnerability": 0, "hardening": 0, "informational": 0, "positive": 0}
     verified_count = 0
     for f in findings:
         conf = _normalize_confidence_value(f.get("confidence")) or "medium"
@@ -288,6 +297,9 @@ def build_evidence_summary(findings: list[dict]) -> dict:
         source_breakdown[src] = source_breakdown.get(src, 0) + 1
         if f.get("verified"):
             verified_count += 1
+        ft = str(f.get("finding_type") or "").strip().lower()
+        if ft in finding_type_counts:
+            finding_type_counts[ft] += 1
     total = len(findings)
     verified_ratio = round((verified_count / total), 2) if total else 0.0
     if confidence_counts["high"] >= 3 or verified_ratio >= 0.5:
@@ -300,6 +312,7 @@ def build_evidence_summary(findings: list[dict]) -> dict:
     return {
         "total_findings": total,
         "confidence_counts": confidence_counts,
+        "finding_type_counts": finding_type_counts,
         "verified_count": verified_count,
         "unverified_count": max(0, total - verified_count),
         "verified_ratio": verified_ratio,

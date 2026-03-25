@@ -32,7 +32,9 @@
     var ev = finding.evidence && String(finding.evidence).trim();
     var im = finding.impact && String(finding.impact).trim();
     var rem = finding.remediation && String(finding.remediation).trim();
-    var hasDetails = !!(ev || im || rem);
+    var ctx = finding.context && String(finding.context).trim();
+    var ftype = finding.finding_type && String(finding.finding_type).trim();
+    var hasDetails = !!(ev || im || rem || ctx);
     var detailsBlock = '';
     if (hasDetails) {
       detailsBlock =
@@ -41,12 +43,23 @@
           (ev ? '<div class="findingBlock"><strong>Evidence</strong><pre class="findingPre">' + escapeHtml(ev) + '</pre></div>' : '') +
           (im ? '<div class="findingBlock"><strong>Impact</strong><p class="findingPara">' + escapeHtml(im) + '</p></div>' : '') +
           (rem ? '<div class="findingBlock"><strong>Remediation</strong><p class="findingPara">' + escapeHtml(rem) + '</p></div>' : '') +
+          (ctx ? '<div class="findingBlock findingContext"><strong>Why this matters</strong><p class="findingPara">' + escapeHtml(ctx) + '</p></div>' : '') +
         '</details>';
+    }
+    var ftypeBadge = '';
+    if (ftype) {
+      var ftypeLabel = ftype === 'vulnerability' ? 'Real risk'
+        : ftype === 'hardening' ? 'Hardening'
+        : ftype === 'informational' ? 'Informational'
+        : ftype === 'positive' ? 'Looks good'
+        : ftype;
+      ftypeBadge = '<span class="findingType findingType--' + escapeHtml(ftype) + '">' + escapeHtml(ftypeLabel) + '</span>';
     }
     li.innerHTML =
       '<div class="findingHeader">' +
         '<span class="findingTitle">' + escapeHtml(finding.title || 'Untitled') + '</span>' +
         '<span class="findingSeverity ' + severity + '">' + escapeHtml(finding.severity || 'Info') + '</span>' +
+        ftypeBadge +
       '</div>' +
       (finding.url ? '<p class="findingUrl">' + escapeHtml(finding.url) + '</p>' : '') +
       ((finding.confidence || finding.source || finding.verified)
