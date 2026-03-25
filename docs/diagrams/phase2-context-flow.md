@@ -1,46 +1,44 @@
-# Phase 1 → Phase 2 web scan (context flow)
+# Phase 2 context skills (diagram source)
 
 Render in GitHub, Notion, or [mermaid.live](https://mermaid.live).
 
 ```mermaid
-flowchart TB
-  subgraph P1["Phase 1 — parallel (no cross-skill context)"]
-    A[osint]
-    B[recon]
-    C[headers_ssl]
-    D[client_surface]
-    E[api_test]
-    F[web_vulns · auth · high_value · …]
-  end
+flowchart LR
+  P2["Phase 2: Context Skills"] --> CI["Context Intake"]
 
-  subgraph CTX["Context passed to Phase 2"]
-    D1[(client_surface JSON)]
-    R1[(recon JSON)]
-    O1[(osint JSON)]
-    AP[(api_test JSON)]
-  end
+  CI --> CS["client_surface JSON"]
+  CI --> RJ["recon JSON"]
+  CI --> OJ["osint JSON"]
+  CI --> AJ["api_test JSON"]
 
-  subgraph P2["Phase 2 — context-aware"]
-    DA[dependency_audit]
-    LA[logic_abuse]
-    ER[entity_reputation]
-  end
+  CS --> SE["Skill Execution"]
+  RJ --> SE
+  OJ --> SE
+  AJ --> SE
 
-  P1 --> CTX
-  D --> D1
-  B --> R1
-  A --> O1
-  E --> AP
+  SE --> DA["dependency_audit"]
+  SE --> LA["logic_abuse"]
+  SE --> ER["entity_reputation"]
 
-  D1 --> DA
-  R1 --> DA
-  D1 --> LA
-  AP --> LA
-  O1 --> ER
+  DA --> FN["Finding Normalization"]
+  LA --> FN
+  ER --> FN
 
-  DA --> OUT[(Aggregated findings + evidence_summary)]
-  LA --> OUT
-  ER --> OUT
+  FN --> C1["confidence: high/medium/low"]
+  FN --> C2["source attribution"]
+  FN --> C3["proof artifact"]
+  FN --> C4["verified flag"]
+  FN --> RO["Report Output"]
+
+  RO --> R1["ordered findings with evidence"]
+  RO --> R2["evidence summary"]
+  RO --> R3["verified vs unverified counts"]
+  RO --> R4["source breakdown"]
+  RO --> DQ["Decision Quality"]
+
+  DQ --> Q1["less noise"]
+  DQ --> Q2["more factual signals"]
+  DQ --> Q3["faster operator validation"]
 ```
 
 **PNG export:** `docs/assets/phase2-context-flow-diagram.png`
