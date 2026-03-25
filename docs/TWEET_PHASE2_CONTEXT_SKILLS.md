@@ -2,7 +2,9 @@
 
 Ship note: full web scans now run these **after** phase-1 surface skills, using **client_surface**, **recon**, **api_test**, and **osint** context. Recent upgrades: richer stack detection (incl. `Sec-CH-UA`), baseline-aware logic probes + form POST, canonical reputation findings + domain fallback when WHOIS is empty.
 
-**Visual:** use `docs/assets/phase2-context-skills-card.png` (generated) for the image post.
+**Visuals:**
+- **Flow diagram (recommended):** `docs/assets/phase2-context-flow-diagram.png` — same style as the technical diagram approach; source: `docs/diagrams/phase2-context-flow.md` (Mermaid).
+- **Three-pillar card:** `docs/assets/phase2-context-skills-card.png`
 
 ---
 
@@ -38,6 +40,8 @@ Phase 2 of our web scan: **dependency/CVE watchlist** (incl. Sec-CH-UA), **logic
 
 ---
 
-## Alt text (for the image)
+## Alt text (for images)
 
-Diverg branded diagram: three columns labeled Dependency audit, Logic abuse, Entity reputation, on a dark grid with teal accents and subtitle “Phase 2 — context-aware scanning.”
+**Flow diagram:** Dark technical flowchart: Phase 1 skills feed context JSON into Phase 2 boxes dependency_audit, logic_abuse, entity_reputation, then aggregated findings.
+
+**Three-pillar card:** Three columns labeled Dependency audit, Logic abuse, Entity reputation, dark grid, teal accents, subtitle “Phase 2 — context-aware scanning.”
