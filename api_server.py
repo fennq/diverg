@@ -73,7 +73,7 @@ def api_scan():
         url = "https://" + url
     goal = (data.get("goal") or "").strip() or None
     scope = (data.get("scope") or "full").strip().lower()
-    if scope not in ("full", "quick", "crypto", "recon", "web", "api", "passive"):
+    if scope not in ("full", "quick", "crypto", "recon", "web", "api", "passive", "attack"):
         scope = "full"
     try:
         result = run_web_scan(url, scope=scope, goal=goal)
@@ -108,7 +108,7 @@ def api_scan_stream():
         url = "https://" + url
     goal = (data.get("goal") or "").strip() or None
     scope = (data.get("scope") or "full").strip().lower()
-    if scope not in ("full", "quick", "crypto", "recon", "web", "api", "passive"):
+    if scope not in ("full", "quick", "crypto", "recon", "web", "api", "passive", "attack"):
         scope = "full"
 
     def generate():

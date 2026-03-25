@@ -393,8 +393,21 @@ BANNER = r"""
 # Skill runner
 # ---------------------------------------------------------------------------
 
-def run_skill(skill_name: str, target: str, target_url: str, context: dict | None = None) -> dict:
-    """Import and execute a skill, returning its parsed JSON output. context: optional dict with client_surface_json, recon_json, osint_json for skills that use them."""
+def run_skill_variant(
+    skill_name: str,
+    target: str,
+    target_url: str,
+    *,
+    scan_type: str = "full",
+    wordlist: str = "medium",
+    crawl_depth: int = 2,
+    context: dict | None = None,
+) -> dict:
+    """Import and execute a skill, returning its parsed JSON output.
+
+    scan_type/wordlist apply only to skills that support them (e.g. api_test, recon, auth_test, company_exposure).
+    context: optional dict with client_surface_json, recon_json, osint_json, api_results_json for skills that use them.
+    """
     print(f"\n{'='*60}")
     print(f"  Running: {skill_name}")
     print(f"  Target:  {target}")
@@ -405,51 +418,51 @@ def run_skill(skill_name: str, target: str, target_url: str, context: dict | Non
     try:
         if skill_name == "recon":
             import recon
-            raw = recon.run(target, scan_type="full")
+            raw = recon.run(target, scan_type=scan_type)
         elif skill_name == "web_vulns":
             import web_vulns
-            raw = web_vulns.run(target_url, scan_type="full", crawl_depth=2)
+            raw = web_vulns.run(target_url, scan_type=scan_type, crawl_depth=crawl_depth)
         elif skill_name == "headers_ssl":
             import headers_ssl
-            raw = headers_ssl.run(target_url, scan_type="full")
+            raw = headers_ssl.run(target_url, scan_type=scan_type)
         elif skill_name == "company_exposure":
             import company_exposure
-            raw = company_exposure.run(target_url, scan_type="full")
+            raw = company_exposure.run(target_url, scan_type=scan_type)
         elif skill_name == "high_value_flaws":
             import high_value_flaws
-            raw = high_value_flaws.run(target_url, scan_type="full")
+            raw = high_value_flaws.run(target_url, scan_type=scan_type)
         elif skill_name == "race_condition":
             import race_condition
-            raw = race_condition.run(target_url, scan_type="full")
+            raw = race_condition.run(target_url, scan_type=scan_type)
         elif skill_name == "workflow_probe":
             import workflow_probe
-            raw = workflow_probe.run(target_url, scan_type="full")
+            raw = workflow_probe.run(target_url, scan_type=scan_type)
         elif skill_name == "payment_financial":
             import payment_financial
-            raw = payment_financial.run(target_url, scan_type="full")
+            raw = payment_financial.run(target_url, scan_type=scan_type)
         elif skill_name == "crypto_security":
             import crypto_security
-            raw = crypto_security.run(target_url, scan_type="full")
+            raw = crypto_security.run(target_url, scan_type=scan_type)
         elif skill_name == "data_leak_risks":
             import data_leak_risks
-            raw = data_leak_risks.run(target_url, scan_type="full")
+            raw = data_leak_risks.run(target_url, scan_type=scan_type)
         elif skill_name == "auth_test":
             import auth_test
-            raw = auth_test.run(target_url, scan_type="full")
+            raw = auth_test.run(target_url, scan_type=scan_type)
         elif skill_name == "api_test":
             import api_test
-            raw = api_test.run(target_url, scan_type="full", wordlist="medium")
+            raw = api_test.run(target_url, scan_type=scan_type, wordlist=wordlist)
         elif skill_name == "osint":
             import osint
-            raw = osint.run(target, scan_type="full")
+            raw = osint.run(target, scan_type=scan_type)
         elif skill_name == "client_surface":
             import client_surface
-            raw = client_surface.run(target_url, scan_type="full")
+            raw = client_surface.run(target_url, scan_type=scan_type)
         elif skill_name == "dependency_audit":
             import dependency_audit
             raw = dependency_audit.run(
                 target_url,
-                scan_type="full",
+                scan_type=scan_type,
                 client_surface_json=ctx.get("client_surface_json"),
                 recon_json=ctx.get("recon_json"),
             )
@@ -457,17 +470,17 @@ def run_skill(skill_name: str, target: str, target_url: str, context: dict | Non
             import logic_abuse
             raw = logic_abuse.run(
                 target_url,
-                scan_type="full",
+                scan_type=scan_type,
                 client_surface_json=ctx.get("client_surface_json"),
             )
         elif skill_name == "entity_reputation":
             import entity_reputation
-            raw = entity_reputation.run(target, scan_type="full", osint_json=ctx.get("osint_json"))
+            raw = entity_reputation.run(target, scan_type=scan_type, osint_json=ctx.get("osint_json"))
         elif skill_name == "chain_validation_abuse":
             import chain_validation_abuse
             raw = chain_validation_abuse.run(
                 target_url,
-                scan_type="full",
+                scan_type=scan_type,
                 client_surface_json=ctx.get("client_surface_json"),
                 api_results_json=ctx.get("api_results_json"),
             )
@@ -484,6 +497,11 @@ def run_skill(skill_name: str, target: str, target_url: str, context: dict | Non
     except Exception as exc:
         print(f"  -> ERROR: {exc}")
         return {"error": str(exc), "skill": skill_name}
+
+
+def run_skill(skill_name: str, target: str, target_url: str, context: dict | None = None) -> dict:
+    """Backward-compatible runner for default full scan."""
+    return run_skill_variant(skill_name, target, target_url, scan_type="full", wordlist="medium", crawl_depth=2, context=context)
 
 
 # ---------------------------------------------------------------------------
@@ -1284,6 +1302,19 @@ WEB_SCAN_PHASE1 = [
 WEB_SCAN_PHASE2 = ["dependency_audit", "logic_abuse", "entity_reputation"]
 WEB_SCAN_PROFILE = WEB_SCAN_PHASE1 + WEB_SCAN_PHASE2
 
+# Phase 3 (attack-style probing): targeted scan_type passes for high-signal checks.
+# This is opt-in via scope="attack" for the API/extension so default scans stay fast.
+WEB_SCAN_PHASE3: list[tuple[str, str, str]] = [
+    ("web_vulns", "files", "medium"),
+    ("api_test", "info_disclosure", "medium"),
+    ("api_test", "auth_bypass", "small"),
+    ("api_test", "cors", "small"),
+    ("auth_test", "enumeration", "medium"),
+    ("auth_test", "jwt", "medium"),
+    ("company_exposure", "business", "medium"),
+    ("company_exposure", "debug", "medium"),
+]
+
 
 def _is_crypto_site(target_url: str) -> bool:
     """Quick crypto/DeFi detection so we can add chain_validation_abuse when relevant."""
@@ -1327,12 +1358,14 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
         requested = resolve_goal(goal)
         skills_phase1 = [s for s in WEB_SCAN_PHASE1 if s in requested]
         skills_phase2 = [s for s in WEB_SCAN_PHASE2 if s in requested]
+        skills_phase3: list[tuple[str, str, str]] = []
         if "chain_validation_abuse" in requested and "chain_validation_abuse" not in skills_phase2:
             skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
             chain_validation_abuse_reason = "goal"
     else:
         skills_phase1 = WEB_SCAN_PHASE1 if scope == "full" else SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])
         skills_phase2 = WEB_SCAN_PHASE2 if scope == "full" else []
+        skills_phase3 = WEB_SCAN_PHASE3 if scope == "attack" else []
         if scope == "crypto":
             if "chain_validation_abuse" not in skills_phase2:
                 skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
@@ -1389,6 +1422,38 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
                 except Exception as exc:
                     results[skill_name] = {"error": str(exc), "skill": skill_name}
 
+    # Phase 3: vulnerability probing (opt-in via scope="attack")
+    if skills_phase3:
+        ctx3 = {
+            "client_surface_json": json.dumps(results["client_surface"]) if results.get("client_surface") and "error" not in results.get("client_surface", {}) else None,
+            "recon_json": json.dumps(results["recon"]) if results.get("recon") and "error" not in results.get("recon", {}) else None,
+            "osint_json": json.dumps(results["osint"]) if results.get("osint") and "error" not in results.get("osint", {}) else None,
+            "api_results_json": json.dumps(results["api_test"]) if results.get("api_test") and "error" not in results.get("api_test", {}) else None,
+        }
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_phase3))) as pool:
+            future_to_task = {
+                pool.submit(
+                    run_skill_variant,
+                    skill,
+                    domain if skill in {"recon", "osint", "entity_reputation"} else domain,
+                    target_url,
+                    scan_type=stype,
+                    wordlist=wl,
+                    crawl_depth=2,
+                    context=ctx3,
+                ): f"{skill}:{stype}:{wl}"
+                for (skill, stype, wl) in skills_phase3
+            }
+            for future in concurrent.futures.as_completed(future_to_task):
+                key = future_to_task[future]
+                try:
+                    results[key] = future.result(timeout=SKILL_TIMEOUT_SECONDS)
+                except concurrent.futures.TimeoutError:
+                    future.cancel()
+                    results[key] = {"error": f"Skill timed out after {SKILL_TIMEOUT_SECONDS}s", "skill": key}
+                except Exception as exc:
+                    results[key] = {"error": str(exc), "skill": key}
+
     findings = aggregate_findings(results)
     company_surfaces = aggregate_company_surfaces(results)
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -1433,12 +1498,14 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
         requested = resolve_goal(goal)
         skills_phase1 = [s for s in WEB_SCAN_PHASE1 if s in requested]
         skills_phase2 = [s for s in WEB_SCAN_PHASE2 if s in requested]
+        skills_phase3: list[tuple[str, str, str]] = []
         if "chain_validation_abuse" in requested and "chain_validation_abuse" not in skills_phase2:
             skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
             chain_validation_abuse_reason = "goal"
     else:
         skills_phase1 = WEB_SCAN_PHASE1 if scope == "full" else SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])
         skills_phase2 = WEB_SCAN_PHASE2 if scope == "full" else []
+        skills_phase3 = WEB_SCAN_PHASE3 if scope == "attack" else []
         if scope == "crypto":
             if "chain_validation_abuse" not in skills_phase2:
                 skills_phase2 = list(skills_phase2) + ["chain_validation_abuse"]
@@ -1478,6 +1545,33 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
             except Exception as exc:
                 results[skill_name] = {"error": str(exc), "skill": skill_name}
                 yield {"event": "skill_done", "skill": skill_name, "findings_count": 0, "error": str(exc)}
+
+    if skills_phase3:
+        ctx3 = {
+            "client_surface_json": json.dumps(results["client_surface"]) if results.get("client_surface") and "error" not in results.get("client_surface", {}) else None,
+            "recon_json": json.dumps(results["recon"]) if results.get("recon") and "error" not in results.get("recon", {}) else None,
+            "osint_json": json.dumps(results["osint"]) if results.get("osint") and "error" not in results.get("osint", {}) else None,
+            "api_results_json": json.dumps(results["api_test"]) if results.get("api_test") and "error" not in results.get("api_test", {}) else None,
+        }
+        for skill_name, stype, wl in skills_phase3:
+            label = f"{skill_name}:{stype}"
+            yield {"event": "skill_start", "skill": label}
+            try:
+                out = run_skill_variant(
+                    skill_name,
+                    domain,
+                    target_url,
+                    scan_type=stype,
+                    wordlist=wl,
+                    crawl_depth=2,
+                    context=ctx3,
+                )
+                results[f"{skill_name}:{stype}:{wl}"] = out
+                cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
+                yield {"event": "skill_done", "skill": label, "findings_count": cnt}
+            except Exception as exc:
+                results[f"{skill_name}:{stype}:{wl}"] = {"error": str(exc), "skill": skill_name}
+                yield {"event": "skill_done", "skill": label, "findings_count": 0, "error": str(exc)}
 
     findings = aggregate_findings(results)
     company_surfaces = aggregate_company_surfaces(results)
