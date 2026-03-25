@@ -2,6 +2,10 @@
 
 Primary source lives in `docs/diagrams/phase2-context-flow.mmd`.
 
+![Phase 2 context skills flow](phase2-context-flow.svg)
+
+**SVG file:** [`phase2-context-flow.svg`](phase2-context-flow.svg) (open in browser or VS Code preview)
+
 Use this in GitHub, Notion, or [mermaid.live](https://mermaid.live).
 
 ```mermaid

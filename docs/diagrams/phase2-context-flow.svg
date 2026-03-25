@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 620" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0 0, 7 2.5, 0 5" fill="#8b949e"/>
+    </marker>
+  </defs>
+  <rect width="100%" height="100%" fill="#0d1117"/>
+
+  <style><![CDATA[
+    .b { fill: #161b22; stroke: #30363d; stroke-width: 1.2; rx: 4; }
+    .t { fill: #e6edf3; font-size: 11px; }
+    .t-sm { fill: #e6edf3; font-size: 10px; }
+    .sub { fill: #8b949e; font-size: 9px; }
+  ]]></style>
+
+  <!-- Left to center -->
+  <rect class="b" x="28" y="258" width="172" height="44"/>
+  <text class="t" x="114" y="284" text-anchor="middle" font-weight="600">Phase 2: Context Skills</text>
+
+  <rect class="b" x="228" y="258" width="136" height="44"/>
+  <text class="t" x="296" y="284" text-anchor="middle">Context Intake</text>
+
+  <rect class="b" x="396" y="84" width="172" height="32"/>
+  <text class="t-sm" x="482" y="104" text-anchor="middle">client_surface JSON</text>
+  <rect class="b" x="396" y="126" width="172" height="32"/>
+  <text class="t-sm" x="482" y="146" text-anchor="middle">recon JSON</text>
+  <rect class="b" x="396" y="168" width="172" height="32"/>
+  <text class="t-sm" x="482" y="188" text-anchor="middle">osint JSON</text>
+  <rect class="b" x="396" y="210" width="172" height="32"/>
+  <text class="t-sm" x="482" y="230" text-anchor="middle">api_test JSON</text>
+
+  <rect class="b" x="608" y="250" width="152" height="48"/>
+  <text class="t" x="684" y="272" text-anchor="middle" font-weight="600">Skill Execution</text>
+  <text class="sub" x="684" y="288" text-anchor="middle">context ? probes</text>
+
+  <rect class="b" x="800" y="96" width="156" height="32"/>
+  <text class="t-sm" x="878" y="116" text-anchor="middle">dependency_audit</text>
+  <rect class="b" x="800" y="144" width="156" height="32"/>
+  <text class="t-sm" x="878" y="164" text-anchor="middle">logic_abuse</text>
+  <rect class="b" x="800" y="192" width="156" height="32"/>
+  <text class="t-sm" x="878" y="212" text-anchor="middle">entity_reputation</text>
+
+  <rect class="b" x="992" y="250" width="176" height="48"/>
+  <text class="t" x="1080" y="272" text-anchor="middle" font-weight="600">Finding Normalization</text>
+  <text class="sub" x="1080" y="288" text-anchor="middle">canonical finding shape</text>
+
+  <!-- Right column -->
+  <g id="right">
+    <rect class="b" x="1212" y="56" width="208" height="28"/>
+    <text class="t-sm" x="1316" y="74" text-anchor="middle">confidence: high/medium/low</text>
+    <rect class="b" x="1212" y="92" width="208" height="28"/>
+    <text class="t-sm" x="1316" y="110" text-anchor="middle">source attribution</text>
+    <rect class="b" x="1212" y="128" width="208" height="28"/>
+    <text class="t-sm" x="1316" y="146" text-anchor="middle">proof artifact</text>
+    <rect class="b" x="1212" y="164" width="208" height="28"/>
+    <text class="t-sm" x="1316" y="182" text-anchor="middle">verified flag</text>
+
+    <rect class="b" x="1212" y="206" width="208" height="34"/>
+    <text class="t" x="1316" y="228" text-anchor="middle" font-weight="600">Report Output</text>
+
+    <rect class="b" x="1212" y="260" width="208" height="28"/>
+    <text class="t-sm" x="1316" y="278" text-anchor="middle">ordered findings with evidence</text>
+    <rect class="b" x="1212" y="296" width="208" height="28"/>
+    <text class="t-sm" x="1316" y="314" text-anchor="middle">evidence summary</text>
+    <rect class="b" x="1212" y="332" width="208" height="28"/>
+    <text class="t-sm" x="1316" y="350" text-anchor="middle">verified vs unverified counts</text>
+    <rect class="b" x="1212" y="368" width="208" height="28"/>
+    <text class="t-sm" x="1316" y="386" text-anchor="middle">source breakdown</text>
+
+    <rect class="b" x="1212" y="416" width="208" height="34"/>
+    <text class="t" x="1316" y="438" text-anchor="middle" font-weight="600">Decision Quality</text>
+
+    <rect class="b" x="1212" y="470" width="208" height="28"/>
+    <text class="t-sm" x="1316" y="488" text-anchor="middle">less noise</text>
+    <rect class="b" x="1212" y="506" width="208" height="28"/>
+    <text class="t-sm" x="1316" y="524" text-anchor="middle">more factual signals</text>
+    <rect class="b" x="1212" y="542" width="208" height="28"/>
+    <text class="t-sm" x="1316" y="560" text-anchor="middle">faster operator validation</text>
+  </g>
+
+  <!-- Edges -->
+  <g stroke="#6e7681" fill="none" marker-end="url(#arr)">
+    <line x1="200" y1="280" x2="228" y2="280"/>
+    <!-- CI to JSON bus -->
+    <path d="M 364 280 L 388 280 L 388 100 L 396 100"/>
+    <path d="M 364 280 L 388 280 L 388 142 L 396 142"/>
+    <path d="M 364 280 L 388 280 L 388 184 L 396 184"/>
+    <path d="M 364 280 L 388 280 L 388 226 L 396 226"/>
+    <!-- JSON to SE -->
+    <path d="M 568 100 L 588 100 L 588 268 L 608 268"/>
+    <path d="M 568 142 L 588 142 L 588 272 L 608 272"/>
+    <path d="M 568 184 L 588 184 L 588 276 L 608 276"/>
+    <path d="M 568 226 L 588 226 L 588 280 L 608 280"/>
+    <!-- SE to skills -->
+    <path d="M 760 268 L 780 268 L 780 112 L 800 112"/>
+    <path d="M 760 274 L 784 274 L 784 160 L 800 160"/>
+    <path d="M 760 280 L 788 280 L 788 208 L 800 208"/>
+    <!-- skills to FN -->
+    <path d="M 956 112 L 976 112 L 976 268 L 992 268"/>
+    <path d="M 956 160 L 976 160 L 976 272 L 992 272"/>
+    <path d="M 956 208 L 976 208 L 976 276 L 992 276"/>
+    <!-- FN to right column (fan to first 5 targets) -->
+    <path d="M 1168 268 L 1188 268 L 1188 70 L 1212 70"/>
+    <path d="M 1168 272 L 1192 272 L 1192 106 L 1212 106"/>
+    <path d="M 1168 276 L 1196 276 L 1196 142 L 1212 142"/>
+    <path d="M 1168 280 L 1200 280 L 1200 178 L 1212 178"/>
+    <path d="M 1168 284 L 1204 284 L 1204 223 L 1212 223"/>
+    <!-- Report Output through list, Decision Quality, outcomes -->
+    <line x1="1316" y1="240" x2="1316" y2="260"/>
+    <line x1="1316" y1="288" x2="1316" y2="396"/>
+    <line x1="1316" y1="396" x2="1316" y2="416"/>
+    <line x1="1316" y1="450" x2="1316" y2="470"/>
+    <line x1="1316" y1="504" x2="1316" y2="542"/>
+  </g>
+</svg>
