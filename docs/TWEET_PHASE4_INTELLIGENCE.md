@@ -4,24 +4,28 @@
 
 ---
 
-## Single post (Phase 1 style)
+## Post (same structure as Phase 3)
 
-**Phase 4 is live:** Intelligence synthesis on top of Phases 1–3.
+Phase 4 is live: Intelligence synthesis upgraded.
 
-We turn the full skill graph into **ranked attack paths** (cross-skill chains, not isolated alerts), a **finding-type-aware risk score** (hardening vs real vulns weighted differently), a **tiered remediation plan** (fix now / soon / harden), plus **gap analysis** and **suggested next tests** so operators know what to run next.
+We leveled up what happens after the scan with:
 
-Same payload on **CLI orchestrator**, **POST /api/scan**, and the **extension** full report. Authorized assessments only.
+- ranked attack paths across skills (exploit chains, not isolated checklist items)
+- finding-type-aware risk score (0-100, Safe / Caution / Risky; hardening weighted lower than real vulns)
+- tiered remediation plan (fix now, fix soon, harden when possible)
+- gap analysis plus suggested next tests so you know which probes complete the story
+- same structured payload on the orchestrator, POST /api/scan (and streaming), plus the extension full report
 
-@DivergSec
+Authorized testing only.
 
 ---
 
-## Short (~280 chars)
+## Short (~260 chars)
 
-Phase 4: after surface + context + attack passes we **synthesize** — correlated **attack paths**, **0–100 risk** (hardening vs vulns), **remediation tiers**, **gaps + next tests**. API + extension. Checklist tools don’t chain findings; we do. @DivergSec
+Phase 4: post-scan intelligence — **attack path correlation**, **risk score + verdict**, **remediation tiers**, **gaps + next tests**. API + extension. @DivergSec
 
 ---
 
 ## Alt text (SVG)
 
-Dark technical flowchart: Phase 1 Surface, Phase 2 Context, Phase 3 Attack, Aggregate, then a highlighted Phase 4 Intelligence synthesis box feeding four outputs — Attack paths, Risk score, Remediation plan, Gaps and next tests — with Diverg/GitHub-style colors.
+Dark flowchart: Phases 1-3 and aggregate feed Phase 4 intelligence synthesis; four output columns for attack paths, risk score, remediation plan, and gaps/next tests; references orchestrator run_web_scan.

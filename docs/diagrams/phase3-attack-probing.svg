@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1480 560" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0 0, 7 2.5, 0 5" fill="#8b949e"/>
+    </marker>
+  </defs>
+  <rect width="100%" height="100%" fill="#0d1117"/>
+
+  <style><![CDATA[
+    .b { fill: #161b22; stroke: #30363d; stroke-width: 1.2; rx: 4; }
+    .b-p3 { fill: #161b22; stroke: #a371f7; stroke-width: 1.6; rx: 6; }
+    .t { fill: #e6edf3; font-size: 11px; }
+    .sub { fill: #8b949e; font-size: 9px; }
+    .title { fill: #e6edf3; font-size: 14px; font-weight: 600; }
+    .bullet { fill: #c9d1d9; font-size: 10px; }
+  ]]></style>
+
+  <text class="title" x="740" y="34" text-anchor="middle">Phase 3 - Attack probing (scope=attack)</text>
+  <text class="sub" x="740" y="52" text-anchor="middle">Runs after Phase 1 + Phase 2; one coherent report</text>
+
+  <rect class="b" x="40" y="76" width="200" height="48"/>
+  <text class="t" x="140" y="98" text-anchor="middle" font-weight="600">Phase 1</text>
+  <text class="sub" x="140" y="114" text-anchor="middle">Surface skills</text>
+
+  <rect class="b" x="260" y="76" width="200" height="48"/>
+  <text class="t" x="360" y="98" text-anchor="middle" font-weight="600">Phase 2</text>
+  <text class="sub" x="360" y="114" text-anchor="middle">Context skills</text>
+
+  <rect class="b-p3" x="480" y="68" width="960" height="64"/>
+  <text class="t" x="960" y="96" text-anchor="middle" font-weight="600">Phase 3 - Targeted variant passes (run_skill_variant)</text>
+  <text class="sub" x="960" y="116" text-anchor="middle">Deeper crawl where configured; same ctx shape as Phase 2</text>
+
+  <rect class="b" x="40" y="168" width="440" height="200"/>
+  <text class="t" x="260" y="192" text-anchor="middle" font-weight="600">web_vulns</text>
+  <text class="bullet" x="56" y="214">- full (deeper crawl)</text>
+  <text class="bullet" x="56" y="232">- files exposure pass</text>
+
+  <rect class="b" x="500" y="168" width="440" height="200"/>
+  <text class="t" x="720" y="192" text-anchor="middle" font-weight="600">api_test</text>
+  <text class="bullet" x="516" y="214">- info disclosure, auth bypass, CORS</text>
+  <text class="bullet" x="516" y="232">- host header, rate limit</text>
+  <text class="bullet" x="516" y="250">- param fuzz, mass assignment</text>
+  <text class="bullet" x="516" y="268">- contract drift</text>
+
+  <rect class="b" x="960" y="168" width="480" height="200"/>
+  <text class="t" x="1200" y="192" text-anchor="middle" font-weight="600">auth_test / company_exposure</text>
+  <text class="bullet" x="976" y="214">- auth: enumeration, JWT</text>
+  <text class="bullet" x="976" y="232">- company: business, debug, docs</text>
+  <text class="bullet" x="976" y="250">- staging, support, admin</text>
+  <text class="bullet" x="976" y="268">- identity, observability</text>
+
+  <rect class="b" x="40" y="396" width="1400" height="72"/>
+  <text class="t" x="740" y="424" text-anchor="middle" font-weight="600">Output</text>
+  <text class="sub" x="740" y="444" text-anchor="middle">Findings merged with Phase 1 + 2; skills_run lists phase-3 keys (e.g. web_vulns:full:medium)</text>
+  <text class="sub" x="740" y="460" text-anchor="middle">Use POST /api/scan with scope: attack - orchestrator.WEB_SCAN_PHASE3</text>
+
+  <g stroke="#6e7681" fill="none" marker-end="url(#arr)">
+    <line x1="240" y1="100" x2="260" y2="100"/>
+    <line x1="460" y1="100" x2="480" y2="100"/>
+  </g>
+</svg>
