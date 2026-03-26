@@ -73,6 +73,14 @@
       severityBarEl.appendChild(chip);
     }
 
+    if (typeof result.risk_score === 'number' && result.risk_verdict) {
+      const chip = document.createElement('span');
+      const rv = result.risk_verdict;
+      chip.className = `severity-chip ${rv === 'Risky' ? 'critical' : rv === 'Caution' ? 'medium' : 'low'}`;
+      chip.textContent = `Score ${result.risk_score}/100 · ${rv}`;
+      severityBarEl.appendChild(chip);
+    }
+
     resultsSummary.hidden = false;
   }
 

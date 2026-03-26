@@ -85,6 +85,16 @@ def api_scan():
             "skills_run": result.get("skills_run"),
             "site_classification": result.get("site_classification"),
             "evidence_summary": result.get("evidence_summary"),
+            "attack_paths": result.get("attack_paths"),
+            "gap_analysis": result.get("gap_analysis"),
+            "suggested_next_tests": result.get("suggested_next_tests"),
+            "attack_path_role_counts": result.get("attack_path_role_counts"),
+            "attack_paths_note": result.get("attack_paths_note"),
+            "risk_score": result.get("risk_score"),
+            "risk_verdict": result.get("risk_verdict"),
+            "risk_summary": result.get("risk_summary"),
+            "safe_to_run": result.get("safe_to_run"),
+            "remediation_plan": result.get("remediation_plan"),
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500

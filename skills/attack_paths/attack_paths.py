@@ -83,6 +83,9 @@ def _classify_finding(f: dict) -> list[str]:
         if re.search(pat, text, re.I):
             roles.append(ROLE_FINANCIAL)
             break
+    ftype = (f.get("finding_type") or "").lower()
+    if ftype == "hardening":
+        roles = [r for r in roles if r not in (ROLE_PRIVILEGE, ROLE_FINANCIAL)]
     # Fallback by severity/category
     if not roles:
         cat = (f.get("category") or "").lower()
@@ -100,6 +103,8 @@ def _classify_finding(f: dict) -> list[str]:
 
 def _finding_has_evidence(f: dict) -> bool:
     """True if finding has enough evidence to include in chains (zero FP: no vague steps)."""
+    if (f.get("finding_type") or "").lower() == "positive":
+        return False
     url = (f.get("url") or "").strip()
     evidence = (f.get("evidence") or "").strip()
     return len(url) > 0 and len(evidence) > 20
@@ -125,6 +130,8 @@ def _aggregate_findings_from_results(results: dict) -> list[dict]:
                     "remediation": str(raw.get("remediation") or "").strip()[:200],
                     "_source_skill": skill_name,
                 }
+                if raw.get("finding_type"):
+                    f["finding_type"] = str(raw.get("finding_type")).strip()
                 out.append(f)
         for ep in result.get("endpoints_found", []):
             if isinstance(ep, dict) and not ep.get("auth_required") and ep.get("status_code") == 200:

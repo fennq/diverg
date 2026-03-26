@@ -95,6 +95,7 @@
     var summary = {
       total_findings: 0,
       confidence_counts: { high: 0, medium: 0, low: 0 },
+      finding_type_counts: { vulnerability: 0, hardening: 0, informational: 0, positive: 0 },
       verified_count: 0,
       unverified_count: 0,
       source_breakdown: {},
@@ -107,6 +108,8 @@
       if (f.verified) summary.verified_count++;
       var src = String(f.source || 'unknown');
       summary.source_breakdown[src] = (summary.source_breakdown[src] || 0) + 1;
+      var ft = String(f.finding_type || '').toLowerCase();
+      if (summary.finding_type_counts[ft] !== undefined) summary.finding_type_counts[ft]++;
     });
     summary.unverified_count = Math.max(0, summary.total_findings - summary.verified_count);
     summary.verified_ratio = summary.total_findings ? Number((summary.verified_count / summary.total_findings).toFixed(2)) : 0;
@@ -124,10 +127,13 @@
     var hasSensitiveData = false;
 
     list.forEach(function (f) {
+      var ftype = String(f.finding_type || '').toLowerCase();
+      if (ftype === 'positive') return;
+      var typeMult = ftype === 'vulnerability' ? 1 : ftype === 'hardening' ? 0.4 : ftype === 'informational' ? 0.35 : 0.85;
       var sev = String(f.severity || 'info').toLowerCase();
       var conf = normalizeConfidence(f.confidence) || 'medium';
       if (counts[sev] !== undefined) counts[sev]++;
-      deductions += (basePenalty[sev] || 0) * (confidenceWeight[conf] || confidenceWeight.medium);
+      deductions += (basePenalty[sev] || 0) * (confidenceWeight[conf] || confidenceWeight.medium) * typeMult;
       if (String(f.category || '').toLowerCase() === 'sensitive data' && conf !== 'low') hasSensitiveData = true;
     });
 

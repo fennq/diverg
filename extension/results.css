@@ -60,3 +60,34 @@ h1 { margin: 0 0 8px; font-size: 22px; }
 .modalContent pre { background: #0d1117; padding: 12px; border-radius: 6px; font-size: 12px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 0 0 16px; max-height: 200px; }
 .modalContent button { padding: 8px 16px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #e7e9ea; cursor: pointer; }
 .modalContent button:hover { background: #30363d; }
+
+/* Phase 4 — intelligence synthesis */
+.phase4Section { margin: 20px 0; padding: 16px; background: #161b22; border: 1px solid #30363d; border-radius: 10px; }
+.phase4Title { margin: 0 0 12px; font-size: 16px; color: #e7e9ea; }
+.phase4Sub { margin: 16px 0 8px; font-size: 14px; color: #c9d1d9; }
+.phase4Hint { font-size: 12px; color: #8b949e; margin: 0 0 12px; line-height: 1.45; }
+.phase4Note { font-size: 12px; color: #8b949e; margin: 12px 0 0; font-style: italic; }
+.phase4Block { margin-top: 14px; }
+.riskScoreRow { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+.riskScoreValue { font-size: 42px; font-weight: 700; line-height: 1; }
+.riskScoreSlash { font-size: 18px; color: #8b949e; }
+.riskVerdictBadge { font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+.riskVerdict--risky { background: rgba(248, 81, 73, 0.2); color: #f85149; border: 1px solid rgba(248, 81, 73, 0.35); }
+.riskVerdict--caution { background: rgba(210, 153, 34, 0.15); color: #d29922; border: 1px solid rgba(210, 153, 34, 0.3); }
+.riskVerdict--safe { background: rgba(63, 185, 80, 0.15); color: #3fb950; border: 1px solid rgba(63, 185, 80, 0.3); }
+.riskSummary { margin: 8px 0 0; font-size: 14px; color: #c9d1d9; }
+.riskMeta { margin: 6px 0 0; font-size: 12px; color: #8b949e; }
+.remTier { margin-bottom: 10px; border: 1px solid #30363d; border-radius: 8px; padding: 8px 12px; background: #0d1117; }
+.remTier summary { cursor: pointer; color: #58a6ff; font-weight: 600; font-size: 13px; }
+.remList { margin: 8px 0 0; padding-left: 18px; color: #c9d1d9; font-size: 12px; }
+.remList li { margin-bottom: 12px; }
+.remSev { font-size: 10px; color: #8b949e; margin-left: 6px; }
+.remLink { color: #58a6ff; word-break: break-all; }
+.remText { margin: 6px 0 0; color: #8b949e; line-height: 1.45; }
+.pathCard { margin-bottom: 8px; border: 1px solid #30363d; border-radius: 8px; padding: 8px 12px; background: #0d1117; }
+.pathCard summary { cursor: pointer; color: #58a6ff; font-size: 12px; }
+.pathChain { font-weight: 600; color: #e7e9ea; }
+.pathImpact { margin: 8px 0; font-size: 12px; color: #d29922; }
+.pathStory { margin: 0; font-size: 11px; color: #8b949e; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; }
+.gapList, .sugList { margin: 8px 0; padding-left: 18px; font-size: 12px; color: #c9d1d9; }
+.gapSkills { color: #8b949e; font-size: 11px; }

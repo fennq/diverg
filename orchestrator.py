@@ -323,6 +323,150 @@ def build_evidence_summary(findings: list[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Phase 4: intelligence synthesis (attack paths, risk score, remediation)
+# ---------------------------------------------------------------------------
+
+def _remediation_item(f: dict) -> dict:
+    er = f.get("exploit_ref") if isinstance(f.get("exploit_ref"), dict) else {}
+    rem = str(f.get("remediation") or "").strip() or str(er.get("prevention") or "").strip()
+    return {
+        "title": str(f.get("title") or "")[:240],
+        "url": str(f.get("url") or "")[:500],
+        "severity": str(f.get("severity") or "Info"),
+        "finding_type": str(f.get("finding_type") or ""),
+        "remediation": rem or "Review and remediate.",
+    }
+
+
+def compute_risk_score(findings: list[dict], attack_paths_list: list[dict]) -> dict:
+    """0–100 score and verdict; weights hardening lower than real vulnerabilities."""
+    base_penalty = {"Critical": 25, "High": 15, "Medium": 8, "Low": 3, "Info": 0}
+    conf_w = {"high": 1.0, "medium": 0.65, "low": 0.35}
+    type_mult = {"vulnerability": 1.0, "hardening": 0.4, "informational": 0.35, "positive": 0.0, "": 0.85}
+    deductions = 0.0
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+    has_sensitive = False
+    for f in findings:
+        ftype = str(f.get("finding_type") or "").strip().lower()
+        if ftype == "positive":
+            continue
+        sev = str(f.get("severity") or "Info").strip()
+        base = base_penalty.get(sev, 0)
+        lk = sev.lower()
+        if lk in counts:
+            counts[lk] += 1
+        conf = _normalize_confidence_value(f.get("confidence")) or "medium"
+        cw = conf_w.get(conf, 0.65)
+        tm = type_mult.get(ftype, 0.85)
+        deductions += base * cw * tm
+        cat = str(f.get("category") or "").lower()
+        if cat == "sensitive data" and conf != "low":
+            has_sensitive = True
+    deductions += min(25.0, len(attack_paths_list or []) * 3.0)
+    score = int(round(max(0.0, min(100.0, 100.0 - deductions))))
+    verdict = "Safe"
+    summary_text = "Safe to run"
+    safe_to_run = True
+    if counts["critical"] > 0 or score < 40:
+        verdict = "Risky"
+        summary_text = "Not recommended — significant security risks"
+        safe_to_run = False
+    elif counts["high"] > 0 or score < 70 or has_sensitive:
+        verdict = "Caution"
+        summary_text = "Sensitive data patterns — proceed with caution" if has_sensitive else "Proceed with caution"
+        safe_to_run = False
+    return {
+        "score": score,
+        "verdict": verdict,
+        "summary_text": summary_text,
+        "safe_to_run": safe_to_run,
+        "counts": counts,
+    }
+
+
+def build_remediation_plan(findings: list[dict], attack_paths_list: list[dict]) -> dict:
+    """Tiered remediation: fix now / fix soon / harden."""
+    chain_titles: set[str] = set()
+    for p in attack_paths_list or []:
+        for s in p.get("steps") or []:
+            t = (s.get("finding_title") or "").strip()
+            if t:
+                chain_titles.add(t)
+                chain_titles.add(t[:80])
+
+    fix_now: list[dict] = []
+    fix_soon: list[dict] = []
+    harden: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    def take(bucket: list[dict], f: dict) -> None:
+        title = str(f.get("title") or "").strip()
+        url = str(f.get("url") or "").strip()
+        key = (title[:240], url[:400])
+        if key in seen:
+            return
+        seen.add(key)
+        bucket.append(_remediation_item(f))
+
+    for f in findings:
+        if str(f.get("finding_type") or "").lower() == "positive":
+            continue
+        title_full = str(f.get("title") or "").strip()
+        title_trim = title_full[:120]
+        ftype = str(f.get("finding_type") or "").lower()
+        sev_l = str(f.get("severity") or "Info").strip().lower()
+        in_chain = title_trim in chain_titles or (len(title_full) >= 8 and title_full[:80] in chain_titles)
+
+        if in_chain or (ftype == "vulnerability" and sev_l in ("critical", "high")):
+            take(fix_now, f)
+        elif ftype == "vulnerability" and sev_l == "medium":
+            take(fix_soon, f)
+        elif ftype == "hardening" and sev_l == "high":
+            take(fix_soon, f)
+        else:
+            take(harden, f)
+
+    return {"fix_now": fix_now, "fix_soon": fix_soon, "harden_when_possible": harden}
+
+
+def run_phase4_synthesis(target_url: str, results: dict[str, dict], findings: list[dict]) -> dict:
+    """Correlate scan results into attack paths, risk score, and remediation tiers."""
+    attack_payload: dict = {
+        "paths": [],
+        "gap_analysis": [],
+        "suggested_next_actions": [],
+        "role_counts": {},
+        "note": "",
+    }
+    try:
+        import attack_paths as attack_paths_skill
+
+        raw = attack_paths_skill.run(target_url, prior_results=results)
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            attack_payload = parsed
+    except Exception as exc:
+        attack_payload["note"] = f"Phase 4 attack-path correlation failed: {exc}"
+
+    paths_list = attack_payload.get("paths") if isinstance(attack_payload.get("paths"), list) else []
+    risk = compute_risk_score(findings, paths_list)
+    remediation = build_remediation_plan(findings, paths_list)
+
+    return {
+        "attack_paths": paths_list,
+        "gap_analysis": attack_payload.get("gap_analysis") or [],
+        "suggested_next_tests": attack_payload.get("suggested_next_actions") or [],
+        "attack_path_role_counts": attack_payload.get("role_counts") or {},
+        "attack_paths_note": attack_payload.get("note", ""),
+        "risk_score": risk["score"],
+        "risk_verdict": risk["verdict"],
+        "risk_summary": risk["summary_text"],
+        "safe_to_run": risk["safe_to_run"],
+        "remediation_plan": remediation,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Exploit catalog — map findings to known exploits and prevention
 # ---------------------------------------------------------------------------
 
@@ -1496,6 +1640,7 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     company_surfaces = aggregate_company_surfaces(results)
     timestamp = datetime.now(timezone.utc).isoformat()
     evidence_summary = build_evidence_summary(findings)
+    phase4 = run_phase4_synthesis(target_url, results, findings)
 
     return {
         "target_url": target_url,
@@ -1517,6 +1662,7 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
             "info": sum(1 for f in findings if f.get("severity") == "Info"),
         },
         "evidence_summary": evidence_summary,
+        **phase4,
     }
 
 
@@ -1620,6 +1766,7 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
     company_surfaces = aggregate_company_surfaces(results)
     timestamp = datetime.now(timezone.utc).isoformat()
     evidence_summary = build_evidence_summary(findings)
+    phase4 = run_phase4_synthesis(target_url, results, findings)
     report = {
         "target_url": target_url,
         "findings": findings,
@@ -1640,6 +1787,7 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
             "info": sum(1 for f in findings if f.get("severity") == "Info"),
         },
         "evidence_summary": evidence_summary,
+        **phase4,
     }
     yield {"event": "done", "report": report}
 

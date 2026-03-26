@@ -137,6 +137,108 @@
     if (e.target === pocModal) pocModal.style.display = 'none';
   });
 
+  function renderPhase4(report) {
+    var sec = document.getElementById('phase4Section');
+    var riskEl = document.getElementById('riskBlock');
+    var remEl = document.getElementById('remediationBlock');
+    var pathsEl = document.getElementById('attackPathsBlock');
+    var gapEl = document.getElementById('gapBlock');
+    if (!sec || !riskEl) return;
+    var plan = report.remediation_plan || {};
+    var paths = report.attack_paths || [];
+    var gaps = report.gap_analysis || [];
+    var sug = report.suggested_next_tests || [];
+    var hasRisk = typeof report.risk_score === 'number';
+    var hasRem = (plan.fix_now && plan.fix_now.length) || (plan.fix_soon && plan.fix_soon.length) || (plan.harden_when_possible && plan.harden_when_possible.length);
+    var hasPaths = paths.length > 0;
+    var hasGap = gaps.length > 0 || sug.length > 0;
+    if (!hasRisk && !hasRem && !hasPaths && !hasGap) {
+      sec.hidden = true;
+      return;
+    }
+    sec.hidden = false;
+
+    if (hasRisk) {
+      var v = String(report.risk_verdict || 'Unknown');
+      var vl = v.toLowerCase();
+      var color = v === 'Risky' ? '#f85149' : (v === 'Caution' ? '#d29922' : '#3fb950');
+      riskEl.innerHTML =
+        '<h2 class="phase4Title">Phase 4 — Intelligence synthesis</h2>' +
+        '<div class="riskScoreRow">' +
+        '<span class="riskScoreValue" style="color:' + color + '">' + report.risk_score + '</span>' +
+        '<span class="riskScoreSlash">/100</span>' +
+        '<span class="riskVerdictBadge riskVerdict--' + escapeHtml(vl) + '">' + escapeHtml(v) + '</span>' +
+        '</div>' +
+        (report.risk_summary ? '<p class="riskSummary">' + escapeHtml(report.risk_summary) + '</p>' : '') +
+        (typeof report.safe_to_run === 'boolean'
+          ? '<p class="riskMeta">' + escapeHtml(report.safe_to_run ? 'Lower priority for blocking routine use.' : 'Review critical items before sensitive actions on this origin.') + '</p>'
+          : '');
+    } else {
+      riskEl.innerHTML = '<h2 class="phase4Title">Phase 4 — Intelligence synthesis</h2><p class="riskMeta">Risk score not available for this report.</p>';
+    }
+
+    function tierHtml(title, items) {
+      if (!items || !items.length) return '';
+      var h = '<details class="remTier" open><summary>' + escapeHtml(title) + ' (' + items.length + ')</summary><ul class="remList">';
+      items.forEach(function (it) {
+        h += '<li><strong>' + escapeHtml(it.title || '') + '</strong>';
+        if (it.severity) h += ' <span class="remSev">' + escapeHtml(it.severity) + '</span>';
+        if (it.url) {
+          h += '<br><a class="remLink" href="' + escapeHtml(it.url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(it.url.length > 96 ? it.url.substring(0, 96) + '…' : it.url) + '</a>';
+        }
+        h += '<p class="remText">' + escapeHtml(it.remediation || '') + '</p></li>';
+      });
+      h += '</ul></details>';
+      return h;
+    }
+    if (hasRem) {
+      remEl.innerHTML =
+        '<h3 class="phase4Sub">Remediation plan</h3>' +
+        tierHtml('Fix now', plan.fix_now) +
+        tierHtml('Fix soon', plan.fix_soon) +
+        tierHtml('Harden when possible', plan.harden_when_possible);
+    } else {
+      remEl.innerHTML = '';
+    }
+
+    if (hasPaths) {
+      var ph = '<h3 class="phase4Sub">Correlated attack paths</h3><p class="phase4Hint">Chains built from findings across skills — use as hypotheses, then verify with evidence.</p>';
+      paths.slice(0, 20).forEach(function (p) {
+        ph += '<details class="pathCard"><summary><span class="pathChain">' + escapeHtml(p.chain_type || 'Chain') + '</span> · exploitability ' + escapeHtml(String(p.exploitability_score != null ? p.exploitability_score : '—')) + '</summary>';
+        ph += '<p class="pathImpact">' + escapeHtml(p.impact_summary || '') + '</p>';
+        ph += '<pre class="pathStory">' + escapeHtml(p.attack_story || '') + '</pre></details>';
+      });
+      pathsEl.innerHTML = ph;
+    } else {
+      pathsEl.innerHTML = '';
+    }
+
+    if (hasGap) {
+      var gh = '<h3 class="phase4Sub">Gaps and suggested next tests</h3>';
+      if (gaps.length) {
+        gh += '<ul class="gapList">';
+        gaps.forEach(function (g) {
+          gh += '<li><strong>' + escapeHtml(g.missing_role || '') + '</strong>: ' + escapeHtml(g.reason || '') +
+            (g.suggested_skills ? ' <span class="gapSkills">Skills: ' + escapeHtml(g.suggested_skills.join(', ')) + '</span>' : '') + '</li>';
+        });
+        gh += '</ul>';
+      }
+      if (sug.length) {
+        gh += '<ul class="sugList">';
+        sug.forEach(function (s) {
+          gh += '<li><strong>' + escapeHtml(s.action || '') + '</strong> — ' + escapeHtml(s.reason || '') + '</li>';
+        });
+        gh += '</ul>';
+      }
+      if (report.attack_paths_note) {
+        gh += '<p class="phase4Note">' + escapeHtml(report.attack_paths_note) + '</p>';
+      }
+      gapEl.innerHTML = gh;
+    } else {
+      gapEl.innerHTML = report.attack_paths_note ? '<p class="phase4Note">' + escapeHtml(report.attack_paths_note) + '</p>' : '';
+    }
+  }
+
   chrome.storage.local.get(['lastReport', 'lastReportUrl', 'diverg_last_scan'], function (o) {
     var report = o.lastReport;
     var url = o.lastReportUrl || '';
@@ -159,6 +261,7 @@
     } else {
       summaryEl.textContent = 'Findings: ' + report.findings.length;
     }
+    renderPhase4(report);
     report.findings.forEach(function (f, i) { renderFinding(f, i); });
   });
 })();
