@@ -58,12 +58,18 @@ try:
         get_bags_pool_by_token_mint,
         get_token_claim_stats,
         get_bags_pools,
+        get_token_launch_feed,
+        get_dexscreener_order_availability,
+        post_pool_config_by_fee_claimer_vaults,
         parse_token_creators,
         parse_lifetime_fees,
         parse_bags_pool,
         parse_token_claim_stats,
         reconcile_claim_stats_with_events,
         section3_fee_share_admin_for_mint,
+        parse_dexscreener_order_availability,
+        find_mint_in_token_launch_feed,
+        parse_pool_config_by_vaults_response,
         summarize_claim_events,
         compare_claim_summaries,
         is_configured as bags_configured,
@@ -71,9 +77,13 @@ try:
 except ImportError:
     get_token_creators = get_token_lifetime_fees = get_token_claim_events = None
     get_bags_pool_by_token_mint = get_token_claim_stats = get_bags_pools = None
+    get_token_launch_feed = get_dexscreener_order_availability = None
+    post_pool_config_by_fee_claimer_vaults = None
     parse_token_creators = parse_lifetime_fees = parse_bags_pool = parse_token_claim_stats = None
     reconcile_claim_stats_with_events = None
     section3_fee_share_admin_for_mint = None
+    parse_dexscreener_order_availability = find_mint_in_token_launch_feed = None
+    parse_pool_config_by_vaults_response = None
     summarize_claim_events = compare_claim_summaries = None
     bags_configured = lambda: False
 
@@ -578,6 +588,55 @@ def fetch_token(mint: str) -> dict[str, Any]:
                 out["bags"]["claim_events_window_trend"] = compare_claim_summaries(s7, s30)
         except Exception as e:
             out["bags"]["claim_events_windows"] = {"error": str(e)}
+        # Section 4: Dexscreener availability (default on), optional launch-feed match, optional vault→pool-config
+        if os.environ.get("BAGS_DEXSCREENER_AVAILABILITY_CHECK", "true").strip().lower() not in (
+            "0",
+            "false",
+            "no",
+            "",
+        ):
+            try:
+                dex_raw = (
+                    get_dexscreener_order_availability(mint) if get_dexscreener_order_availability else None
+                )
+                out["bags"]["dexscreener_order_availability_raw"] = dex_raw
+                out["bags"]["dexscreener_order_availability"] = (
+                    parse_dexscreener_order_availability(dex_raw)
+                    if parse_dexscreener_order_availability
+                    else None
+                )
+                time.sleep(0.1)
+            except Exception as e:
+                out["bags"]["dexscreener_order_availability"] = {"error": str(e)}
+        if os.environ.get("BAGS_FETCH_LAUNCH_FEED", "").strip().lower() in ("1", "true", "yes"):
+            try:
+                feed_raw = get_token_launch_feed() if get_token_launch_feed else None
+                if os.environ.get("BAGS_FETCH_LAUNCH_FEED_RAW", "").strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                ):
+                    out["bags"]["token_launch_feed_raw"] = feed_raw
+                out["bags"]["token_launch_feed"] = (
+                    find_mint_in_token_launch_feed(feed_raw, mint)
+                    if find_mint_in_token_launch_feed
+                    else None
+                )
+                time.sleep(0.15)
+            except Exception as e:
+                out["bags"]["token_launch_feed"] = {"error": str(e)}
+        vaults_env = os.environ.get("BAGS_FEE_CLAIMER_VAULTS", "").strip()
+        if vaults_env and post_pool_config_by_fee_claimer_vaults and parse_pool_config_by_vaults_response:
+            try:
+                vault_list = [v.strip() for v in vaults_env.split(",") if v.strip()]
+                pc_raw = post_pool_config_by_fee_claimer_vaults(vault_list)
+                out["bags"]["pool_config_by_vaults_raw"] = pc_raw
+                out["bags"]["pool_config_by_vaults"] = parse_pool_config_by_vaults_response(
+                    pc_raw, vault_list
+                )
+                time.sleep(0.1)
+            except Exception as e:
+                out["bags"]["pool_config_by_vaults"] = {"error": str(e)}
     else:
         out["bags"] = None
     out["data_consistency"] = _validate_token_data(out)

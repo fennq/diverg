@@ -28,7 +28,9 @@ def main():
     lines.append("Source: `investigation/synq_data.json` (from `scripts/run_synq_research.py`).")
     lines.append("RPC: Solana public getBalance + getSignaturesForAddress. Token: Solscan holder total + metadata.")
     lines.append("Optional: `HELIUS_API_KEY` for parsed wallet history/transfers; `ARKHAM_API_KEY` for address labels/entities.")
-    lines.append("Optional: `BAGS_API_KEY` for Bags Sections 1–3 (creators/fees/claims, pool keys, per-claimer claim-stats).")
+    lines.append(
+        "Optional: `BAGS_API_KEY` for Bags Sections 1–4 (creators/fees/claims, pool keys, per-claimer claim-stats, Dexscreener availability, optional launch-feed match, optional vault→pool-config)."
+    )
     lines.append("")
     lines.append("### Wallets (SOL balance, recent tx count, Helius/Arkham)")
     lines.append("")
@@ -58,7 +60,7 @@ def main():
     bags = tok.get("bags") or {}
     if isinstance(bags, dict) and bags:
         lines.append("")
-        lines.append("### Bags API (Sections 1–3)")
+        lines.append("### Bags API (Sections 1–4)")
         lf = bags.get("lifetime_fees") or {}
         if isinstance(lf, dict) and lf.get("sol") is not None:
             lines.append(f"- **Lifetime fees (approx):** {lf.get('sol')} SOL (lamports: {lf.get('lamports')})")
@@ -103,6 +105,29 @@ def main():
                 f"- **Bags pools list (optional):** {pl.get('count')} pools"
                 f"{' (only migrated)' if pl.get('only_migrated') else ''}"
                 f"; mint in list: **{pl.get('requested_mint_in_list')}**"
+            )
+        dex = bags.get("dexscreener_order_availability") or {}
+        if isinstance(dex, dict) and dex.get("error"):
+            lines.append(f"- **Dexscreener order availability (Section 4):** error — {dex.get('error')}")
+        elif isinstance(dex, dict) and dex.get("dexscreener_order_available") is not None:
+            lines.append(
+                f"- **Dexscreener order available (Section 4):** **{dex.get('dexscreener_order_available')}**"
+            )
+        feed = bags.get("token_launch_feed") or {}
+        if isinstance(feed, dict) and feed.get("error"):
+            lines.append(f"- **Token launch feed (Section 4):** error — {feed.get('error')}")
+        elif isinstance(feed, dict) and feed.get("feed_item_count") is not None:
+            lines.append(
+                f"- **Launch feed (Section 4):** mint in active feed: **{feed.get('mint_found_in_feed')}** "
+                f"(feed items: {feed.get('feed_item_count')})"
+            )
+        pc = bags.get("pool_config_by_vaults") or {}
+        if isinstance(pc, dict) and pc.get("error"):
+            lines.append(f"- **Pool config by vaults (Section 4):** error — {pc.get('error')}")
+        elif isinstance(pc, dict) and pc.get("vault_count") is not None:
+            lines.append(
+                f"- **Pool config by vaults (Section 4):** resolved **{pc.get('resolved_count')}** / "
+                f"{pc.get('vault_count')} fee-claimer vault(s) to DBC pool config keys"
             )
     lines.append("")
     lines.append("---")

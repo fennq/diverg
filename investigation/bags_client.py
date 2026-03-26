@@ -12,6 +12,11 @@ Section 3 — fee-share analytics:
 - optional: `GET /fee-share/admin/list` to verify creator wallet admin scope for the mint
 - optional: list all Bags pools (`GET /solana/bags/pools`) for ecosystem / migration scans
 
+Section 4 — launch feed, Dexscreener, pool-config (state):
+- `GET /token-launch/feed` — optional scan for whether this mint appears on the active launch feed
+- `GET /solana/dexscreener/order-availability` — whether a Dexscreener token-info order can be placed for the mint
+- `POST /token-launch/state/pool-config` — map fee-claimer vault pubkeys → Meteora DBC pool config keys (optional, when vaults known)
+
 Auth: set BAGS_API_KEY in environment.
 """
 from __future__ import annotations
@@ -38,6 +43,27 @@ def _get(path: str, params: Optional[dict[str, Any]] = None, timeout: int = 30) 
             f"{BAGS_BASE_URL}{path}",
             headers={"x-api-key": BAGS_API_KEY},
             params=params or {},
+            timeout=timeout,
+        )
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        payload = r.json()
+        if isinstance(payload, dict) and payload.get("success") is False:
+            return payload
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def _post_json(path: str, body: dict[str, Any], timeout: int = 30) -> Optional[dict[str, Any]]:
+    if not BAGS_API_KEY:
+        return None
+    try:
+        r = requests.post(
+            f"{BAGS_BASE_URL}{path}",
+            headers={"x-api-key": BAGS_API_KEY, "Content-Type": "application/json"},
+            json=body,
             timeout=timeout,
         )
         if r.status_code == 404:
@@ -127,6 +153,39 @@ def get_bags_pools(*, only_migrated: bool = False) -> Optional[dict[str, Any]]:
     if only_migrated:
         params["onlyMigrated"] = "true"
     return _get("/solana/bags/pools", params)
+
+
+def get_token_launch_feed() -> Optional[dict[str, Any]]:
+    """
+    Section 4: Recent/active token launches on Bags (can be a large list).
+
+    GET /token-launch/feed
+    """
+    return _get("/token-launch/feed")
+
+
+def get_dexscreener_order_availability(token_address: str) -> Optional[dict[str, Any]]:
+    """
+    Section 4: Whether a Dexscreener token-info order is available for this mint.
+
+    GET /solana/dexscreener/order-availability?tokenAddress=...
+    """
+    a = (token_address or "").strip()
+    if not a:
+        return None
+    return _get("/solana/dexscreener/order-availability", {"tokenAddress": a})
+
+
+def post_pool_config_by_fee_claimer_vaults(fee_claimer_vaults: list[str]) -> Optional[dict[str, Any]]:
+    """
+    Section 4: First Meteora DBC pool config key per fee-claimer vault (aligned array).
+
+    POST /token-launch/state/pool-config
+    """
+    vaults = [v.strip() for v in fee_claimer_vaults if isinstance(v, str) and v.strip()]
+    if not vaults:
+        return None
+    return _post_json("/token-launch/state/pool-config", {"feeClaimerVaults": vaults})
 
 
 def get_fee_share_admin_list(wallet: str) -> Optional[dict[str, Any]]:
@@ -409,6 +468,91 @@ def section3_fee_share_admin_for_mint(
             }
         )
     return out
+
+
+def parse_dexscreener_order_availability(payload: Optional[dict[str, Any]]) -> dict[str, Any]:
+    """Normalize Section 4 Dexscreener order-availability response."""
+    inner = _unwrap_response(payload)
+    available = None
+    if isinstance(inner, dict) and "available" in inner:
+        available = bool(inner.get("available"))
+    err = None
+    if isinstance(payload, dict) and payload.get("success") is False:
+        err = payload.get("error") or payload.get("response")
+    return {"dexscreener_order_available": available, "error": err, "raw": inner}
+
+
+def find_mint_in_token_launch_feed(
+    feed_payload: Optional[dict[str, Any]],
+    token_mint: str,
+) -> dict[str, Any]:
+    """
+    Scan Section 4 launch feed for a matching tokenMint (exact string match after strip).
+
+    Does not embed the full feed — only counts + optional matched item summary.
+    """
+    mint = (token_mint or "").strip()
+    items = _unwrap_response(feed_payload)
+    if not isinstance(items, list):
+        items = []
+    match: Optional[dict[str, Any]] = None
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        tm = str(it.get("tokenMint") or "").strip()
+        if mint and tm == mint:
+            match = {
+                "token_mint": tm,
+                "name": it.get("name"),
+                "symbol": it.get("symbol"),
+                "status": it.get("status"),
+                "dbc_pool_key": it.get("dbcPoolKey"),
+                "dbc_config_key": it.get("dbcConfigKey"),
+                "twitter": it.get("twitter"),
+                "website": it.get("website"),
+                "launch_signature": it.get("launchSignature"),
+            }
+            break
+    err = None
+    if isinstance(feed_payload, dict) and feed_payload.get("success") is False:
+        err = feed_payload.get("error") or feed_payload.get("response")
+    return {
+        "requested_mint": mint or None,
+        "mint_found_in_feed": bool(match),
+        "feed_item_count": len(items),
+        "matched_item": match,
+        "error": err,
+    }
+
+
+def parse_pool_config_by_vaults_response(
+    payload: Optional[dict[str, Any]],
+    requested_vaults: list[str],
+) -> dict[str, Any]:
+    """Pair fee-claimer vault inputs with returned pool config keys (Section 4)."""
+    inner = _unwrap_response(payload)
+    keys: list[Any] = []
+    if isinstance(inner, dict) and isinstance(inner.get("poolConfigKeys"), list):
+        keys = list(inner.get("poolConfigKeys") or [])
+    err = None
+    if isinstance(payload, dict) and payload.get("success") is False:
+        err = payload.get("error") or payload.get("response")
+    rows: list[dict[str, Any]] = []
+    for i, v in enumerate(requested_vaults):
+        k = keys[i] if i < len(keys) else None
+        rows.append(
+            {
+                "fee_claimer_vault": v,
+                "pool_config_key": k if isinstance(k, str) and k.strip() else k,
+                "resolved": bool(k and str(k).strip()),
+            }
+        )
+    return {
+        "vault_count": len(requested_vaults),
+        "resolved_count": sum(1 for r in rows if r.get("resolved")),
+        "mappings": rows,
+        "error": err,
+    }
 
 
 def parse_token_creators(payload: Optional[dict[str, Any]]) -> dict[str, Any]:
