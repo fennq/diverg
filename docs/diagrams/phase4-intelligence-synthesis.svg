@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1520 600" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
+  <defs>
+    <marker id="arr" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0 0, 7 2.5, 0 5" fill="#8b949e"/>
+    </marker>
+  </defs>
+  <rect width="100%" height="100%" fill="#0d1117"/>
+
+  <style><![CDATA[
+    .b { fill: #161b22; stroke: #30363d; stroke-width: 1.2; rx: 4; }
+    .b-p4 { fill: #161b22; stroke: #58a6ff; stroke-width: 1.6; rx: 6; }
+    .t { fill: #e6edf3; font-size: 11px; }
+    .t-sm { fill: #e6edf3; font-size: 10px; }
+    .sub { fill: #8b949e; font-size: 9px; }
+    .title { fill: #e6edf3; font-size: 14px; font-weight: 600; }
+  ]]></style>
+
+  <text class="title" x="760" y="36" text-anchor="middle">Web scan pipeline  Phase 4 intelligence synthesis</text>
+
+  <!-- Phase row -->
+  <rect class="b" x="48" y="64" width="200" height="52"/>
+  <text class="t" x="148" y="88" text-anchor="middle" font-weight="600">Phase 1  Surface</text>
+  <text class="sub" x="148" y="104" text-anchor="middle">parallel recon · headers · vulns · API&</text>
+
+  <rect class="b" x="276" y="64" width="200" height="52"/>
+  <text class="t" x="376" y="88" text-anchor="middle" font-weight="600">Phase 2  Context</text>
+  <text class="sub" x="376" y="104" text-anchor="middle">dependency · logic · reputation + ctx</text>
+
+  <rect class="b" x="504" y="64" width="200" height="52"/>
+  <text class="t" x="604" y="88" text-anchor="middle" font-weight="600">Phase 3  Attack</text>
+  <text class="sub" x="604" y="104" text-anchor="middle">scope=attack · deeper variants</text>
+
+  <rect class="b" x="732" y="64" width="220" height="52"/>
+  <text class="t" x="842" y="88" text-anchor="middle" font-weight="600">Aggregate</text>
+  <text class="sub" x="842" y="104" text-anchor="middle">dedupe · exploits · citations · API fields</text>
+
+  <!-- Phase 4 hero -->
+  <rect class="b-p4" x="48" y="168" width="1424" height="88"/>
+  <text class="t" x="760" y="204" text-anchor="middle" font-weight="600" font-size="13">Phase 4  Intelligence synthesis</text>
+  <text class="sub" x="760" y="228" text-anchor="middle">attack_paths.run(prior_results) ’ ranked chains · gap analysis · suggested next tests</text>
+  <text class="sub" x="760" y="244" text-anchor="middle">compute_risk_score (finding-type aware) · build_remediation_plan (fix now / soon / harden) ’ API + reports</text>
+
+  <!-- Outputs -->
+  <rect class="b" x="48" y="308" width="332" height="120"/>
+  <text class="t" x="214" y="334" text-anchor="middle" font-weight="600">Attack paths</text>
+  <text class="sub" x="214" y="352" text-anchor="middle">entry ’ privilege ’ data / financial</text>
+  <text class="sub" x="214" y="368" text-anchor="middle">exploitability score · attack story</text>
+  <text class="sub" x="214" y="384" text-anchor="middle">evidence refs per step</text>
+  <text class="sub" x="214" y="408" text-anchor="middle">role_counts · operator hypotheses</text>
+
+  <rect class="b" x="404" y="308" width="332" height="120"/>
+  <text class="t" x="570" y="334" text-anchor="middle" font-weight="600">Risk score</text>
+  <text class="sub" x="570" y="352" text-anchor="middle">0100 · Safe / Caution / Risky</text>
+  <text class="sub" x="570" y="368" text-anchor="middle">hardening weighted lower than vulns</text>
+  <text class="sub" x="570" y="384" text-anchor="middle">path count adjusts deductions</text>
+  <text class="sub" x="570" y="408" text-anchor="middle">safe_to_run + summary line</text>
+
+  <rect class="b" x="760" y="308" width="332" height="120"/>
+  <text class="t" x="926" y="334" text-anchor="middle" font-weight="600">Remediation plan</text>
+  <text class="sub" x="926" y="352" text-anchor="middle">fix_now  chains + Critical/High vulns</text>
+  <text class="sub" x="926" y="368" text-anchor="middle">fix_soon  Medium vulns · High hardening</text>
+  <text class="sub" x="926" y="384" text-anchor="middle">harden_when_possible  rest</text>
+  <text class="sub" x="926" y="408" text-anchor="middle">title · url · severity · remediation</text>
+
+  <rect class="b" x="1116" y="308" width="356" height="120"/>
+  <text class="t" x="1294" y="334" text-anchor="middle" font-weight="600">Gaps + next tests</text>
+  <text class="sub" x="1294" y="352" text-anchor="middle">gap_analysis  one role short of a chain</text>
+  <text class="sub" x="1294" y="368" text-anchor="middle">suggested_next_tests  which skills to run</text>
+  <text class="sub" x="1294" y="384" text-anchor="middle">POST /api/scan + stream done payload</text>
+  <text class="sub" x="1294" y="408" text-anchor="middle">extension results UI + popup score chip</text>
+
+  <!-- Footer -->
+  <text class="sub" x="760" y="478" text-anchor="middle">run_web_scan · run_web_scan_streaming  orchestrator.py</text>
+
+  <!-- Edges -->
+  <g stroke="#6e7681" fill="none" marker-end="url(#arr)">
+    <line x1="248" y1="90" x2="276" y2="90"/>
+    <line x1="476" y1="90" x2="504" y2="90"/>
+    <line x1="704" y1="90" x2="732" y2="90"/>
+    <line x1="952" y1="90" x2="1000" y2="90"/>
+    <path d="M 842 116 L 842 148 L 760 148 L 760 168"/>
+    <line x1="214" y1="256" x2="214" y2="308"/>
+    <line x1="570" y1="256" x2="570" y2="308"/>
+    <line x1="926" y1="256" x2="926" y2="308"/>
+    <line x1="1294" y1="256" x2="1294" y2="308"/>
+  </g>
+</svg>
