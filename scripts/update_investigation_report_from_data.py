@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
-Read investigation/synq_data.json and prepend an "EVIDENCE FROM ON-CHAIN FETCH" section
-to investigation/SYNQ_Investigation_Report.md (or update in place). Keeps rest of report intact.
-Run after run_synq_research.py. Do not commit investigation/ to repo.
+Merge on-chain fetch JSON into the investigation markdown report.
+
+Reads `investigation/synq_data.json` and inserts or refreshes the auto-generated
+"EVIDENCE FROM ON-CHAIN FETCH" section in `investigation/SYNQ_Investigation_Report.md`.
+
+Typical flow: `scripts/run_synq_research.py` → this script.
+Investigation outputs under `investigation/` are local-only (gitignored).
 """
 import json
 from pathlib import Path

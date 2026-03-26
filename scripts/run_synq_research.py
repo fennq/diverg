@@ -7,7 +7,9 @@ This is one use of the generic blockchain pipeline. Same data sources:
   FrontrunPro (FRONTRUNPRO_API_KEY + FRONTRUNPRO_BASE_URL — optional paid API;
   without it, use address_finder_url() for Twitter → wallet), Solscan.
 
-Writes investigation/synq_data.json. For other investigations use:
+Writes investigation/synq_data.json. Merge that JSON into the markdown report with:
+  python scripts/update_investigation_report_from_data.py
+For other investigations use:
   python scripts/run_blockchain_research.py --wallets ADDR1 ADDR2 [--token MINT] [--out path.json]
 """
 import sys
