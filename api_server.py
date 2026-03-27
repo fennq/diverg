@@ -95,6 +95,7 @@ def api_scan():
             "risk_summary": result.get("risk_summary"),
             "safe_to_run": result.get("safe_to_run"),
             "remediation_plan": result.get("remediation_plan"),
+            "ssl_risk_signal": result.get("ssl_risk_signal"),
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500

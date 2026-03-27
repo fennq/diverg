@@ -177,6 +177,17 @@
       riskEl.innerHTML = '<h2 class="phase4Title">Phase 4 — Intelligence synthesis</h2><p class="riskMeta">Risk score not available for this report.</p>';
     }
 
+    // SSL risk signal badge
+    var ssl = report.ssl_risk_signal;
+    if (ssl && ssl.signal) {
+      var sslColor = ssl.risk === 'high' ? '#f85149' : (ssl.risk === 'medium' ? '#d29922' : '#3fb950');
+      riskEl.innerHTML +=
+        '<div class="sslSignalCard" style="margin-top:10px;padding:8px 12px;border-left:3px solid ' + sslColor + ';background:rgba(255,255,255,0.04);border-radius:4px">' +
+        '<strong style="color:' + sslColor + '">SSL Check: ' + escapeHtml(ssl.risk.toUpperCase()) + '</strong>' +
+        '<p style="margin:4px 0 0;font-size:12px;opacity:0.85">' + escapeHtml(ssl.reason || '') + '</p>' +
+        '</div>';
+    }
+
     function tierHtml(title, items) {
       if (!items || !items.length) return '';
       var h = '<details class="remTier" open><summary>' + escapeHtml(title) + ' (' + items.length + ')</summary><ul class="remList">';

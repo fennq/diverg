@@ -1,0 +1,15 @@
+{
+  "name": "ssl_check",
+  "display_name": "SSL Certificate Validity Check",
+  "description": "Verifies HTTPS usage and checks SSL certificate validity, expiry, issuer trust, and hostname match. Returns a structured risk signal.",
+  "version": "1.0.0",
+  "entry_point": "ssl_check.py",
+  "parameters": {
+    "target_url": {
+      "type": "string",
+      "description": "Full URL of the target to analyze",
+      "required": true
+    }
+  },
+  "tags": ["security", "ssl", "tls", "certificate", "risk-signal"]
+}

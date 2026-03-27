@@ -31,6 +31,7 @@ sys.path.insert(0, str(SKILLS_DIR / "auth_test"))
 sys.path.insert(0, str(SKILLS_DIR / "api_test"))
 sys.path.insert(0, str(SKILLS_DIR / "osint"))
 sys.path.insert(0, str(SKILLS_DIR / "telegram_report"))
+sys.path.insert(0, str(SKILLS_DIR / "ssl_check"))
 
 
 # ---------------------------------------------------------------------------
@@ -39,20 +40,20 @@ sys.path.insert(0, str(SKILLS_DIR / "telegram_report"))
 
 SCAN_PROFILES = {
     "full": [
-        "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "company_exposure",
+        "osint", "recon", "headers_ssl", "ssl_check", "crypto_security", "data_leak_risks", "company_exposure",
         "web_vulns", "auth_test", "api_test", "high_value_flaws", "workflow_probe", "race_condition",
         "payment_financial", "client_surface", "dependency_audit", "logic_abuse", "entity_reputation",
     ],
     "crypto": [
-        "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "company_exposure",
+        "osint", "recon", "headers_ssl", "ssl_check", "crypto_security", "data_leak_risks", "company_exposure",
         "web_vulns", "auth_test", "api_test", "high_value_flaws", "workflow_probe", "race_condition",
         "payment_financial", "client_surface", "chain_validation_abuse", "dependency_audit", "logic_abuse", "entity_reputation",
     ],
-    "quick": ["headers_ssl", "recon", "osint", "company_exposure"],
+    "quick": ["headers_ssl", "ssl_check", "recon", "osint", "company_exposure"],
     "recon": ["osint", "recon"],
-    "web": ["web_vulns", "headers_ssl", "auth_test", "company_exposure"],
-    "api": ["api_test", "headers_ssl", "company_exposure"],
-    "passive": ["osint", "headers_ssl", "company_exposure"],
+    "web": ["web_vulns", "headers_ssl", "ssl_check", "auth_test", "company_exposure"],
+    "api": ["api_test", "headers_ssl", "ssl_check", "company_exposure"],
+    "passive": ["osint", "headers_ssl", "ssl_check", "company_exposure"],
 }
 
 SKILL_TIMEOUT_SECONDS = 90  # skills exit in ~58s; buffer to avoid timeouts
@@ -84,15 +85,16 @@ SKILL_TARGET_TYPE = {
     "logic_abuse": "url",
     "entity_reputation": "domain",
     "chain_validation_abuse": "url",
+    "ssl_check": "url",
 }
 ENGAGEMENT_TRACKS = {
-    "surface": ["osint", "recon", "headers_ssl", "company_exposure"],
+    "surface": ["osint", "recon", "headers_ssl", "ssl_check", "company_exposure"],
     "application": ["web_vulns", "auth_test"],
     "api": ["api_test"],
 }
 AGENT_DIRECT_FALLBACKS = {
     "surface_mapper": ["osint", "recon", "headers_ssl", "company_exposure"],
-    "exposure_analyst": ["company_exposure", "recon", "headers_ssl"],
+    "exposure_analyst": ["company_exposure", "recon", "headers_ssl", "ssl_check"],
     "auth_api_analyst": ["auth_test", "api_test", "web_vulns"],
 }
 SKILL_DESCRIPTIONS = {
@@ -114,6 +116,7 @@ SKILL_DESCRIPTIONS = {
     "logic_abuse": "numeric/bounds abuse (amount, limit, offset), overflow, success-like response to tampered params",
     "entity_reputation": "domain owner/entity foul-play research, fraud/lawsuit/breach/reputation searches",
     "chain_validation_abuse": "Diverg batch validation: batch vs single path validation, account/subaccount ID substitution, parameter trust (see content/diverg-batch-validation-routes.md)",
+    "ssl_check": "SSL certificate validity, expiry, issuer trust, hostname match — structured risk signal",
 }
 
 # Canonical finding schema — all skills normalize to this shape for dedup and correlation
@@ -219,6 +222,8 @@ def _default_finding_source(f: dict) -> str:
     category = str(f.get("category") or "").strip().lower()
     if skill == "headers_ssl" or ("transport" in category and "browser" in category):
         return "header_analysis"
+    if skill == "ssl_check":
+        return "ssl_analysis"
     if skill == "client_surface" or "client" in category:
         return "dom_scan"
     if skill == "data_leak_risks" or "sensitive" in category:
@@ -236,7 +241,7 @@ def _default_finding_source(f: dict) -> str:
 
 def _default_finding_confidence(f: dict, source: str) -> str:
     sev = str(f.get("severity") or "").strip().lower()
-    if source == "header_analysis":
+    if source in ("header_analysis", "ssl_analysis"):
         return "high"
     if source == "regex_match":
         return "medium" if sev == "high" else "low"
@@ -257,7 +262,7 @@ def _infer_verified(f: dict, source: str) -> bool:
     ev = str(f.get("evidence") or "")
     if "[confirmed]" in title.lower() or "[confirmed]" in ev.lower():
         return True
-    if source == "header_analysis":
+    if source in ("header_analysis", "ssl_analysis"):
         return True
     return False
 
@@ -641,6 +646,9 @@ def run_skill_variant(
                 client_surface_json=ctx.get("client_surface_json"),
                 api_results_json=ctx.get("api_results_json"),
             )
+        elif skill_name == "ssl_check":
+            import ssl_check
+            raw = ssl_check.run(target_url, scan_type=scan_type)
         else:
             return {"error": f"Unknown skill: {skill_name}"}
 
@@ -720,6 +728,14 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
     except Exception:
         pass
     return finalize_api_findings(enriched)
+
+
+def extract_ssl_risk_signal(results: dict[str, dict]) -> dict | None:
+    """Pull the ssl_risk_signal from the ssl_check skill result, if present."""
+    ssl_result = results.get("ssl_check")
+    if isinstance(ssl_result, dict) and "ssl_risk_signal" in ssl_result:
+        return ssl_result["ssl_risk_signal"]
+    return None
 
 
 def aggregate_company_surfaces(results: dict[str, dict]) -> list[dict]:
@@ -1452,7 +1468,7 @@ async def run_via_openclaw(target: str, scope: str, report_type: str) -> None:
 # Phase 1: all skills that do not need context from other skills.
 # Phase 2: dependency_audit, logic_abuse, entity_reputation (run with context from phase 1).
 WEB_SCAN_PHASE1 = [
-    "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks",
+    "osint", "recon", "headers_ssl", "ssl_check", "crypto_security", "data_leak_risks",
     "company_exposure", "web_vulns", "auth_test", "api_test", "high_value_flaws",
     "workflow_probe", "race_condition", "payment_financial", "client_surface",
 ]
@@ -1638,11 +1654,12 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
 
     findings = aggregate_findings(results)
     company_surfaces = aggregate_company_surfaces(results)
+    ssl_risk_signal = extract_ssl_risk_signal(results)
     timestamp = datetime.now(timezone.utc).isoformat()
     evidence_summary = build_evidence_summary(findings)
     phase4 = run_phase4_synthesis(target_url, results, findings)
 
-    return {
+    report: dict = {
         "target_url": target_url,
         "findings": findings,
         "company_surfaces": company_surfaces,
@@ -1664,6 +1681,9 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
         "evidence_summary": evidence_summary,
         **phase4,
     }
+    if ssl_risk_signal is not None:
+        report["ssl_risk_signal"] = ssl_risk_signal
+    return report
 
 
 def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = None):
@@ -1764,10 +1784,11 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
 
     findings = aggregate_findings(results)
     company_surfaces = aggregate_company_surfaces(results)
+    ssl_risk_signal = extract_ssl_risk_signal(results)
     timestamp = datetime.now(timezone.utc).isoformat()
     evidence_summary = build_evidence_summary(findings)
     phase4 = run_phase4_synthesis(target_url, results, findings)
-    report = {
+    report: dict = {
         "target_url": target_url,
         "findings": findings,
         "company_surfaces": company_surfaces,
@@ -1789,6 +1810,8 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
         "evidence_summary": evidence_summary,
         **phase4,
     }
+    if ssl_risk_signal is not None:
+        report["ssl_risk_signal"] = ssl_risk_signal
     yield {"event": "done", "report": report}
 
 
