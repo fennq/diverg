@@ -175,8 +175,19 @@ async function quickLaunch() {
   const btn = document.getElementById('quickBtn');
   btn.disabled = true;
 
+  const box = document.getElementById('quickProgressBox');
+  const pText = document.getElementById('quickProgressText');
+  const pSkills = document.getElementById('quickSkillsList');
+  const pFindings = document.getElementById('quickFindings');
+  box.classList.add('show');
+  pText.textContent = 'Connecting…';
+  pSkills.innerHTML = '';
+  pFindings.innerHTML = '';
+
+  const skills = {};
+  let findingCount = 0;
+
   try {
-    toast('Starting scan…', 'ok');
     const resp = await fetch(api('/api/scan/stream'), {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -184,6 +195,8 @@ async function quickLaunch() {
     });
     if (resp.status === 401) { Auth.logout(); return; }
     if (!resp.ok) throw new Error('API error ' + resp.status);
+
+    pText.textContent = 'Scanning ' + shortUrl(url) + '…';
 
     let lastReport = null;
     const reader = resp.body.getReader();
@@ -198,6 +211,19 @@ async function quickLaunch() {
         if (!line.trim()) continue;
         try {
           const e = JSON.parse(line);
+          if (e.event === 'skill_start') {
+            skills[e.skill] = 'running';
+            renderQuickSkills(skills);
+            pText.textContent = 'Running ' + e.skill + '…';
+          }
+          if (e.event === 'skill_done') {
+            skills[e.skill] = e.error ? 'error' : 'done';
+            renderQuickSkills(skills);
+            findingCount += (e.findings_count || 0);
+            if (findingCount > 0) {
+              pFindings.textContent = findingCount + ' finding' + (findingCount > 1 ? 's' : '') + ' so far';
+            }
+          }
           if (e.event === 'done') lastReport = e.report;
         } catch {}
       }
@@ -206,17 +232,37 @@ async function quickLaunch() {
     if (lastReport) {
       State.report = lastReport;
       State.scanId = lastReport.id;
+      pText.textContent = 'Complete — ' + (lastReport.findings?.length || 0) + ' findings';
       toast('Scan complete', 'ok');
-      navigate('results', lastReport);
+      setTimeout(() => {
+        box.classList.remove('show');
+        navigate('results', lastReport);
+      }, 600);
     } else {
+      pText.textContent = 'Finished';
       toast('Scan finished', 'ok');
+      setTimeout(() => box.classList.remove('show'), 1500);
       loadHome();
     }
   } catch (e) {
+    pText.textContent = 'Failed: ' + e.message;
     toast('Scan failed: ' + e.message, 'err');
+    setTimeout(() => box.classList.remove('show'), 3000);
   } finally {
     btn.disabled = false;
   }
+}
+
+function renderQuickSkills(skills) {
+  const el = document.getElementById('quickSkillsList');
+  const colors = { running: 'var(--accent)', done: 'var(--green)', error: 'var(--red)' };
+  el.innerHTML = Object.entries(skills).map(([name, status]) => `
+    <div style="display:flex; align-items:center; gap:0.5rem; padding:0.2rem 0; font-size:0.75rem; color:var(--dim)">
+      <span style="width:6px; height:6px; border-radius:50%; background:${colors[status] || 'var(--dim)'}; flex-shrink:0"></span>
+      ${esc(name)}
+      <span style="color:${colors[status] || 'var(--dim)'}; margin-left:auto; font-size:0.7rem">${status === 'running' ? '●' : status === 'done' ? '✓' : '✗'}</span>
+    </div>
+  `).join('');
 }
 
 // ── SCANNER (dedicated page) ────────────────────────────────────────────────

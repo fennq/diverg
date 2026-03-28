@@ -563,6 +563,8 @@ def api_scan_options():
 @app.route("/api/scan", methods=["POST"])
 @require_auth
 def api_scan():
+    if not SCANNER_AVAILABLE:
+        return jsonify({"error": "Scanner engine not available on this instance"}), 503
     url, goal, scope, err = _parse_scan_body()
     if err:
         return err
@@ -603,6 +605,8 @@ def api_scan_stream_options():
 @app.route("/api/scan/stream", methods=["POST"])
 @require_auth
 def api_scan_stream():
+    if not SCANNER_AVAILABLE:
+        return jsonify({"error": "Scanner engine not available on this instance"}), 503
     url, goal, scope, err = _parse_scan_body()
     if err:
         return err
@@ -632,8 +636,12 @@ def api_scan_stream():
 
     return Response(
         stream_with_context(generate()),
-        mimetype="application/x-ndjson",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
 
 
@@ -647,6 +655,8 @@ def poc_simulate_options():
 @app.route("/api/poc/simulate", methods=["POST"])
 @require_auth
 def poc_simulate():
+    if not SCANNER_AVAILABLE:
+        return jsonify({"error": "Scanner engine not available on this instance"}), 503
     if not request.is_json:
         return jsonify({"error": "Content-Type must be application/json"}), 400
     data = request.get_json(silent=True) or {}
