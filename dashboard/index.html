@@ -7,60 +7,58 @@
   <link rel="icon" href="/website/logo.png" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;450;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/dashboard/css/dashboard.css">
 </head>
 <body>
 <div class="app">
 
-  <!-- Sidebar -->
-  <aside class="sidebar" id="sidebar">
+  <!-- Sidebar — minimal -->
+  <aside class="sidebar">
     <div class="brand">
       <img src="/website/logo.png" alt="Diverg" onerror="this.style.display='none'">
       <span class="brand-text">Diverg</span>
       <span class="brand-badge">Console</span>
     </div>
 
-    <div class="nav-label">Overview</div>
-    <div class="nav-item active" data-page="home">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-      Home
-    </div>
-    <div class="nav-item" data-page="scanner">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      Scanner
-    </div>
-    <div class="nav-item" data-page="history">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      History
-    </div>
-    <div class="nav-item" data-page="findings">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-      Findings
-    </div>
-
-    <div class="nav-label">Tools</div>
-    <div class="nav-item" data-page="attack-paths">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-      Attack Paths
-    </div>
-    <div class="nav-item" data-page="investigation">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
-      Investigation
+    <div class="nav-section">
+      <div class="nav-item active" data-page="home">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        Home
+      </div>
+      <div class="nav-item" data-page="scanner">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Scanner
+      </div>
+      <div class="nav-item" data-page="history">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        History
+      </div>
+      <div class="nav-item" data-page="findings">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Findings
+      </div>
+      <div class="nav-item" data-page="attack-paths">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        Attack Paths
+      </div>
+      <div class="nav-item" data-page="investigation">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+        Investigation
+      </div>
+      <div class="nav-item" data-page="settings">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 4 2 2 0 0 1-2-4v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </div>
     </div>
 
     <div class="nav-bottom">
-      <div class="nav-item" data-page="settings">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 4 2 2 0 0 1-2-4v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        Settings
-      </div>
       <div class="user">
         <div class="user-avatar">DV</div>
         <div class="user-info">
-          <div class="user-name">Local Operator</div>
+          <div class="user-name">Operator</div>
           <div class="user-role">Full Access</div>
         </div>
-        <div class="user-status"></div>
       </div>
     </div>
   </aside>
@@ -68,539 +66,310 @@
   <!-- Main -->
   <main class="main">
     <header class="header">
-      <div class="header-left">
-        <h1 class="page-title" id="pageTitle">Home</h1>
-      </div>
-      <div class="header-actions" id="pageActions"></div>
+      <span class="page-title" id="pageTitle">Home</span>
     </header>
 
     <div class="content">
 
-      <!-- ═══ HOME ════════════════════════════════════════════════════════ -->
+      <!-- ═══ HOME ═══════════════════════════════════════════════════════ -->
       <div class="page active" id="page-home">
-        <div class="hero-stats">
-          <div class="hero-stat">
-            <div class="hero-stat-label">Total Scans</div>
-            <div class="hero-stat-value" id="statScans">—</div>
+        <div class="hero">
+          <div class="hero-title">What should we scan today?</div>
+        </div>
+
+        <div class="command-box">
+          <input type="text" class="command-input" id="quickUrl" placeholder="Enter a URL to scan…">
+          <button class="command-btn" id="quickBtn" onclick="quickLaunch()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </button>
+        </div>
+
+        <div class="pills">
+          <span class="pill" data-scope="quick" onclick="setQuickScope(this)">Quick</span>
+          <span class="pill active" data-scope="full" onclick="setQuickScope(this)">Full</span>
+          <span class="pill" data-scope="web" onclick="setQuickScope(this)">Web</span>
+          <span class="pill" data-scope="crypto" onclick="setQuickScope(this)">Crypto</span>
+        </div>
+
+        <div class="stats-row">
+          <div class="stat">
+            <div class="stat-value" id="statScans">—</div>
+            <div class="stat-label">Total scans</div>
           </div>
-          <div class="hero-stat">
-            <div class="hero-stat-label">Critical Findings</div>
-            <div class="hero-stat-value red" id="statCritical">—</div>
+          <div class="stat">
+            <div class="stat-value red" id="statCritical">—</div>
+            <div class="stat-label">Critical</div>
           </div>
-          <div class="hero-stat">
-            <div class="hero-stat-label">Unique Targets</div>
-            <div class="hero-stat-value blue" id="statTargets">—</div>
+          <div class="stat">
+            <div class="stat-value blue" id="statTargets">—</div>
+            <div class="stat-label">Targets</div>
           </div>
-          <div class="hero-stat">
-            <div class="hero-stat-label">Avg Risk Score</div>
-            <div class="hero-stat-value yellow" id="statAvgRisk">—</div>
+          <div class="stat">
+            <div class="stat-value" id="statAvgRisk">—</div>
+            <div class="stat-label">Avg risk</div>
           </div>
         </div>
 
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <h3>Quick Scan</h3>
-                <div class="subtitle">Launch a fast security check</div>
-              </div>
-            </div>
-            <div class="card-body">
-              <div class="quick-scan">
-                <input type="text" class="input input-mono" id="quickUrl" placeholder="target.com">
-                <select class="input" id="quickScope" style="width:120px;flex:none">
-                  <option value="quick">Quick</option>
-                  <option value="full">Full</option>
-                  <option value="web">Web</option>
-                  <option value="crypto">Crypto</option>
-                </select>
-                <button class="btn btn-primary" onclick="quickLaunch()">Run</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <div>
-                <h3>Recent Scans</h3>
-                <div class="subtitle">Latest activity</div>
-              </div>
-              <button class="btn btn-ghost" onclick="navigate('history')">View all →</button>
-            </div>
-            <div class="card-body p0" id="recentScans">
-              <div class="empty">
-                <div class="empty-icon">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                </div>
-                <div class="empty-title">No scans yet</div>
-                <div class="empty-desc">Run your first scan to see results here</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ SCANNER ═════════════════════════════════════════════════════ -->
-      <div class="page" id="page-scanner">
-        <div class="scan-form">
-          <div class="card" style="margin-bottom: 1.5rem">
-            <div class="card-header">
-              <div>
-                <h3>New Scan</h3>
-                <div class="subtitle">Configure your security assessment</div>
-              </div>
-            </div>
-            <div class="card-body">
-              <div class="form-section">
-                <label class="form-label">Target URL</label>
-                <input type="text" class="input input-mono" id="scanUrl" placeholder="https://example.com">
-              </div>
-
-              <div class="form-section">
-                <label class="form-label">Scan Scope</label>
-                <div class="scope-grid" id="scopeGrid">
-                  <button class="scope-btn" data-scope="quick">
-                    <div class="scope-btn-title">Quick</div>
-                    <div class="scope-btn-desc">Headers & OSINT</div>
-                  </button>
-                  <button class="scope-btn active" data-scope="full">
-                    <div class="scope-btn-title">Full</div>
-                    <div class="scope-btn-desc">Complete assessment</div>
-                  </button>
-                  <button class="scope-btn" data-scope="web">
-                    <div class="scope-btn-title">Web</div>
-                    <div class="scope-btn-desc">Vulns & auth</div>
-                  </button>
-                  <button class="scope-btn" data-scope="crypto">
-                    <div class="scope-btn-title">Crypto</div>
-                    <div class="scope-btn-desc">DeFi & contracts</div>
-                  </button>
-                  <button class="scope-btn" data-scope="api">
-                    <div class="scope-btn-title">API</div>
-                    <div class="scope-btn-desc">Endpoints</div>
-                  </button>
-                  <button class="scope-btn" data-scope="recon">
-                    <div class="scope-btn-title">Recon</div>
-                    <div class="scope-btn-desc">OSINT & DNS</div>
-                  </button>
-                  <button class="scope-btn" data-scope="passive">
-                    <div class="scope-btn-title">Passive</div>
-                    <div class="scope-btn-desc">No active probing</div>
-                  </button>
-                  <button class="scope-btn" data-scope="attack">
-                    <div class="scope-btn-title">Attack</div>
-                    <div class="scope-btn-desc">Full offensive</div>
-                  </button>
-                </div>
-              </div>
-
-              <div class="form-section">
-                <label class="form-label">Goal (optional)</label>
-                <textarea class="input" id="scanGoal" rows="2" placeholder="e.g. Focus on authentication bypasses"></textarea>
-              </div>
-
-              <button class="btn btn-primary btn-lg" id="launchBtn" onclick="launchScan()" style="width:100%">
-                Launch Scan
-              </button>
-            </div>
-          </div>
-
-          <div class="progress-container" id="progressContainer">
-            <div class="progress-header">
-              <div class="progress-indicator" id="progressDot"></div>
-              <div>
-                <div class="progress-title" id="progressTitle">Scanning…</div>
-                <div class="progress-target" id="progressTarget"></div>
-              </div>
-            </div>
-            <div class="skills-list" id="skillsList"></div>
-            <div class="live-findings" id="liveFindings"></div>
-            <div id="progressComplete" style="display:none; margin-top:1.5rem; padding-top:1.5rem; border-top:1px solid var(--border)">
-              <div style="display:flex; align-items:center; justify-content:space-between">
-                <span style="font-weight:500; color:var(--green)">Scan complete</span>
-                <button class="btn btn-primary" onclick="viewProgressResults()">View Results</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ HISTORY ═══════════════════════════════════════════════════════ -->
-      <div class="page" id="page-history">
-        <div class="filters">
-          <input type="text" class="input filter-input" id="historySearch" placeholder="Search scans…" oninput="filterHistory()">
-          <select class="input" id="historyScope" onchange="loadHistory()" style="width:140px">
-            <option value="">All scopes</option>
-            <option value="full">Full</option>
-            <option value="quick">Quick</option>
-            <option value="web">Web</option>
-            <option value="crypto">Crypto</option>
-          </select>
-          <select class="input" id="historyVerdict" onchange="loadHistory()" style="width:140px">
-            <option value="">All verdicts</option>
-            <option value="Critical">Critical</option>
-            <option value="High">High</option>
-            <option value="Medium">Medium</option>
-            <option value="Low">Low</option>
-          </select>
-          <button class="btn btn-secondary" onclick="navigate('scanner')">New Scan</button>
+        <div class="section-h">
+          <span class="section-title">Recent scans</span>
+          <span class="section-action" onclick="navigate('history')">View all</span>
         </div>
 
         <div class="card">
-          <div class="card-header">
-            <div>
-              <h3>Scan History</h3>
-              <div class="subtitle" id="historyCount">Loading…</div>
-            </div>
-          </div>
-          <div class="card-body p0">
-            <div class="scan-list" id="historyList">
-              <div class="empty">
-                <div class="empty-icon">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                </div>
-                <div class="empty-title">No scans found</div>
-                <div class="empty-desc">Run your first scan to see history</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ FINDINGS ══════════════════════════════════════════════════════ -->
-      <div class="page" id="page-findings">
-        <div class="filters">
-          <input type="text" class="input filter-input" id="findingsSearch" placeholder="Search findings…" oninput="filterFindings()">
-          <select class="input" id="findingsSev" onchange="filterFindings()" style="width:140px">
-            <option value="">All severities</option>
-            <option value="Critical">Critical</option>
-            <option value="High">High</option>
-            <option value="Medium">Medium</option>
-            <option value="Low">Low</option>
-            <option value="Info">Info</option>
-          </select>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h3>All Findings</h3>
-              <div class="subtitle" id="findingsCount">Aggregated from all scans</div>
-            </div>
-          </div>
-          <div class="card-body p0" id="findingsList"></div>
-        </div>
-      </div>
-
-      <!-- ═══ RESULTS ═══════════════════════════════════════════════════════ -->
-      <div class="page" id="page-results">
-        <div class="results-hero">
-          <div class="results-info">
-            <div class="results-url" id="resultsUrl">—</div>
-            <div class="results-meta" id="resultsMeta">—</div>
-            <div class="results-badge" id="resultsBadge"></div>
-            <div class="severity-breakdown" id="severityBreakdown">
-              <div class="sev-item"><div class="sev-count critical" id="rc">0</div><div class="sev-label">Critical</div></div>
-              <div class="sev-item"><div class="sev-count high" id="rh">0</div><div class="sev-label">High</div></div>
-              <div class="sev-item"><div class="sev-count medium" id="rm">0</div><div class="sev-label">Medium</div></div>
-              <div class="sev-item"><div class="sev-count low" id="rl">0</div><div class="sev-label">Low</div></div>
-            </div>
-          </div>
-          <div class="score-display">
-            <div class="score-ring" id="scoreRing">
-              <div class="score-value" id="scoreValue">—</div>
-              <div class="score-label">Risk</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="tabs">
-          <button class="tab active" data-tab="findings">Findings</button>
-          <button class="tab" data-tab="summary">Summary</button>
-          <button class="tab" data-tab="attack">Attack Paths</button>
-          <button class="tab" data-tab="remediation">Remediation</button>
-        </div>
-
-        <div class="tab-content active" id="tab-findings">
-          <div class="findings-list" id="resultsFindingsList"></div>
-        </div>
-        <div class="tab-content" id="tab-summary">
-          <div class="grid-2">
-            <div class="card">
-              <div class="card-body">
-                <div class="finding-section-title">Executive Summary</div>
-                <div class="finding-content" id="resultsSummary" style="white-space:pre-wrap"></div>
-              </div>
-            </div>
-            <div class="card">
-              <div class="card-body">
-                <div class="finding-section-title">Evidence Summary</div>
-                <div class="finding-content" id="resultsEvidence" style="white-space:pre-wrap"></div>
-              </div>
-            </div>
-          </div>
-          <div class="card" style="margin-top:1rem">
-            <div class="card-body">
-              <div class="finding-section-title">Skills Run</div>
-              <div id="resultsSkills" style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.75rem"></div>
-            </div>
-          </div>
-        </div>
-        <div class="tab-content" id="tab-attack">
-          <div class="paths-list" id="resultsPaths"></div>
-        </div>
-        <div class="tab-content" id="tab-remediation">
-          <div class="card" style="margin-bottom:1rem">
-            <div class="card-body">
-              <div class="finding-section-title">Remediation Plan</div>
-              <div class="finding-content" id="resultsRemediation" style="white-space:pre-wrap"></div>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-body">
-              <div class="finding-section-title">Suggested Next Tests</div>
-              <div class="finding-content" id="resultsSuggested"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ ATTACK PATHS ══════════════════════════════════════════════════ -->
-      <div class="page" id="page-attack-paths">
-        <div class="card">
-          <div class="card-header">
-            <div>
-              <h3>Attack Path Library</h3>
-              <div class="subtitle">Chained paths discovered across all scans</div>
-            </div>
-          </div>
-          <div class="card-body p0" id="attackPathsList">
+          <div class="card-b" id="recentScans">
             <div class="empty">
-              <div class="empty-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-              </div>
-              <div class="empty-title">No attack paths</div>
-              <div class="empty-desc">Run a full-scope scan to discover chained attack paths</div>
+              <div class="empty-t">No scans yet</div>
+              <div class="empty-d">Enter a URL above to start</div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- ═══ INVESTIGATION ═════════════════════════════════════════════════ -->
+      <!-- ═══ SCANNER ════════════════════════════════════════════════════ -->
+      <div class="page" id="page-scanner">
+        <div class="hero">
+          <div class="hero-title">Configure scan</div>
+        </div>
+
+        <div class="command-box">
+          <input type="text" class="command-input" id="scanUrl" placeholder="https://example.com">
+          <button class="command-btn" onclick="launchScan()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </button>
+        </div>
+
+        <div class="scope-grid" id="scopeGrid">
+          <div class="scope-opt" data-scope="quick">
+            <div class="scope-opt-title">Quick</div>
+            <div class="scope-opt-desc">Headers & OSINT</div>
+          </div>
+          <div class="scope-opt active" data-scope="full">
+            <div class="scope-opt-title">Full</div>
+            <div class="scope-opt-desc">Complete assessment</div>
+          </div>
+          <div class="scope-opt" data-scope="web">
+            <div class="scope-opt-title">Web</div>
+            <div class="scope-opt-desc">Vulns & auth</div>
+          </div>
+          <div class="scope-opt" data-scope="crypto">
+            <div class="scope-opt-title">Crypto</div>
+            <div class="scope-opt-desc">DeFi analysis</div>
+          </div>
+        </div>
+
+        <div class="progress-box" id="progressBox">
+          <div class="progress-h">
+            <div class="progress-dot"></div>
+            <span id="progressText">Scanning…</span>
+          </div>
+          <div id="skillsList"></div>
+          <div id="liveFindings" style="margin-top:1rem"></div>
+        </div>
+      </div>
+
+      <!-- ═══ HISTORY ══════════════════════════════════════════════════════ -->
+      <div class="page" id="page-history">
+        <div class="section-h">
+          <span class="section-title">Scan history</span>
+          <span class="section-action" onclick="navigate('scanner')">New scan</span>
+        </div>
+
+        <div class="card">
+          <div class="scan-list" id="historyList">
+            <div class="empty" style="padding:2rem">
+              <div class="empty-t">No scans found</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ FINDINGS ═══════════════════════════════════════════════════ -->
+      <div class="page" id="page-findings">
+        <div class="section-h">
+          <span class="section-title">All findings</span>
+        </div>
+
+        <div class="card">
+          <div class="scan-list" id="findingsList">
+            <div class="empty" style="padding:2rem">
+              <div class="empty-t">No findings</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ RESULTS ════════════════════════════════════════════════════ -->
+      <div class="page" id="page-results">
+        <div class="section-h">
+          <span class="section-title" id="resultsTarget">Results</span>
+          <span class="section-action" onclick="exportReport()">Export</span>
+        </div>
+
+        <div style="display:flex; gap:1rem; margin-bottom:1.5rem; flex-wrap:wrap">
+          <span id="resultsBadge"></span>
+          <span class="badge" id="rcBadge"></span>
+          <span class="badge" id="rhBadge"></span>
+          <span class="badge" id="rmBadge"></span>
+          <span class="badge" id="rlBadge"></span>
+        </div>
+
+        <div class="card">
+          <div id="resultsFindings"></div>
+        </div>
+      </div>
+
+      <!-- ═══ ATTACK PATHS ═══════════════════════════════════════════════ -->
+      <div class="page" id="page-attack-paths">
+        <div class="section-h">
+          <span class="section-title">Attack paths</span>
+        </div>
+
+        <div class="card">
+          <div class="card-b" id="attackPathsList">
+            <div class="empty">
+              <div class="empty-t">No attack paths discovered</div>
+              <div class="empty-d">Run a full scan to find chained vulnerabilities</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ INVESTIGATION ════════════════════════════════════════════════ -->
       <div class="page" id="page-investigation">
-        <div class="inv-grid">
-          <div class="inv-card">
-            <div class="inv-header">
-              <div class="inv-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
-              </div>
-              <div>
-                <div class="inv-title">Blockchain Lookup</div>
-                <div class="inv-subtitle">Trace wallets & transactions</div>
-              </div>
+        <div class="section-h">
+          <span class="section-title">Investigation tools</span>
+        </div>
+
+        <div class="settings-grid">
+          <div class="settings-card">
+            <div class="settings-h">
+              <h4>Blockchain Lookup</h4>
+              <p>Trace wallets & transactions</p>
             </div>
-            <input type="text" class="input input-mono inv-input" id="chainAddr" placeholder="0x… or Solana address">
+            <div class="settings-f">
+              <input type="text" id="chainAddr" placeholder="0x… or Solana address" class="input" style="font-family:var(--mono)">
+            </div>
             <button class="btn btn-primary" onclick="runChainLookup()">Look up</button>
-            <pre class="inv-result" id="chainResult">Enter an address or tx hash above</pre>
+            <pre id="chainResult" style="margin-top:1rem; padding:1rem; background:var(--elevated); border-radius:6px; font-size:0.75rem; color:var(--dim); min-height:60px; white-space:pre-wrap">Enter an address to look up</pre>
           </div>
 
-          <div class="inv-card">
-            <div class="inv-header">
-              <div class="inv-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-              </div>
-              <div>
-                <div class="inv-title">Domain OSINT</div>
-                <div class="inv-subtitle">Whois, DNS & certificates</div>
-              </div>
+          <div class="settings-card">
+            <div class="settings-h">
+              <h4>Domain OSINT</h4>
+              <p>WHOIS, DNS & certificates</p>
             </div>
-            <input type="text" class="input input-mono inv-input" id="osintDomain" placeholder="example.com">
+            <div class="settings-f">
+              <input type="text" id="osintDomain" placeholder="example.com" class="input">
+            </div>
             <button class="btn btn-primary" onclick="runOsint()">Investigate</button>
-            <pre class="inv-result" id="osintResult">Enter a domain to investigate</pre>
+            <pre id="osintResult" style="margin-top:1rem; padding:1rem; background:var(--elevated); border-radius:6px; font-size:0.75rem; color:var(--dim); min-height:60px; white-space:pre-wrap">Enter a domain to investigate</pre>
           </div>
 
-          <div class="inv-card">
-            <div class="inv-header">
-              <div class="inv-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-              </div>
-              <div>
-                <div class="inv-title">PoC Simulator</div>
-                <div class="inv-subtitle">Test IDOR & unauth access</div>
-              </div>
+          <div class="settings-card">
+            <div class="settings-h">
+              <h4>PoC Simulator</h4>
+              <p>Test IDOR & unauth access</p>
             </div>
-            <select class="input" id="pocType" style="margin-bottom:0.75rem">
-              <option value="idor">IDOR — Change parameter</option>
-              <option value="unauthenticated">Unauthenticated access</option>
-            </select>
-            <input type="text" class="input input-mono inv-input" id="pocUrl" placeholder="https://api.example.com/user/123">
-            <div id="pocIdorFields">
-              <input type="text" class="input input-mono inv-input" id="pocParam" placeholder="Parameter name (e.g. user_id)">
-              <input type="text" class="input input-mono inv-input" id="pocValue" placeholder="New value (e.g. 2)">
+            <div class="settings-f">
+              <select id="pocType" class="input" style="margin-bottom:0.5rem">
+                <option value="idor">IDOR</option>
+                <option value="unauthenticated">Unauthenticated</option>
+              </select>
+              <input type="text" id="pocUrl" placeholder="https://api.example.com/user/123" class="input" style="font-family:var(--mono)">
             </div>
             <button class="btn btn-primary" onclick="runPoc()">Simulate</button>
-            <pre class="inv-result" id="pocResult">Configure and click Simulate</pre>
+            <pre id="pocResult" style="margin-top:1rem; padding:1rem; background:var(--elevated); border-radius:6px; font-size:0.75rem; color:var(--dim); min-height:60px; white-space:pre-wrap">Configure and run</pre>
           </div>
 
-          <div class="inv-card">
-            <div class="inv-header">
-              <div class="inv-icon">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-              </div>
-              <div>
-                <div class="inv-title">Entity Reputation</div>
-                <div class="inv-subtitle">Threat intel check</div>
-              </div>
+          <div class="settings-card">
+            <div class="settings-h">
+              <h4>Entity Reputation</h4>
+              <p>Check threat intel</p>
             </div>
-            <input type="text" class="input input-mono inv-input" id="reputationTarget" placeholder="IP, domain, or wallet">
+            <div class="settings-f">
+              <input type="text" id="reputationTarget" placeholder="IP, domain, or wallet" class="input">
+            </div>
             <button class="btn btn-primary" onclick="runReputation()">Check</button>
-            <pre class="inv-result" id="reputationResult">Enter a target to check reputation</pre>
+            <pre id="reputationResult" style="margin-top:1rem; padding:1rem; background:var(--elevated); border-radius:6px; font-size:0.75rem; color:var(--dim); min-height:60px; white-space:pre-wrap">Enter a target to check</pre>
           </div>
         </div>
       </div>
 
-      <!-- ═══ SETTINGS ════════════════════════════════════════════════════ -->
+      <!-- ═══ SETTINGS ═══════════════════════════════════════════════════ -->
       <div class="page" id="page-settings">
+        <div class="section-h">
+          <span class="section-title">Settings</span>
+        </div>
+
         <div class="settings-grid">
-          <!-- API Configuration -->
           <div class="settings-card">
-            <div class="settings-header">
-              <div class="settings-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-              </div>
-              <div>
-                <div class="settings-card-title">API Configuration</div>
-                <div class="settings-card-subtitle">Connect to your Diverg backend</div>
-              </div>
+            <div class="settings-h">
+              <h4>API Configuration</h4>
+              <p>Diverg backend connection</p>
             </div>
-            <div class="settings-body">
-              <div class="settings-field">
-                <label>API Base URL</label>
-                <input type="text" class="input input-mono" id="settingsApiUrl" placeholder="http://127.0.0.1:5000">
-                <div class="settings-hint">Your local or hosted Diverg API endpoint</div>
-              </div>
-              <div class="settings-actions">
-                <button class="btn btn-primary" onclick="saveSettings()">Save</button>
-                <button class="btn btn-secondary" onclick="testConnection()">Test Connection</button>
-              </div>
-              <div id="connStatus" class="settings-status"></div>
+            <div class="settings-f">
+              <label>API URL</label>
+              <input type="text" id="settingsApiUrl" placeholder="http://127.0.0.1:5000">
             </div>
+            <div style="display:flex; gap:0.5rem">
+              <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+              <button class="btn btn-secondary" onclick="testConnection()">Test</button>
+            </div>
+            <div id="connStatus" style="margin-top:0.75rem; font-size:0.75rem; color:var(--dim)"></div>
           </div>
 
-          <!-- Helius Integration -->
           <div class="settings-card">
-            <div class="settings-header">
-              <div class="settings-icon" style="color:var(--accent)">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
-              </div>
-              <div>
-                <div class="settings-card-title">Helius Integration</div>
-                <div class="settings-card-subtitle">Blockchain data & Web3 intelligence</div>
-              </div>
+            <div class="settings-h">
+              <h4>Helius Integration</h4>
+              <p>Blockchain data via Helius</p>
             </div>
-            <div class="settings-body">
-              <div class="settings-field">
-                <label>Helius API Key</label>
-                <input type="password" class="input input-mono" id="heliusApiKey" placeholder="Enter your Helius API key">
-                <div class="settings-hint">Get your key from <a href="https://helius.dev" target="_blank">helius.dev</a> for Solana/EVM analysis</div>
-              </div>
-              <div class="settings-field">
-                <label>Network</label>
-                <select class="input" id="heliusNetwork">
-                  <option value="mainnet">Mainnet</option>
-                  <option value="devnet">Devnet</option>
-                </select>
-              </div>
-              <div class="settings-actions">
-                <button class="btn btn-secondary" onclick="testHeliusKey()">Test Key</button>
-                <button class="btn btn-primary" onclick="saveHeliusKey()">Save Key</button>
-              </div>
-              <div id="heliusStatus" class="settings-status"></div>
+            <div class="settings-f">
+              <label>API Key</label>
+              <input type="password" id="heliusApiKey" placeholder="Enter Helius API key">
             </div>
+            <div class="settings-f">
+              <label>Network</label>
+              <select id="heliusNetwork">
+                <option value="mainnet">Mainnet</option>
+                <option value="devnet">Devnet</option>
+              </select>
+            </div>
+            <div style="display:flex; gap:0.5rem">
+              <button class="btn btn-secondary" onclick="testHeliusKey()">Test</button>
+              <button class="btn btn-primary" onclick="saveHeliusKey()">Save</button>
+            </div>
+            <div id="heliusStatus" style="margin-top:0.75rem; font-size:0.75rem; color:var(--dim)"></div>
           </div>
 
-          <!-- Scan Defaults -->
-          <div class="settings-card">
-            <div class="settings-header">
-              <div class="settings-icon" style="color:var(--green)">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              </div>
-              <div>
-                <div class="settings-card-title">Scan Defaults</div>
-                <div class="settings-card-subtitle">Customize your default scan behavior</div>
-              </div>
+          <div class="settings-card wide">
+            <div class="settings-h">
+              <h4>Preferences</h4>
             </div>
-            <div class="settings-body">
-              <div class="settings-field">
-                <label>Default Scope</label>
-                <select class="input" id="settingsScope">
-                  <option value="full">Full — Complete assessment</option>
-                  <option value="quick">Quick — Headers & OSINT</option>
-                  <option value="web">Web — Vulns & auth</option>
-                  <option value="crypto">Crypto — DeFi & contracts</option>
-                  <option value="api">API — Endpoints</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <!-- Preferences -->
-          <div class="settings-card">
-            <div class="settings-header">
-              <div class="settings-icon" style="color:var(--yellow)">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 4 2 2 0 0 1-2-4v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-              </div>
-              <div>
-                <div class="settings-card-title">Preferences</div>
-                <div class="settings-card-subtitle">Notification & behavior settings</div>
-              </div>
-            </div>
-            <div class="settings-body">
-              <div class="setting-row">
-                <div class="setting-info">
-                  <div class="setting-label">Critical alerts</div>
-                  <div class="setting-desc">Notify when critical findings are discovered</div>
-                </div>
+            <div style="display:flex; gap:2rem; flex-wrap:wrap">
+              <div style="display:flex; align-items:center; gap:0.75rem">
                 <label class="toggle">
                   <input type="checkbox" id="toggleCritical" checked>
-                  <span class="toggle-slider"></span>
+                  <span class="toggle-s"></span>
                 </label>
+                <span style="font-size:0.8125rem">Critical alerts</span>
               </div>
-              <div class="setting-row">
-                <div class="setting-info">
-                  <div class="setting-label">Auto-navigate to results</div>
-                  <div class="setting-desc">Jump to results page when scan completes</div>
-                </div>
+              <div style="display:flex; align-items:center; gap:0.75rem">
                 <label class="toggle">
                   <input type="checkbox" id="toggleAutoNav" checked>
-                  <span class="toggle-slider"></span>
+                  <span class="toggle-s"></span>
                 </label>
+                <span style="font-size:0.8125rem">Auto-navigate to results</span>
               </div>
             </div>
           </div>
 
-          <!-- Data Management -->
-          <div class="settings-card" style="grid-column:1/-1">
-            <div class="settings-header">
-              <div class="settings-icon" style="color:var(--red)">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-              </div>
-              <div>
-                <div class="settings-card-title">Data Management</div>
-                <div class="settings-card-subtitle">Export or clear your scan history</div>
-              </div>
+          <div class="settings-card wide">
+            <div class="settings-h">
+              <h4>Data</h4>
             </div>
-            <div class="settings-body">
-              <div class="settings-actions">
-                <button class="btn btn-secondary" onclick="exportHistory()">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:0.5rem"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                  Export History (JSON)
-                </button>
-                <button class="btn btn-danger" onclick="clearHistory()">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:0.5rem"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                  Clear All Scans
-                </button>
-              </div>
+            <div style="display:flex; gap:0.5rem">
+              <button class="btn btn-secondary" onclick="exportHistory()">Export history</button>
+              <button class="btn btn-secondary" onclick="clearHistory()" style="color:var(--red)">Clear all scans</button>
             </div>
           </div>
         </div>
