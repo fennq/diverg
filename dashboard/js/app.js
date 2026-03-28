@@ -36,7 +36,7 @@ const PAGE_ACTIONS = {
     <button class="btn-ghost" id="exportReportBtn" onclick="exportReport()">Export JSON</button>
     <button class="btn-sm"    id="deleteReportBtn" onclick="deleteCurrentScan()">Delete</button>
   `,
-  history: `<button class="btn-accent" onclick="navigate('scanner')">
+  history: `<button class="btn-fill" onclick="navigate('scanner')">
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     New Scan
   </button>`,
