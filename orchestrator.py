@@ -42,13 +42,15 @@ SCAN_PROFILES = {
         "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "company_exposure",
         "web_vulns", "auth_test", "api_test", "high_value_flaws", "workflow_probe", "race_condition",
         "payment_financial", "client_surface", "dependency_audit", "logic_abuse", "entity_reputation",
+        "suspicious_keywords",
     ],
     "crypto": [
         "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "company_exposure",
         "web_vulns", "auth_test", "api_test", "high_value_flaws", "workflow_probe", "race_condition",
         "payment_financial", "client_surface", "chain_validation_abuse", "dependency_audit", "logic_abuse", "entity_reputation",
+        "suspicious_keywords",
     ],
-    "quick": ["headers_ssl", "recon", "osint", "company_exposure"],
+    "quick": ["headers_ssl", "recon", "osint", "company_exposure", "suspicious_keywords"],
     "recon": ["osint", "recon"],
     "web": ["web_vulns", "headers_ssl", "auth_test", "company_exposure"],
     "api": ["api_test", "headers_ssl", "company_exposure"],
@@ -84,6 +86,7 @@ SKILL_TARGET_TYPE = {
     "logic_abuse": "url",
     "entity_reputation": "domain",
     "chain_validation_abuse": "url",
+    "suspicious_keywords": "url",
 }
 ENGAGEMENT_TRACKS = {
     "surface": ["osint", "recon", "headers_ssl", "company_exposure"],
@@ -114,6 +117,7 @@ SKILL_DESCRIPTIONS = {
     "logic_abuse": "numeric/bounds abuse (amount, limit, offset), overflow, success-like response to tampered params",
     "entity_reputation": "domain owner/entity foul-play research, fraud/lawsuit/breach/reputation searches",
     "chain_validation_abuse": "Diverg batch validation: batch vs single path validation, account/subaccount ID substitution, parameter trust (see content/diverg-batch-validation-routes.md)",
+    "suspicious_keywords": "URL and page content scan for crypto scam, phishing, and social engineering keywords",
 }
 
 # Canonical finding schema — all skills normalize to this shape for dedup and correlation
@@ -225,6 +229,8 @@ def _default_finding_source(f: dict) -> str:
         return "regex_match"
     if skill == "entity_reputation":
         return "entity_reputation"
+    if skill == "suspicious_keywords" or "suspicious" in category:
+        return "suspicious_keywords"
     if skill == "dependency_audit":
         return "dependency_audit"
     if skill == "logic_abuse":
@@ -641,6 +647,9 @@ def run_skill_variant(
                 client_surface_json=ctx.get("client_surface_json"),
                 api_results_json=ctx.get("api_results_json"),
             )
+        elif skill_name == "suspicious_keywords":
+            import suspicious_keywords
+            raw = suspicious_keywords.run(target_url, scan_type=scan_type)
         else:
             return {"error": f"Unknown skill: {skill_name}"}
 
@@ -1455,6 +1464,7 @@ WEB_SCAN_PHASE1 = [
     "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks",
     "company_exposure", "web_vulns", "auth_test", "api_test", "high_value_flaws",
     "workflow_probe", "race_condition", "payment_financial", "client_surface",
+    "suspicious_keywords",
 ]
 WEB_SCAN_PHASE2 = ["dependency_audit", "logic_abuse", "entity_reputation"]
 WEB_SCAN_PROFILE = WEB_SCAN_PHASE1 + WEB_SCAN_PHASE2
