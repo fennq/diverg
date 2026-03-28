@@ -223,7 +223,7 @@ class StealthSession(requests.Session):
         kwargs["headers"] = base
 
         if "timeout" not in kwargs:
-            kwargs["timeout"] = 10
+            kwargs["timeout"] = 6
 
         # Jitter before request
         jitter(self.min_delay, self.max_delay)

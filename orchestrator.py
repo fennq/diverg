@@ -1526,7 +1526,8 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     domain = target.replace("https://", "").replace("http://", "").split("/")[0]
     target_url = target if target.startswith("http") else f"https://{target}"
 
-    site_classification = _get_crypto_detection(target_url)
+    needs_crypto = scope in ("full", "crypto")
+    site_classification = _get_crypto_detection(target_url) if needs_crypto else {"is_crypto": False, "confidence": 0.0, "signals": []}
     chain_validation_abuse_reason: str | None = None
 
     if goal and str(goal).strip():
@@ -1709,7 +1710,8 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
     domain = target.replace("https://", "").replace("http://", "").split("/")[0]
     target_url = target if target.startswith("http") else f"https://{target}"
 
-    site_classification = _get_crypto_detection(target_url)
+    needs_crypto = scope in ("full", "crypto")
+    site_classification = _get_crypto_detection(target_url) if needs_crypto else {"is_crypto": False, "confidence": 0.0, "signals": []}
     chain_validation_abuse_reason: str | None = None
 
     if goal and str(goal).strip():
