@@ -1,14 +1,28 @@
 """
 Points, referrals, and leaderboard helpers (SQLite). Used by api_server.
+
+Security: all credits are server-side only; deltas are clamped and validated;
+ledger reasons/refs are sanitized to prevent abuse or oversized rows.
 """
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
 # ── Config (env) ───────────────────────────────────────────────────────────
+
+# Hard ceiling for any single award (misconfigured env cannot grant huge scores).
+_HARD_MAX_PER_AWARD = 500
+
+# Max length for referral input before normalization (DoS / garbage).
+_MAX_REFERRAL_INPUT_LEN = 64
+
+_REASON_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_REF_TYPE_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+_REF_ID_RE = re.compile(r"^[a-zA-Z0-9_.:-]{1,128}$")
 
 
 def _int_env(key: str, default: int) -> int:
@@ -18,10 +32,48 @@ def _int_env(key: str, default: int) -> int:
         return default
 
 
+def _clamp_config_int(val: int, lo: int, hi: int) -> int:
+    return max(lo, min(val, hi))
+
+
+def max_points_per_award() -> int:
+    return _clamp_config_int(_int_env("DIVERG_POINTS_MAX_PER_AWARD", 120), 1, _HARD_MAX_PER_AWARD)
+
+
+def clamp_award_delta(delta: int) -> int:
+    """Non-negative, capped per-award; negative or zero after clamp → caller should skip."""
+    if delta < 0:
+        return 0
+    return min(delta, max_points_per_award())
+
+
+def _sanitize_reason(reason: str) -> str | None:
+    if not reason or not _REASON_RE.match(reason):
+        return None
+    return reason
+
+
+def _sanitize_ref_type(ref_type: str | None) -> str | None:
+    if ref_type is None:
+        return None
+    if not _REF_TYPE_RE.match(ref_type):
+        return None
+    return ref_type
+
+
+def _sanitize_ref_id(ref_id: str | None) -> str | None:
+    if ref_id is None:
+        return None
+    s = str(ref_id)[:128]
+    if not _REF_ID_RE.match(s):
+        return None
+    return s
+
+
 def points_for_scan_scope(scope: str) -> int:
     env_key = f"DIVERG_POINTS_SCAN_{scope.upper().replace('-', '_')}"
     if (os.environ.get(env_key) or "").strip():
-        return _int_env(env_key, 15)
+        return clamp_award_delta(_int_env(env_key, 15))
     defaults = {
         "full": 20,
         "quick": 10,
@@ -32,18 +84,27 @@ def points_for_scan_scope(scope: str) -> int:
         "passive": 10,
         "attack": 18,
     }
-    return defaults.get((scope or "full").lower(), 15)
+    return clamp_award_delta(defaults.get((scope or "full").lower(), 15))
 
 
 def investigation_delta(reason_key: str) -> int:
-    return _int_env(f"DIVERG_POINTS_INV_{reason_key.upper()}", 3)
+    return clamp_award_delta(_int_env(f"DIVERG_POINTS_INV_{reason_key.upper()}", 3))
 
 
-DAILY_INVESTIGATION_CAP = _int_env("DIVERG_POINTS_DAILY_INVESTIGATION_CAP", 30)
+def daily_investigation_cap() -> int:
+    return _clamp_config_int(_int_env("DIVERG_POINTS_DAILY_INVESTIGATION_CAP", 30), 1, 500)
 
-REFERRAL_SIGNUP_REFERRER = _int_env("DIVERG_POINTS_REFERRAL_SIGNUP_REFERRER", 50)
-REFERRAL_SIGNUP_REFEREE = _int_env("DIVERG_POINTS_REFERRAL_SIGNUP_REFEREE", 25)
-REFERRAL_FIRST_SCAN_REFERRER = _int_env("DIVERG_POINTS_REFERRAL_FIRST_SCAN_REFERRER", 15)
+
+def referral_signup_referrer() -> int:
+    return clamp_award_delta(_int_env("DIVERG_POINTS_REFERRAL_SIGNUP_REFERRER", 50))
+
+
+def referral_signup_referee() -> int:
+    return clamp_award_delta(_int_env("DIVERG_POINTS_REFERRAL_SIGNUP_REFEREE", 25))
+
+
+def referral_first_scan_referrer() -> int:
+    return clamp_award_delta(_int_env("DIVERG_POINTS_REFERRAL_FIRST_SCAN_REFERRER", 15))
 
 REFERRAL_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
@@ -79,7 +140,19 @@ def award_points(
     ref_type: str | None = None,
     ref_id: str | None = None,
 ) -> bool:
-    if delta == 0:
+    reason_s = _sanitize_reason(reason)
+    if not reason_s:
+        return False
+    ref_type_s = _sanitize_ref_type(ref_type)
+    if ref_type is not None and ref_type_s is None:
+        return False
+    ref_id_s = _sanitize_ref_id(ref_id)
+    if ref_id is not None and ref_id_s is None:
+        return False
+    delta = clamp_award_delta(delta)
+    if delta <= 0:
+        return False
+    if not user_id or len(str(user_id)) > 64:
         return False
     ensure_user_points_row(conn, user_id)
     now = datetime.now(timezone.utc).isoformat()
@@ -87,7 +160,7 @@ def award_points(
         conn.execute(
             """INSERT INTO points_ledger (user_id, delta, reason, ref_type, ref_id, created_at)
                VALUES (?,?,?,?,?,?)""",
-            (user_id, delta, reason, ref_type, ref_id, now),
+            (user_id, delta, reason_s, ref_type_s, ref_id_s, now),
         )
     except sqlite3.IntegrityError:
         return False
@@ -118,8 +191,11 @@ def try_award_investigation_or_poc(
 ) -> bool:
     if delta <= 0:
         return False
+    delta = clamp_award_delta(delta)
+    if delta <= 0:
+        return False
     current = _investigation_points_today(conn, user_id)
-    if current + delta > DAILY_INVESTIGATION_CAP:
+    if current + delta > daily_investigation_cap():
         return False
     ref_id = secrets.token_hex(16)
     return award_points(conn, user_id, delta, reason, ref_type="activity", ref_id=ref_id)
@@ -143,7 +219,7 @@ def _maybe_referrer_first_scan_bonus(conn: sqlite3.Connection, referee_id: str) 
     referrer_id = row[0]
     if referrer_id == referee_id:
         return
-    bonus = REFERRAL_FIRST_SCAN_REFERRER
+    bonus = referral_first_scan_referrer()
     if bonus <= 0:
         return
     award_points(
@@ -159,7 +235,8 @@ def _maybe_referrer_first_scan_bonus(conn: sqlite3.Connection, referee_id: str) 
 def normalize_referral_code(raw: str | None) -> str:
     if not raw:
         return ""
-    return "".join(c for c in raw.strip().upper() if c in REFERRAL_CODE_ALPHABET)
+    s = str(raw).strip()[:_MAX_REFERRAL_INPUT_LEN]
+    return "".join(c for c in s.upper() if c in REFERRAL_CODE_ALPHABET)
 
 
 def lookup_referrer_id(conn: sqlite3.Connection, code: str) -> str | None:
@@ -200,20 +277,22 @@ def apply_referral_on_register(
         "UPDATE user_points SET referred_by = ?, updated_at = ? WHERE user_id = ?",
         (referrer_id, now, referee_id),
     )
-    if REFERRAL_SIGNUP_REFERRER > 0:
+    r_ref = referral_signup_referrer()
+    if r_ref > 0:
         award_points(
             conn,
             referrer_id,
-            REFERRAL_SIGNUP_REFERRER,
+            r_ref,
             "referral_signup_referrer",
             "referral",
             referee_id,
         )
-    if REFERRAL_SIGNUP_REFEREE > 0:
+    r_fee = referral_signup_referee()
+    if r_fee > 0:
         award_points(
             conn,
             referee_id,
-            REFERRAL_SIGNUP_REFEREE,
+            r_fee,
             "referral_signup_referee",
             "referral",
             referrer_id,

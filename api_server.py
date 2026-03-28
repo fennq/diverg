@@ -155,6 +155,8 @@ class RateLimiter:
 
 auth_limiter = RateLimiter(max_attempts=10, window_seconds=300, lockout_seconds=600)
 register_limiter = RateLimiter(max_attempts=5, window_seconds=3600, lockout_seconds=1800)
+# Authenticated reads only; stops leaderboard/ledger scraping.
+rewards_read_limiter = RateLimiter(max_attempts=90, window_seconds=60, lockout_seconds=120)
 
 # ── Database ────────────────────────────────────────────────────────────────
 
@@ -195,7 +197,7 @@ CREATE TABLE IF NOT EXISTS scans (
 
 CREATE TABLE IF NOT EXISTS user_points (
     user_id       TEXT PRIMARY KEY,
-    balance       INTEGER NOT NULL DEFAULT 0,
+    balance       INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
     referral_code TEXT UNIQUE,
     referred_by   TEXT,
     updated_at    TEXT
@@ -443,7 +445,7 @@ def auth_register():
     password = (data.get("password") or "")
     name = sanitize_text(data.get("name") or "", 100)
     referral_raw = data.get("referral_code") or data.get("ref") or ""
-    referral_raw = referral_raw.strip() if isinstance(referral_raw, str) else ""
+    referral_raw = referral_raw.strip()[:64] if isinstance(referral_raw, str) else ""
 
     if not validate_email(email):
         return jsonify({"error": "Valid email required"}), 400
@@ -579,7 +581,7 @@ def auth_google():
         return jsonify({"error": "Could not get email from Google"}), 401
 
     referral_raw = data.get("referral_code") or data.get("ref") or ""
-    referral_raw = referral_raw.strip() if isinstance(referral_raw, str) else ""
+    referral_raw = referral_raw.strip()[:64] if isinstance(referral_raw, str) else ""
 
     with _db() as conn:
         existing = conn.execute("SELECT id, email, name, provider, avatar_url FROM users WHERE email = ?",
@@ -1177,6 +1179,13 @@ def rewards_me():
     if not user:
         return jsonify({"error": "Authentication required"}), 401
     uid = user["id"]
+    ip = _get_client_ip()
+    allowed, retry = rewards_read_limiter.check(f"rw:me:{uid}:{ip}")
+    if not allowed:
+        resp = jsonify({"error": "Too many requests. Try again shortly."})
+        resp.headers["Retry-After"] = str(retry)
+        return resp, 429
+    rewards_read_limiter.record(f"rw:me:{uid}:{ip}")
     from dashboard_points import ensure_user_points_row
 
     with _db() as conn:
@@ -1203,8 +1212,16 @@ def rewards_me():
 def rewards_leaderboard():
     if request.method == "OPTIONS":
         return "", 204
-    if not get_current_user():
+    user = get_current_user()
+    if not user:
         return jsonify({"error": "Authentication required"}), 401
+    ip = _get_client_ip()
+    allowed, retry = rewards_read_limiter.check(f"rw:lb:{user['id']}:{ip}")
+    if not allowed:
+        resp = jsonify({"error": "Too many requests. Try again shortly."})
+        resp.headers["Retry-After"] = str(retry)
+        return resp, 429
+    rewards_read_limiter.record(f"rw:lb:{user['id']}:{ip}")
     window = (request.args.get("window") or "all").lower()
     if window not in ("all", "30d", "7d"):
         window = "all"
