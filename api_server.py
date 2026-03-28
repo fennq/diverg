@@ -55,6 +55,7 @@ from datetime import datetime, timezone, timedelta
 from functools import wraps
 from pathlib import Path
 from threading import Lock
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
@@ -390,6 +391,26 @@ VALID_SCOPES = ("full", "quick", "crypto", "recon", "web", "api", "passive", "at
 init_db()
 
 
+def _error(message: str, status: int = 400):
+    """Return a standardized JSON error response."""
+    return jsonify({"error": True, "message": message}), status
+
+
+def _validate_url(url: str) -> str | None:
+    """Return an error message if the URL is invalid, else None."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return "Invalid URL provided"
+    if parsed.scheme not in ("http", "https"):
+        return "URL must use http or https scheme (e.g. https://example.com)"
+    if not parsed.netloc:
+        return "URL must include a valid hostname"
+    return None
+
+
+
+
 @app.after_request
 def _security_headers(resp):
     origin = request.headers.get("Origin", "")
@@ -643,13 +664,16 @@ def login_page():
 
 def _parse_scan_body():
     if not request.is_json:
-        return None, None, None, (jsonify({"error": "Content-Type must be application/json"}), 400)
+        return None, None, None, _error("Content-Type must be application/json")
     data = request.get_json(silent=True) or {}
     url = sanitize_text(data.get("url") or "", 2048)
     if not url:
-        return None, None, None, (jsonify({"error": "Missing 'url' in body"}), 400)
+        return None, None, None, _error("Missing 'url' in request body")
     if not url.startswith("http://") and not url.startswith("https://"):
         url = "https://" + url
+    url_err = _validate_url(url)
+    if url_err:
+        return None, None, None, _error(url_err)
     goal = sanitize_text(data.get("goal") or "", 500) or None
     scope = sanitize_text(data.get("scope") or "full", 20).lower()
     if scope not in VALID_SCOPES:
@@ -695,8 +719,9 @@ def api_scan():
             "remediation_plan": result.get("remediation_plan"),
         }
         return jsonify(payload)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        app.logger.exception("Scan failed for %s", url)
+        return _error("Scan failed. Check server logs for details.", 500)
 
 
 @app.route("/api/scan/stream", methods=["OPTIONS"])
@@ -728,7 +753,7 @@ def api_scan_stream():
                     event["id"] = scan_id
                 yield json.dumps(event) + "\n"
         except Exception as e:
-            yield json.dumps({"event": "error", "error": str(e)}) + "\n"
+            yield json.dumps({"event": "error", "message": str(e)}) + "\n"
         finally:
             if accumulated:
                 try:
@@ -760,14 +785,22 @@ def poc_simulate():
     if not SCANNER_AVAILABLE:
         return jsonify({"error": "Scanner engine not available on this instance"}), 503
     if not request.is_json:
-        return jsonify({"error": "Content-Type must be application/json"}), 400
+        return _error("Content-Type must be application/json")
     data = request.get_json(silent=True) or {}
     verbose = bool(data.get("verbose"))
     pv_lim = 20000 if verbose else None
     if data.get("finding"):
         finding = data["finding"]
         if not isinstance(finding, dict):
-            return jsonify({"error": "finding must be an object"}), 400
+            return _error("'finding' must be an object")
+        finding_url = (finding.get("url") or "").strip()
+        if finding_url:
+            if not finding_url.startswith("http://") and not finding_url.startswith("https://"):
+                finding_url = "https://" + finding_url
+            finding_url_err = _validate_url(finding_url)
+            if finding_url_err:
+                return _error(finding_url_err)
+            finding = {**finding, "url": finding_url}
         try:
             result = run_poc_for_finding(
                 finding,
