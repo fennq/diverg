@@ -142,6 +142,7 @@ register_limiter = RateLimiter(max_attempts=5, window_seconds=3600, lockout_seco
 
 DB_PATH = Path(os.environ.get("DIVERG_DB_PATH", str(ROOT / "data" / "dashboard.db")))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+print(f"  DB path: {DB_PATH}  (exists: {DB_PATH.exists()})")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -818,7 +819,20 @@ def stats():
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "service": "diverg-console", "version": "2.2"})
+    user_count = 0
+    try:
+        with _db() as conn:
+            user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    except Exception:
+        pass
+    return jsonify({
+        "status": "ok",
+        "service": "diverg-console",
+        "version": "2.3",
+        "db_path": str(DB_PATH),
+        "db_exists": DB_PATH.exists(),
+        "users": user_count,
+    })
 
 
 # ── Catch-all redirect to login ──────────────────────────────────────────────
