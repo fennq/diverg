@@ -31,6 +31,7 @@ sys.path.insert(0, str(SKILLS_DIR / "auth_test"))
 sys.path.insert(0, str(SKILLS_DIR / "api_test"))
 sys.path.insert(0, str(SKILLS_DIR / "osint"))
 sys.path.insert(0, str(SKILLS_DIR / "telegram_report"))
+sys.path.insert(0, str(SKILLS_DIR / "ssl_check"))
 
 
 # ---------------------------------------------------------------------------
@@ -39,20 +40,20 @@ sys.path.insert(0, str(SKILLS_DIR / "telegram_report"))
 
 SCAN_PROFILES = {
     "full": [
-        "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "company_exposure",
+        "osint", "recon", "headers_ssl", "ssl_check", "crypto_security", "data_leak_risks", "company_exposure",
         "web_vulns", "auth_test", "api_test", "high_value_flaws", "workflow_probe", "race_condition",
         "payment_financial", "client_surface", "dependency_audit", "logic_abuse", "entity_reputation",
     ],
     "crypto": [
-        "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "company_exposure",
+        "osint", "recon", "headers_ssl", "ssl_check", "crypto_security", "data_leak_risks", "company_exposure",
         "web_vulns", "auth_test", "api_test", "high_value_flaws", "workflow_probe", "race_condition",
         "payment_financial", "client_surface", "chain_validation_abuse", "dependency_audit", "logic_abuse", "entity_reputation",
     ],
-    "quick": ["headers_ssl", "recon", "osint", "company_exposure"],
+    "quick": ["headers_ssl", "ssl_check", "recon", "osint", "company_exposure"],
     "recon": ["osint", "recon"],
-    "web": ["web_vulns", "headers_ssl", "auth_test", "company_exposure"],
-    "api": ["api_test", "headers_ssl", "company_exposure"],
-    "passive": ["osint", "headers_ssl", "company_exposure"],
+    "web": ["web_vulns", "headers_ssl", "ssl_check", "auth_test", "company_exposure"],
+    "api": ["api_test", "headers_ssl", "ssl_check", "company_exposure"],
+    "passive": ["osint", "headers_ssl", "ssl_check", "company_exposure"],
 }
 
 SKILL_TIMEOUT_SECONDS = 90  # skills exit in ~58s; buffer to avoid timeouts
@@ -84,15 +85,16 @@ SKILL_TARGET_TYPE = {
     "logic_abuse": "url",
     "entity_reputation": "domain",
     "chain_validation_abuse": "url",
+    "ssl_check": "url",
 }
 ENGAGEMENT_TRACKS = {
-    "surface": ["osint", "recon", "headers_ssl", "company_exposure"],
+    "surface": ["osint", "recon", "headers_ssl", "ssl_check", "company_exposure"],
     "application": ["web_vulns", "auth_test"],
     "api": ["api_test"],
 }
 AGENT_DIRECT_FALLBACKS = {
     "surface_mapper": ["osint", "recon", "headers_ssl", "company_exposure"],
-    "exposure_analyst": ["company_exposure", "recon", "headers_ssl"],
+    "exposure_analyst": ["company_exposure", "recon", "headers_ssl", "ssl_check"],
     "auth_api_analyst": ["auth_test", "api_test", "web_vulns"],
 }
 SKILL_DESCRIPTIONS = {
@@ -114,6 +116,7 @@ SKILL_DESCRIPTIONS = {
     "logic_abuse": "numeric/bounds abuse (amount, limit, offset), overflow, success-like response to tampered params",
     "entity_reputation": "domain owner/entity foul-play research, fraud/lawsuit/breach/reputation searches",
     "chain_validation_abuse": "Diverg batch validation: batch vs single path validation, account/subaccount ID substitution, parameter trust (see content/diverg-batch-validation-routes.md)",
+    "ssl_check": "SSL certificate validity, expiry, issuer trust, hostname match — structured risk signal",
 }
 
 # Canonical finding schema — all skills normalize to this shape for dedup and correlation
@@ -219,6 +222,8 @@ def _default_finding_source(f: dict) -> str:
     category = str(f.get("category") or "").strip().lower()
     if skill == "headers_ssl" or ("transport" in category and "browser" in category):
         return "header_analysis"
+    if skill == "ssl_check":
+        return "ssl_analysis"
     if skill == "client_surface" or "client" in category:
         return "dom_scan"
     if skill == "data_leak_risks" or "sensitive" in category:
@@ -236,7 +241,7 @@ def _default_finding_source(f: dict) -> str:
 
 def _default_finding_confidence(f: dict, source: str) -> str:
     sev = str(f.get("severity") or "").strip().lower()
-    if source == "header_analysis":
+    if source in ("header_analysis", "ssl_analysis"):
         return "high"
     if source == "regex_match":
         return "medium" if sev == "high" else "low"
@@ -257,7 +262,7 @@ def _infer_verified(f: dict, source: str) -> bool:
     ev = str(f.get("evidence") or "")
     if "[confirmed]" in title.lower() or "[confirmed]" in ev.lower():
         return True
-    if source == "header_analysis":
+    if source in ("header_analysis", "ssl_analysis"):
         return True
     return False
 
@@ -449,8 +454,18 @@ def run_phase4_synthesis(target_url: str, results: dict[str, dict], findings: li
         attack_payload["note"] = f"Phase 4 attack-path correlation failed: {exc}"
 
     paths_list = attack_payload.get("paths") if isinstance(attack_payload.get("paths"), list) else []
-    risk = compute_risk_score(findings, paths_list)
-    remediation = build_remediation_plan(findings, paths_list)
+
+    try:
+        risk = compute_risk_score(findings, paths_list)
+    except Exception as exc:
+        attack_payload.setdefault("note", "")
+        attack_payload["note"] += f"; Risk scoring failed: {exc}"
+        risk = {"score": None, "verdict": "Unknown", "summary_text": "Risk score unavailable", "safe_to_run": False}
+
+    try:
+        remediation = build_remediation_plan(findings, paths_list)
+    except Exception:
+        remediation = {"fix_now": [], "fix_soon": [], "harden_when_possible": []}
 
     return {
         "attack_paths": paths_list,
@@ -641,6 +656,9 @@ def run_skill_variant(
                 client_surface_json=ctx.get("client_surface_json"),
                 api_results_json=ctx.get("api_results_json"),
             )
+        elif skill_name == "ssl_check":
+            import ssl_check
+            raw = ssl_check.run(target_url, scan_type=scan_type)
         else:
             return {"error": f"Unknown skill: {skill_name}"}
 
@@ -687,19 +705,23 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
                 all_findings.append(normalize_finding(raw, skill_name, key))
 
         for port in result.get("ports", []):
-            if port.get("state") == "open":
-                all_findings.append(normalize_finding({
-                    "title": f"Open port {port['port']} ({port.get('service', 'unknown')})",
-                    "severity": "Info",
-                    "url": result.get("target", ""),
-                    "category": "Reconnaissance",
-                    "evidence": f"Port {port['port']}: {port.get('service', '')} {port.get('version', '')}",
-                    "impact": "Open ports increase the attack surface.",
-                    "remediation": "Close unnecessary ports and services.",
-                }, skill_name, "findings"))
+            if not isinstance(port, dict) or port.get("state") != "open":
+                continue
+            port_num = port.get("port", "?")
+            all_findings.append(normalize_finding({
+                "title": f"Open port {port_num} ({port.get('service', 'unknown')})",
+                "severity": "Info",
+                "url": result.get("target", ""),
+                "category": "Reconnaissance",
+                "evidence": f"Port {port_num}: {port.get('service', '')} {port.get('version', '')}",
+                "impact": "Open ports increase the attack surface.",
+                "remediation": "Close unnecessary ports and services.",
+            }, skill_name, "findings"))
 
         for ep in result.get("endpoints_found", []):
-            if not ep.get("auth_required") and ep.get("status_code") == 200:
+            if not isinstance(ep, dict):
+                continue
+            if not ep.get("auth_required") and ep.get("status_code") == 200 and ep.get("url"):
                 all_findings.append(normalize_finding({
                     "title": f"Unauthenticated endpoint: {ep['url']}",
                     "severity": "Low",
@@ -720,6 +742,14 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
     except Exception:
         pass
     return finalize_api_findings(enriched)
+
+
+def extract_ssl_risk_signal(results: dict[str, dict]) -> dict | None:
+    """Pull the ssl_risk_signal from the ssl_check skill result, if present."""
+    ssl_result = results.get("ssl_check")
+    if isinstance(ssl_result, dict) and "ssl_risk_signal" in ssl_result:
+        return ssl_result["ssl_risk_signal"]
+    return None
 
 
 def aggregate_company_surfaces(results: dict[str, dict]) -> list[dict]:
@@ -1452,7 +1482,7 @@ async def run_via_openclaw(target: str, scope: str, report_type: str) -> None:
 # Phase 1: all skills that do not need context from other skills.
 # Phase 2: dependency_audit, logic_abuse, entity_reputation (run with context from phase 1).
 WEB_SCAN_PHASE1 = [
-    "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks",
+    "osint", "recon", "headers_ssl", "ssl_check", "crypto_security", "data_leak_risks",
     "company_exposure", "web_vulns", "auth_test", "api_test", "high_value_flaws",
     "workflow_probe", "race_condition", "payment_financial", "client_surface",
 ]
@@ -1516,6 +1546,16 @@ def _get_crypto_detection(target_url: str) -> dict:
         return {"is_crypto": False, "confidence": 0.0, "signals": []}
 
 
+def _extract_domain(url: str) -> str:
+    """Extract hostname from a URL, handling edge cases like auth in URL."""
+    from urllib.parse import urlparse as _urlparse
+    try:
+        parsed = _urlparse(url if "://" in url else f"https://{url}")
+        return parsed.hostname or url.split("/")[0]
+    except Exception:
+        return url.replace("https://", "").replace("http://", "").split("/")[0]
+
+
 def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> dict:
     """
     Run full web-only scan (no blockchain) and return aggregated result for API/extension.
@@ -1523,7 +1563,7 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     Otherwise runs phase 1 then phase 2. When target is detected as crypto/DeFi, chain_validation_abuse is added automatically.
     Returns dict with target_url, findings, summary, scanned_at, skills_run.
     """
-    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
+    domain = _extract_domain(target)
     target_url = target if target.startswith("http") else f"https://{target}"
 
     site_classification = _get_crypto_detection(target_url)
@@ -1560,23 +1600,24 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     results: dict[str, dict] = {}
 
     # Phase 1: run all skills that do not need context
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_phase1))) as pool:
-        future_to_skill = {
-            pool.submit(run_skill, skill_name, domain, target_url): skill_name
-            for skill_name in skills_phase1
-        }
-        for future in concurrent.futures.as_completed(future_to_skill):
-            skill_name = future_to_skill[future]
-            try:
-                results[skill_name] = future.result(timeout=SKILL_TIMEOUT_SECONDS)
-            except concurrent.futures.TimeoutError:
-                future.cancel()
-                results[skill_name] = {
-                    "error": f"Skill timed out after {SKILL_TIMEOUT_SECONDS}s",
-                    "skill": skill_name,
-                }
-            except Exception as exc:
-                results[skill_name] = {"error": str(exc), "skill": skill_name}
+    if skills_phase1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_phase1))) as pool:
+            future_to_skill = {
+                pool.submit(run_skill, skill_name, domain, target_url): skill_name
+                for skill_name in skills_phase1
+            }
+            for future in concurrent.futures.as_completed(future_to_skill):
+                skill_name = future_to_skill[future]
+                try:
+                    results[skill_name] = future.result(timeout=SKILL_TIMEOUT_SECONDS)
+                except concurrent.futures.TimeoutError:
+                    future.cancel()
+                    results[skill_name] = {
+                        "error": f"Skill timed out after {SKILL_TIMEOUT_SECONDS}s",
+                        "skill": skill_name,
+                    }
+                except Exception as exc:
+                    results[skill_name] = {"error": str(exc), "skill": skill_name}
 
     # Phase 2: run context-dependent skills with context from phase 1
     if skills_phase2:
@@ -1638,11 +1679,12 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
 
     findings = aggregate_findings(results)
     company_surfaces = aggregate_company_surfaces(results)
+    ssl_risk_signal = extract_ssl_risk_signal(results)
     timestamp = datetime.now(timezone.utc).isoformat()
     evidence_summary = build_evidence_summary(findings)
     phase4 = run_phase4_synthesis(target_url, results, findings)
 
-    return {
+    report: dict = {
         "target_url": target_url,
         "findings": findings,
         "company_surfaces": company_surfaces,
@@ -1664,6 +1706,9 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
         "evidence_summary": evidence_summary,
         **phase4,
     }
+    if ssl_risk_signal is not None:
+        report["ssl_risk_signal"] = ssl_risk_signal
+    return report
 
 
 def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = None):
@@ -1671,7 +1716,7 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
     Generator that runs the same scan as run_web_scan but yields progress events (NDJSON).
     Yields: skill_start, skill_done per skill, then done with full report (including site_classification).
     """
-    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
+    domain = _extract_domain(target)
     target_url = target if target.startswith("http") else f"https://{target}"
 
     site_classification = _get_crypto_detection(target_url)
@@ -1764,10 +1809,11 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
 
     findings = aggregate_findings(results)
     company_surfaces = aggregate_company_surfaces(results)
+    ssl_risk_signal = extract_ssl_risk_signal(results)
     timestamp = datetime.now(timezone.utc).isoformat()
     evidence_summary = build_evidence_summary(findings)
     phase4 = run_phase4_synthesis(target_url, results, findings)
-    report = {
+    report: dict = {
         "target_url": target_url,
         "findings": findings,
         "company_surfaces": company_surfaces,
@@ -1789,13 +1835,15 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
         "evidence_summary": evidence_summary,
         **phase4,
     }
+    if ssl_risk_signal is not None:
+        report["ssl_risk_signal"] = ssl_risk_signal
     yield {"event": "done", "report": report}
 
 
 def run_direct(target: str, scope: str, report_type: str) -> None:
     skills_to_run = SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])
 
-    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
+    domain = _extract_domain(target)
     target_url = target if target.startswith("http") else f"https://{target}"
 
     print(f"  Engagement mode: {infer_engagement_mode(target, scope)}")
