@@ -322,17 +322,16 @@ def _security_headers(resp):
     resp.headers["Cross-Origin-Resource-Policy"] = "same-site"
     resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
 
-    connect_src = "'self' https://mainnet.helius-rpc.com https://accounts.google.com https://www.googleapis.com"
+    connect_src = "'self' https://mainnet.helius-rpc.com"
     if not IS_PRODUCTION:
         connect_src += " http://127.0.0.1:*"
     csp = (
         "default-src 'self'; "
-        "script-src 'self' https://accounts.google.com; "
-        "style-src 'self' https://fonts.googleapis.com; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src https://fonts.gstatic.com; "
         "img-src 'self' data: https:; "
         f"connect-src {connect_src}; "
-        "frame-src https://accounts.google.com; "
         "frame-ancestors 'none'"
     )
     if request.path.startswith("/dashboard") or request.path.startswith("/login"):
