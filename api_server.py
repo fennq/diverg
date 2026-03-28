@@ -27,6 +27,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Run from project root so orchestrator and skills resolve
 ROOT = Path(__file__).resolve().parent
@@ -44,6 +45,48 @@ from poc_runner import run_poc_for_finding, run_idor_poc, run_unauth_poc, PoCRes
 
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _error(message: str, status: int = 400):
+    """Return a consistent JSON error response."""
+    return jsonify({"error": True, "message": message}), status
+
+
+def _validate_url(raw: str) -> tuple[str | None, str | None]:
+    """Validate and normalise a user-supplied URL.
+
+    Returns (clean_url, None) on success or (None, error_message) on failure.
+    """
+    url = (raw or "").strip()
+    if not url:
+        return None, "Missing 'url' in request body"
+
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return None, "Malformed URL"
+
+    host = (parsed.hostname or "").strip().rstrip(".")
+    if not host:
+        return None, "URL has no hostname"
+
+    if parsed.scheme not in ("http", "https"):
+        return None, f"Unsupported scheme '{parsed.scheme}' — use http or https"
+
+    if "." not in host and host != "localhost":
+        return None, f"Invalid hostname '{host}'"
+
+    if len(host) > 253 or any(len(part) > 63 for part in host.split(".")):
+        return None, f"Hostname exceeds DNS length limits"
+
+    return url, None
 
 
 @app.after_request
@@ -64,13 +107,15 @@ def api_scan_options():
 def api_scan():
     """Run full web scan (no blockchain). Body: {"url": "https://...", "goal": "optional natural-language goal"}."""
     if not request.is_json:
-        return jsonify({"error": "Content-Type must be application/json"}), 400
-    data = request.get_json() or {}
-    url = (data.get("url") or "").strip()
-    if not url:
-        return jsonify({"error": "Missing 'url' in body"}), 400
-    if not url.startswith("http://") and not url.startswith("https://"):
-        url = "https://" + url
+        return _error("Content-Type must be application/json")
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _error("Request body must be a JSON object")
+
+    url, err = _validate_url(data.get("url"))
+    if err:
+        return _error(err)
+
     goal = (data.get("goal") or "").strip() or None
     scope = (data.get("scope") or "full").strip().lower()
     if scope not in ("full", "quick", "crypto", "recon", "web", "api", "passive", "attack"):
@@ -88,7 +133,7 @@ def api_scan():
             "evidence_summary": result.get("evidence_summary"),
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _error(f"Scan failed: {e}", status=500)
 
 
 @app.route("/api/scan/stream", methods=["OPTIONS"])
@@ -100,13 +145,15 @@ def api_scan_stream_options():
 def api_scan_stream():
     """Stream scan progress as NDJSON. Body: {"url": "https://...", "goal": "optional"}."""
     if not request.is_json:
-        return jsonify({"error": "Content-Type must be application/json"}), 400
-    data = request.get_json() or {}
-    url = (data.get("url") or "").strip()
-    if not url:
-        return jsonify({"error": "Missing 'url' in body"}), 400
-    if not url.startswith("http://") and not url.startswith("https://"):
-        url = "https://" + url
+        return _error("Content-Type must be application/json")
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _error("Request body must be a JSON object")
+
+    url, err = _validate_url(data.get("url"))
+    if err:
+        return _error(err)
+
     goal = (data.get("goal") or "").strip() or None
     scope = (data.get("scope") or "full").strip().lower()
     if scope not in ("full", "quick", "crypto", "recon", "web", "api", "passive", "attack"):
@@ -118,7 +165,7 @@ def api_scan_stream():
             for event in run_web_scan_streaming(url, scope=scope, goal=goal):
                 yield _json.dumps(event) + "\n"
         except Exception as e:
-            yield _json.dumps({"event": "error", "error": str(e)}) + "\n"
+            yield _json.dumps({"event": "error", "error": True, "message": str(e)}) + "\n"
 
     return Response(
         stream_with_context(generate()),
@@ -143,13 +190,25 @@ def poc_simulate():
     Returns: {success, status_code?, body_preview?, conclusion, error?, poc_type?}
     """
     if not request.is_json:
-        return jsonify({"error": "Content-Type must be application/json"}), 400
-    data = request.get_json() or {}
+        return _error("Content-Type must be application/json")
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return _error("Request body must be a JSON object")
+
+    def _poc_response(result: PoCResult):
+        return jsonify({
+            "success": result.success,
+            "status_code": result.status_code,
+            "body_preview": result.body_preview,
+            "conclusion": result.conclusion,
+            "error": result.error or None,
+            "poc_type": result.poc_type or None,
+        })
 
     if data.get("finding"):
         finding = data["finding"]
         if not isinstance(finding, dict):
-            return jsonify({"error": "finding must be an object"}), 400
+            return _error("'finding' must be a JSON object")
         param_to_change = data.get("param_to_change")
         new_value = str(data.get("new_value") or "1").strip()
         cookies = data.get("cookies")
@@ -162,49 +221,38 @@ def poc_simulate():
             )
         except Exception as e:
             return jsonify({"success": False, "error": str(e), "conclusion": ""}), 200
-        return jsonify({
-            "success": result.success,
-            "status_code": result.status_code,
-            "body_preview": result.body_preview,
-            "conclusion": result.conclusion,
-            "error": result.error or None,
-            "poc_type": result.poc_type or None,
-        })
-    # Explicit type + url
+        return _poc_response(result)
+
     poc_type = (data.get("type") or "").strip().lower()
     url = (data.get("url") or "").strip()
     if not url:
-        return jsonify({"error": "Missing url (or provide finding)"}), 400
+        return _error("Missing 'url' (or provide 'finding')")
     if poc_type not in ("idor", "unauthenticated"):
-        return jsonify({"error": "type must be 'idor' or 'unauthenticated'"}), 400
+        return _error("'type' must be 'idor' or 'unauthenticated'")
 
-    if poc_type == "idor":
-        result = run_idor_poc(
-            url=url,
-            method=data.get("method") or "GET",
-            params=data.get("params"),
-            data=data.get("data"),
-            headers=data.get("headers"),
-            param_to_change=data.get("param_to_change"),
-            new_value=str(data.get("new_value") or "1"),
-            cookies=data.get("cookies"),
-        )
-    else:
-        result = run_unauth_poc(
-            url=url,
-            method=data.get("method") or "GET",
-            headers=data.get("headers"),
-            cookies=data.get("cookies"),
-        )
+    try:
+        if poc_type == "idor":
+            result = run_idor_poc(
+                url=url,
+                method=data.get("method") or "GET",
+                params=data.get("params"),
+                data=data.get("data"),
+                headers=data.get("headers"),
+                param_to_change=data.get("param_to_change"),
+                new_value=str(data.get("new_value") or "1"),
+                cookies=data.get("cookies"),
+            )
+        else:
+            result = run_unauth_poc(
+                url=url,
+                method=data.get("method") or "GET",
+                headers=data.get("headers"),
+                cookies=data.get("cookies"),
+            )
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e), "conclusion": ""}), 200
 
-    return jsonify({
-        "success": result.success,
-        "status_code": result.status_code,
-        "body_preview": result.body_preview,
-        "conclusion": result.conclusion,
-        "error": result.error or None,
-        "poc_type": result.poc_type or None,
-    })
+    return _poc_response(result)
 
 
 @app.route("/api/health", methods=["GET"])

@@ -529,6 +529,15 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
     all_findings: list[dict] = []
 
     for skill_name, result in results.items():
+        if not isinstance(result, dict):
+            all_findings.append(normalize_finding({
+                "title": f"Skill '{skill_name}' returned unexpected data",
+                "severity": "Info",
+                "evidence": f"Expected dict, got {type(result).__name__}",
+                "impact": "Some tests could not be completed.",
+                "remediation": "Check skill configuration and try again.",
+            }, skill_name, "findings"))
+            continue
         if "error" in result and isinstance(result["error"], str):
             all_findings.append(normalize_finding({
                 "title": f"Skill '{skill_name}' encountered an error",
@@ -584,10 +593,13 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
 def aggregate_company_surfaces(results: dict[str, dict]) -> list[dict]:
     surfaces: list[dict] = []
     for skill_name, result in results.items():
+        if not isinstance(result, dict):
+            continue
         for surface in result.get("surfaces", []):
-            enriched = dict(surface)
-            enriched["_source_skill"] = skill_name
-            surfaces.append(enriched)
+            if isinstance(surface, dict):
+                enriched = dict(surface)
+                enriched["_source_skill"] = skill_name
+                surfaces.append(enriched)
     return surfaces
 
 
@@ -1375,6 +1387,18 @@ def _get_crypto_detection(target_url: str) -> dict:
         return {"is_crypto": False, "confidence": 0.0, "signals": []}
 
 
+def _extract_scan_target(target: str) -> tuple[str, str]:
+    """Derive (domain, target_url) from a user-supplied target string.
+
+    Raises ValueError when the target cannot produce a usable hostname.
+    """
+    target_url = target if target.startswith("http") else f"https://{target}"
+    domain = target_url.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0].strip().lower()
+    if not domain or domain in (".", ".."):
+        raise ValueError(f"Cannot extract a valid domain from '{target}'")
+    return domain, target_url
+
+
 def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> dict:
     """
     Run full web-only scan (no blockchain) and return aggregated result for API/extension.
@@ -1382,8 +1406,7 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     Otherwise runs phase 1 then phase 2. When target is detected as crypto/DeFi, chain_validation_abuse is added automatically.
     Returns dict with target_url, findings, summary, scanned_at, skills_run.
     """
-    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
-    target_url = target if target.startswith("http") else f"https://{target}"
+    domain, target_url = _extract_scan_target(target)
 
     site_classification = _get_crypto_detection(target_url)
     chain_validation_abuse_reason: str | None = None
@@ -1534,8 +1557,7 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
     Generator that runs the same scan as run_web_scan but yields progress events (NDJSON).
     Yields: skill_start, skill_done per skill, then done with full report (including site_classification).
     """
-    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
-    target_url = target if target.startswith("http") else f"https://{target}"
+    domain, target_url = _extract_scan_target(target)
 
     site_classification = _get_crypto_detection(target_url)
     chain_validation_abuse_reason: str | None = None
@@ -1663,8 +1685,7 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
 def run_direct(target: str, scope: str, report_type: str) -> None:
     skills_to_run = SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])
 
-    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
-    target_url = target if target.startswith("http") else f"https://{target}"
+    domain, target_url = _extract_scan_target(target)
 
     print(f"  Engagement mode: {infer_engagement_mode(target, scope)}")
     print(f"  Priority tracks: {', '.join(infer_priority_tracks(target, scope))}")
