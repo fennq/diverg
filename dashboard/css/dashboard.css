@@ -181,7 +181,7 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
 .command-input::placeholder { color: var(--dim); }
 .command-btn {
   position: absolute;
-  right: 0.5rem;
+  right: 1.5rem;
   top: 50%;
   transform: translateY(-50%);
   width: 36px; height: 36px;
@@ -612,6 +612,22 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
 }
 .toggle input:checked + .toggle-s { background: var(--accent); border-color: var(--accent); }
 .toggle input:checked + .toggle-s::before { transform: translateX(16px); background: #fff; }
+
+/* Tool result pre blocks */
+.tool-result {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-family: var(--mono);
+  color: var(--dim);
+  min-height: 60px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.6;
+}
 
 /* Responsive */
 @media (max-width: 900px) {

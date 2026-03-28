@@ -13,7 +13,7 @@
 <body>
 <div class="app">
 
-  <!-- Sidebar — minimal -->
+  <!-- Sidebar -->
   <aside class="sidebar">
     <div class="brand">
       <img src="/dashboard/logo.png" alt="Diverg" class="brand-logo">
@@ -24,6 +24,10 @@
       <div class="nav-item active" data-page="home">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
         Home
+      </div>
+      <div class="nav-item" data-page="scanner">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Scanner
       </div>
       <div class="nav-item" data-page="analytics">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
@@ -46,7 +50,7 @@
         Investigation
       </div>
       <div class="nav-item" data-page="settings">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 4 2 2 0 0 1-2-4v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         Settings
       </div>
     </div>
@@ -70,7 +74,7 @@
 
     <div class="content">
 
-      <!-- ═══ HOME ═══════════════════════════════════════════════════════ -->
+      <!-- HOME ═══════════════════════════════════════════════════════════ -->
       <div class="page active" id="page-home">
         <div class="hero">
           <div class="hero-title">What should we scan today?</div>
@@ -124,18 +128,77 @@
         </div>
       </div>
 
-      <!-- ═══ ANALYTICS ═══════════════════════════════════════════════════ -->
+      <!-- SCANNER ═══════════════════════════════════════════════════════ -->
+      <div class="page" id="page-scanner">
+        <div class="section-h" style="margin-top:2rem">
+          <span class="section-title">Advanced Scanner</span>
+        </div>
+
+        <div class="card" style="margin-bottom:1.5rem">
+          <div class="card-b">
+            <div class="settings-f">
+              <label>Target URL</label>
+              <input type="text" id="scanUrl" placeholder="https://example.com" class="input" style="font-family:var(--mono)">
+            </div>
+
+            <div class="scope-grid">
+              <div class="scope-opt active" data-scope="full" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+                <div class="scope-opt-title">Full</div>
+                <div class="scope-opt-desc">Complete assessment</div>
+              </div>
+              <div class="scope-opt" data-scope="quick" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+                <div class="scope-opt-title">Quick</div>
+                <div class="scope-opt-desc">Headers & basics</div>
+              </div>
+              <div class="scope-opt" data-scope="web" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+                <div class="scope-opt-title">Web</div>
+                <div class="scope-opt-desc">XSS, SQLi, CSRF</div>
+              </div>
+              <div class="scope-opt" data-scope="api" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+                <div class="scope-opt-title">API</div>
+                <div class="scope-opt-desc">REST & endpoints</div>
+              </div>
+              <div class="scope-opt" data-scope="crypto" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+                <div class="scope-opt-title">Crypto</div>
+                <div class="scope-opt-desc">Web3 & wallets</div>
+              </div>
+              <div class="scope-opt" data-scope="recon" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+                <div class="scope-opt-title">Recon</div>
+                <div class="scope-opt-desc">OSINT & mapping</div>
+              </div>
+              <div class="scope-opt" data-scope="passive" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+                <div class="scope-opt-title">Passive</div>
+                <div class="scope-opt-desc">Non-intrusive</div>
+              </div>
+              <div class="scope-opt" data-scope="attack" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+                <div class="scope-opt-title">Attack</div>
+                <div class="scope-opt-desc">Aggressive testing</div>
+              </div>
+            </div>
+
+            <button class="btn btn-primary" onclick="launchScan()">Launch Scan</button>
+          </div>
+        </div>
+
+        <div class="progress-box" id="progressBox">
+          <div class="progress-h">
+            <div class="progress-dot"></div>
+            <span id="progressText" style="font-size:0.8125rem; font-weight:500">Scanning…</span>
+          </div>
+          <div id="skillsList" style="margin-bottom:1rem"></div>
+          <div id="liveFindings"></div>
+        </div>
+      </div>
+
+      <!-- ANALYTICS ═══════════════════════════════════════════════════════ -->
       <div class="page" id="page-analytics">
         <div class="section-h" style="margin-top:2rem">
           <span class="section-title">Security Overview</span>
         </div>
 
-        <!-- Chart Cards -->
-        <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:1rem; margin-bottom:2rem">
-          <div class="card">
-            <div class="card-h">
-              <h3>Findings by Severity</h3>
-            </div>
+        <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:1rem; margin-bottom:2rem; max-width:800px; margin-left:auto; margin-right:auto">
+          <div class="card" style="max-width:none">
+            <div class="card-h"><h3>Findings by Severity</h3></div>
             <div class="card-b">
               <div class="chart-bars" id="severityChart">
                 <div class="chart-bar-row">
@@ -162,10 +225,8 @@
             </div>
           </div>
 
-          <div class="card">
-            <div class="card-h">
-              <h3>Risk Distribution</h3>
-            </div>
+          <div class="card" style="max-width:none">
+            <div class="card-h"><h3>Risk Distribution</h3></div>
             <div class="card-b" style="display:flex; align-items:center; justify-content:center; min-height:200px">
               <div class="donut-chart" id="riskDonut">
                 <div class="donut-center">
@@ -177,11 +238,8 @@
           </div>
         </div>
 
-        <!-- Trend Chart -->
-        <div class="card" style="margin-bottom:2rem">
-          <div class="card-h">
-            <h3>Scan Activity (Last 30 Days)</h3>
-          </div>
+        <div class="card" style="margin-bottom:2rem; max-width:800px; margin-left:auto; margin-right:auto">
+          <div class="card-h"><h3>Scan Activity (Last 30 Days)</h3></div>
           <div class="card-b">
             <div class="trend-chart" id="trendChart">
               <div class="trend-bars" id="trendBars"></div>
@@ -190,11 +248,8 @@
           </div>
         </div>
 
-        <!-- Top Categories -->
-        <div class="card">
-          <div class="card-h">
-            <h3>Top Vulnerability Categories</h3>
-          </div>
+        <div class="card" style="max-width:800px; margin-left:auto; margin-right:auto">
+          <div class="card-h"><h3>Top Vulnerability Categories</h3></div>
           <div class="card-b" id="topCategories">
             <div class="empty" style="padding:2rem">
               <div class="empty-t">No data yet</div>
@@ -204,7 +259,7 @@
         </div>
       </div>
 
-      <!-- ═══ HISTORY ══════════════════════════════════════════════════════ -->
+      <!-- HISTORY ═══════════════════════════════════════════════════════ -->
       <div class="page" id="page-history">
         <div class="section-h">
           <span class="section-title">Scan history</span>
@@ -220,7 +275,7 @@
         </div>
       </div>
 
-      <!-- ═══ FINDINGS ═══════════════════════════════════════════════════ -->
+      <!-- FINDINGS ═══════════════════════════════════════════════════════ -->
       <div class="page" id="page-findings">
         <div class="section-h">
           <span class="section-title">All findings</span>
@@ -235,27 +290,21 @@
         </div>
       </div>
 
-      <!-- ═══ RESULTS ════════════════════════════════════════════════════ -->
+      <!-- RESULTS ═══════════════════════════════════════════════════════ -->
       <div class="page" id="page-results">
         <div class="section-h">
           <span class="section-title" id="resultsTarget">Results</span>
-          <span class="section-action" onclick="exportReport()">Export</span>
+          <span class="section-action" onclick="exportReport()">Export JSON</span>
         </div>
 
-        <div style="display:flex; gap:1rem; margin-bottom:1.5rem; flex-wrap:wrap">
-          <span id="resultsBadge"></span>
-          <span class="badge" id="rcBadge"></span>
-          <span class="badge" id="rhBadge"></span>
-          <span class="badge" id="rmBadge"></span>
-          <span class="badge" id="rlBadge"></span>
-        </div>
+        <div id="resultsBadges" style="display:flex; gap:0.5rem; margin-bottom:1.5rem; flex-wrap:wrap"></div>
 
         <div class="card">
           <div id="resultsFindings"></div>
         </div>
       </div>
 
-      <!-- ═══ ATTACK PATHS ═══════════════════════════════════════════════ -->
+      <!-- ATTACK PATHS ═══════════════════════════════════════════════════ -->
       <div class="page" id="page-attack-paths">
         <div class="section-h">
           <span class="section-title">Attack paths</span>
@@ -271,7 +320,7 @@
         </div>
       </div>
 
-      <!-- ═══ INVESTIGATION ════════════════════════════════════════════════ -->
+      <!-- INVESTIGATION ═══════════════════════════════════════════════════ -->
       <div class="page" id="page-investigation">
         <div class="section-h">
           <span class="section-title">Investigation tools</span>
@@ -281,41 +330,45 @@
           <div class="settings-card">
             <div class="settings-h">
               <h4>Blockchain Lookup</h4>
-              <p>Trace wallets & transactions</p>
+              <p>Trace wallets &amp; transactions</p>
             </div>
             <div class="settings-f">
               <input type="text" id="chainAddr" placeholder="0x… or Solana address" class="input" style="font-family:var(--mono)">
             </div>
             <button class="btn btn-primary" onclick="runChainLookup()">Look up</button>
-            <pre id="chainResult" style="margin-top:1rem; padding:1rem; background:var(--elevated); border-radius:6px; font-size:0.75rem; color:var(--dim); min-height:60px; white-space:pre-wrap">Enter an address to look up</pre>
+            <pre id="chainResult" class="tool-result">Enter an address to look up</pre>
           </div>
 
           <div class="settings-card">
             <div class="settings-h">
               <h4>Domain OSINT</h4>
-              <p>WHOIS, DNS & certificates</p>
+              <p>WHOIS, DNS &amp; certificates</p>
             </div>
             <div class="settings-f">
               <input type="text" id="osintDomain" placeholder="example.com" class="input">
             </div>
             <button class="btn btn-primary" onclick="runOsint()">Investigate</button>
-            <pre id="osintResult" style="margin-top:1rem; padding:1rem; background:var(--elevated); border-radius:6px; font-size:0.75rem; color:var(--dim); min-height:60px; white-space:pre-wrap">Enter a domain to investigate</pre>
+            <pre id="osintResult" class="tool-result">Enter a domain to investigate</pre>
           </div>
 
           <div class="settings-card">
             <div class="settings-h">
               <h4>PoC Simulator</h4>
-              <p>Test IDOR & unauth access</p>
+              <p>Test IDOR &amp; unauth access</p>
             </div>
             <div class="settings-f">
               <select id="pocType" class="input" style="margin-bottom:0.5rem">
                 <option value="idor">IDOR</option>
                 <option value="unauthenticated">Unauthenticated</option>
               </select>
-              <input type="text" id="pocUrl" placeholder="https://api.example.com/user/123" class="input" style="font-family:var(--mono)">
+              <input type="text" id="pocUrl" placeholder="https://api.example.com/user/123" class="input" style="font-family:var(--mono); margin-bottom:0.5rem">
+              <div style="display:flex; gap:0.5rem">
+                <input type="text" id="pocParam" placeholder="param (id)" class="input" style="flex:1">
+                <input type="text" id="pocValue" placeholder="value (2)" class="input" style="flex:1">
+              </div>
             </div>
             <button class="btn btn-primary" onclick="runPoc()">Simulate</button>
-            <pre id="pocResult" style="margin-top:1rem; padding:1rem; background:var(--elevated); border-radius:6px; font-size:0.75rem; color:var(--dim); min-height:60px; white-space:pre-wrap">Configure and run</pre>
+            <pre id="pocResult" class="tool-result">Configure and run</pre>
           </div>
 
           <div class="settings-card">
@@ -327,12 +380,12 @@
               <input type="text" id="reputationTarget" placeholder="IP, domain, or wallet" class="input">
             </div>
             <button class="btn btn-primary" onclick="runReputation()">Check</button>
-            <pre id="reputationResult" style="margin-top:1rem; padding:1rem; background:var(--elevated); border-radius:6px; font-size:0.75rem; color:var(--dim); min-height:60px; white-space:pre-wrap">Enter a target to check</pre>
+            <pre id="reputationResult" class="tool-result">Enter a target to check</pre>
           </div>
         </div>
       </div>
 
-      <!-- ═══ SETTINGS ═══════════════════════════════════════════════════ -->
+      <!-- SETTINGS ═══════════════════════════════════════════════════════ -->
       <div class="page" id="page-settings">
         <div class="section-h">
           <span class="section-title">Settings</span>
@@ -402,7 +455,7 @@
 
           <div class="settings-card wide">
             <div class="settings-h">
-              <h4>Data</h4>
+              <h4>Data Management</h4>
             </div>
             <div style="display:flex; gap:0.5rem">
               <button class="btn btn-secondary" onclick="exportHistory()">Export history</button>

@@ -1,4 +1,4 @@
-/* Diverg Console — Minimal, intentional */
+/* Diverg Console */
 
 const CFG = { apiUrl: localStorage.getItem('diverg_api') || 'http://127.0.0.1:5000' };
 const api = p => CFG.apiUrl + p;
@@ -12,7 +12,13 @@ function navigate(page, data) {
 
   document.getElementById('page-' + page)?.classList.add('active');
   document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
-  document.getElementById('pageTitle').textContent = page.charAt(0).toUpperCase() + page.slice(1);
+
+  const titles = {
+    home: 'Home', scanner: 'Scanner', analytics: 'Analytics', history: 'History',
+    findings: 'Findings', results: 'Results', 'attack-paths': 'Attack Paths',
+    investigation: 'Investigation', settings: 'Settings',
+  };
+  document.getElementById('pageTitle').textContent = titles[page] || page;
 
   if (page === 'home') loadHome();
   if (page === 'analytics') loadAnalytics();
@@ -109,6 +115,18 @@ function shortUrl(u) {
   } catch { return u; }
 }
 
+function scanRow(s) {
+  const cls = riskClass(s.risk_verdict);
+  return `
+    <div class="scan-row" onclick="openScan('${s.id}')">
+      <div class="scan-info">
+        <div class="scan-url">${esc(shortUrl(s.target_url))}</div>
+        <div class="scan-meta">${ago(s.scanned_at)}</div>
+      </div>
+      <span class="badge ${cls}">${esc(s.risk_verdict || 'Unknown')}</span>
+    </div>`;
+}
+
 // ── HOME ───────────────────────────────────────────────────────────────────
 async function loadHome() {
   try {
@@ -122,113 +140,12 @@ async function loadHome() {
     if (!s.recent_scans?.length) {
       recent.innerHTML = `<div class="empty"><div class="empty-t">No scans yet</div><div class="empty-d">Enter a URL above to start</div></div>`;
     } else {
-      recent.innerHTML = s.recent_scans.map(scanRow).join('');
+      recent.innerHTML = `<div class="scan-list">${s.recent_scans.map(scanRow).join('')}</div>`;
     }
   } catch { document.getElementById('statScans').textContent = '—'; }
 }
 
-// ── ANALYTICS ──────────────────────────────────────────────────────────────
-async function loadAnalytics() {
-  try {
-    const s = await get('/api/stats');
-    const history = await get('/api/history?limit=100');
-    const scans = history.scans || [];
-
-    // Severity breakdown
-    let critical = 0, high = 0, medium = 0, low = 0;
-    scans.forEach(scan => {
-      (scan.findings || []).forEach(f => {
-        if (f.severity === 'Critical') critical++;
-        else if (f.severity === 'High') high++;
-        else if (f.severity === 'Medium') medium++;
-        else low++;
-      });
-    });
-    const max = Math.max(critical, high, medium, low, 1);
-    document.getElementById('valCritical').textContent = critical;
-    document.getElementById('barCritical').style.width = (critical / max * 100) + '%';
-    document.getElementById('valHigh').textContent = high;
-    document.getElementById('barHigh').style.width = (high / max * 100) + '%';
-    document.getElementById('valMedium').textContent = medium;
-    document.getElementById('barMedium').style.width = (medium / max * 100) + '%';
-    document.getElementById('valLow').textContent = low;
-    document.getElementById('barLow').style.width = (low / max * 100) + '%';
-
-    // Donut chart - avg risk
-    const avgRisk = s.avg_risk_score || 0;
-    document.getElementById('donutValue').textContent = avgRisk > 0 ? avgRisk : '—';
-    const donut = document.getElementById('riskDonut');
-    if (avgRisk > 0) {
-      const redPct = Math.min(avgRisk / 10 * 100, 100);
-      donut.style.background = `conic-gradient(var(--red) 0% ${redPct}%, var(--elevated) ${redPct}% 100%)`;
-    }
-
-    // Trend chart (last 30 days)
-    const days = 30;
-    const counts = new Array(days).fill(0);
-    const labels = [];
-    const today = new Date();
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      labels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-    }
-    scans.forEach(scan => {
-      const d = new Date(scan.created_at);
-      const daysAgo = Math.floor((today - d) / (1000 * 60 * 60 * 24));
-      if (daysAgo >= 0 && daysAgo < days) counts[days - 1 - daysAgo]++;
-    });
-    const maxCount = Math.max(...counts, 1);
-    const trendBars = document.getElementById('trendBars');
-    trendBars.innerHTML = counts.map(c =>
-      `<div class="trend-bar" style="height:${Math.max(c / maxCount * 100, 4)}%"></div>`
-    ).join('');
-    const trendLabels = document.getElementById('trendLabels');
-    trendLabels.innerHTML = `
-      <span>${labels[0]}</span>
-      <span>${labels[Math.floor(days/2)]}</span>
-      <span>${labels[days-1]}</span>
-    `;
-
-    // Top categories
-    const cats = {};
-    scans.forEach(scan => {
-      (scan.findings || []).forEach(f => {
-        const cat = f.category || 'Other';
-        cats[cat] = (cats[cat] || 0) + 1;
-      });
-    });
-    const sortedCats = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 5);
-    const topTotal = sortedCats[0]?.[1] || 1;
-    const catsEl = document.getElementById('topCategories');
-    if (sortedCats.length === 0) {
-      catsEl.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">No data yet</div><div class="empty-d">Run scans to see analytics</div></div>`;
-    } else {
-      catsEl.innerHTML = sortedCats.map(([name, count]) => `
-        <div class="category-row">
-          <span class="category-name">${esc(name)}</span>
-          <div class="category-bar-wrap"><div class="category-bar" style="width:${count / topTotal * 100}%"></div></div>
-          <span class="category-count">${count}</span>
-        </div>
-      `).join('');
-    }
-  } catch (e) {
-    console.error('Analytics load failed:', e);
-  }
-}
-
-function scanRow(s) {
-  const cls = riskClass(s.risk_verdict);
-  return `
-    <div class="scan-row" onclick="openScan('${s.id}')">
-      <div class="scan-info">
-        <div class="scan-url">${esc(shortUrl(s.target_url))}</div>
-        <div class="scan-meta">${ago(s.scanned_at)}</div>
-      </div>
-      <span class="badge ${cls}">${s.risk_verdict || 'Unknown'}</span>
-    </div>`;
-}
-
+// ── QUICK LAUNCH (Home) ────────────────────────────────────────────────────
 async function quickLaunch() {
   let url = document.getElementById('quickUrl').value.trim();
   if (!url) { toast('Enter a URL', 'err'); return; }
@@ -236,60 +153,58 @@ async function quickLaunch() {
 
   const btn = document.getElementById('quickBtn');
   btn.disabled = true;
-  btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="30"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/></circle></svg>`;
 
   try {
     toast('Starting scan…', 'ok');
     const resp = await fetch(api('/api/scan/stream'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target_url: url, scope: state.scope })
+      body: JSON.stringify({ url, scope: State.scope }),
     });
+    if (!resp.ok) throw new Error('API error ' + resp.status);
 
-    let result = null;
+    let lastReport = null;
     const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+    const dec = new TextDecoder();
+    let buf = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n'); buf = lines.pop();
       for (const line of lines) {
         if (!line.trim()) continue;
         try {
-          const msg = JSON.parse(line);
-          if (msg.event === 'scan:complete') result = msg;
+          const e = JSON.parse(line);
+          if (e.event === 'done') lastReport = e.report;
         } catch {}
       }
     }
 
-    if (result?.scan_id) {
+    if (lastReport) {
+      State.report = lastReport;
+      State.scanId = lastReport.id;
       toast('Scan complete', 'ok');
-      openScan(result.scan_id);
+      navigate('results', lastReport);
     } else {
       toast('Scan finished', 'ok');
       loadHome();
     }
   } catch (e) {
-    toast('Scan failed: ' + (e.message || 'Error'), 'err');
+    toast('Scan failed: ' + e.message, 'err');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
   }
 }
 
-// ── SCANNER ────────────────────────────────────────────────────────────────
+// ── SCANNER (dedicated page) ────────────────────────────────────────────────
 async function launchScan() {
   let url = document.getElementById('scanUrl').value.trim();
   if (!url) { toast('Enter a URL', 'err'); return; }
   if (!url.startsWith('http')) url = 'https://' + url;
 
   const box = document.getElementById('progressBox');
-  const btn = document.querySelector('.command-btn');
   box.classList.add('show');
-  btn.disabled = true;
 
   document.getElementById('skillsList').innerHTML = '';
   document.getElementById('liveFindings').innerHTML = '';
@@ -318,9 +233,17 @@ async function launchScan() {
         try {
           const e = JSON.parse(line);
           if (e.event === 'skill_start') { skills[e.skill] = 'running'; renderSkills(skills); }
-          if (e.event === 'skill_done') { skills[e.skill] = 'done'; renderSkills(skills); }
-          if (e.event === 'finding') addLiveFinding(e.finding);
-          if (e.event === 'done') lastReport = e.report;
+          if (e.event === 'skill_done') {
+            skills[e.skill] = e.error ? 'error' : 'done';
+            renderSkills(skills);
+            if (e.findings_count > 0) {
+              document.getElementById('progressText').textContent = `Found ${e.findings_count} issue${e.findings_count > 1 ? 's' : ''} in ${e.skill}`;
+            }
+          }
+          if (e.event === 'done') {
+            lastReport = e.report;
+            (lastReport.findings || []).forEach(f => addLiveFinding(f));
+          }
         } catch {}
       }
     }
@@ -337,21 +260,21 @@ async function launchScan() {
   } catch (e) {
     toast('Scan failed: ' + e.message, 'err');
   }
-
-  btn.disabled = false;
 }
 
 function renderSkills(skills) {
   const el = document.getElementById('skillsList');
+  const colors = { running: 'var(--accent)', done: 'var(--green)', error: 'var(--red)' };
   el.innerHTML = Object.entries(skills).map(([name, status]) => `
     <div style="display:flex; align-items:center; gap:0.5rem; padding:0.25rem 0; font-size:0.75rem; color:var(--dim)">
-      <span style="width:6px; height:6px; border-radius:50%; background:${status === 'running' ? 'var(--accent)' : 'var(--green)'}"></span>
+      <span style="width:6px; height:6px; border-radius:50%; background:${colors[status] || 'var(--dim)'}"></span>
       ${esc(name)}
     </div>
   `).join('');
 }
 
 function addLiveFinding(f) {
+  if (!f) return;
   const s = sevClass(f.severity);
   const el = document.getElementById('liveFindings');
   const row = document.createElement('div');
@@ -363,16 +286,117 @@ function addLiveFinding(f) {
   }
 }
 
+// ── ANALYTICS ──────────────────────────────────────────────────────────────
+async function loadAnalytics() {
+  try {
+    const s = await get('/api/stats');
+    const history = await get('/api/history?limit=100');
+    const scans = history.scans || [];
+
+    // Use counts from the list data (not findings array)
+    let critical = 0, high = 0, medium = 0, low = 0;
+    scans.forEach(scan => {
+      critical += scan.critical || 0;
+      high += scan.high || 0;
+      medium += scan.medium || 0;
+      low += scan.low || 0;
+    });
+    const max = Math.max(critical, high, medium, low, 1);
+    document.getElementById('valCritical').textContent = critical;
+    document.getElementById('barCritical').style.width = (critical / max * 100) + '%';
+    document.getElementById('valHigh').textContent = high;
+    document.getElementById('barHigh').style.width = (high / max * 100) + '%';
+    document.getElementById('valMedium').textContent = medium;
+    document.getElementById('barMedium').style.width = (medium / max * 100) + '%';
+    document.getElementById('valLow').textContent = low;
+    document.getElementById('barLow').style.width = (low / max * 100) + '%';
+
+    // Donut chart
+    const avgRisk = s.avg_risk_score || 0;
+    document.getElementById('donutValue').textContent = avgRisk > 0 ? avgRisk : '—';
+    const donut = document.getElementById('riskDonut');
+    if (avgRisk > 0) {
+      const pct = Math.min(avgRisk / 10 * 100, 100);
+      donut.style.background = `conic-gradient(var(--red) 0% ${pct}%, var(--elevated) ${pct}% 100%)`;
+    }
+
+    // Trend chart (last 30 days)
+    const days = 30;
+    const counts = new Array(days).fill(0);
+    const labels = [];
+    const today = new Date();
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      labels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+    }
+    scans.forEach(scan => {
+      if (!scan.created_at) return;
+      const d = new Date(scan.created_at);
+      const daysAgo = Math.floor((today - d) / (1000 * 60 * 60 * 24));
+      if (daysAgo >= 0 && daysAgo < days) counts[days - 1 - daysAgo]++;
+    });
+    const maxCount = Math.max(...counts, 1);
+    document.getElementById('trendBars').innerHTML = counts.map(c =>
+      `<div class="trend-bar" style="height:${Math.max(c / maxCount * 100, 4)}%"></div>`
+    ).join('');
+    document.getElementById('trendLabels').innerHTML = `
+      <span>${labels[0]}</span>
+      <span>${labels[Math.floor(days / 2)]}</span>
+      <span>${labels[days - 1]}</span>
+    `;
+
+    // Top categories — fetch full reports for scans with findings
+    const cats = {};
+    for (const scan of scans) {
+      if ((scan.total || 0) > 0) {
+        try {
+          const full = await get(`/api/history/${scan.id}`);
+          (full.report?.findings || []).forEach(f => {
+            const cat = f.category || 'Other';
+            cats[cat] = (cats[cat] || 0) + 1;
+          });
+        } catch {}
+      }
+    }
+    const sorted = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const topMax = sorted[0]?.[1] || 1;
+    const catsEl = document.getElementById('topCategories');
+    if (!sorted.length) {
+      catsEl.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">No data yet</div><div class="empty-d">Run scans to see analytics</div></div>`;
+    } else {
+      catsEl.innerHTML = sorted.map(([name, count]) => `
+        <div class="category-row">
+          <span class="category-name">${esc(name)}</span>
+          <div class="category-bar-wrap"><div class="category-bar" style="width:${count / topMax * 100}%"></div></div>
+          <span class="category-count">${count}</span>
+        </div>
+      `).join('');
+    }
+  } catch (e) {
+    console.error('Analytics load failed:', e);
+  }
+}
+
 // ── HISTORY ────────────────────────────────────────────────────────────────
 async function loadHistory() {
   try {
     const data = await get('/api/history?limit=50');
-    State.historyData = data.scans;
+    State.historyData = data.scans || [];
     const el = document.getElementById('historyList');
-    if (!data.scans?.length) {
-      el.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">No scans</div></div>`;
+    if (!State.historyData.length) {
+      el.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">No scans</div><div class="empty-d">Run a scan from Home to see results here</div></div>`;
     } else {
-      el.innerHTML = data.scans.map(scanRow).join('');
+      el.innerHTML = State.historyData.map(s => `
+        <div class="scan-row" onclick="openScan('${s.id}')">
+          <div class="scan-info">
+            <div class="scan-url">${esc(shortUrl(s.target_url))}</div>
+            <div class="scan-meta">${s.scope || 'full'} · ${ago(s.scanned_at)} · ${s.total || 0} findings</div>
+          </div>
+          <span class="badge ${riskClass(s.risk_verdict)}">${esc(s.risk_verdict || 'Unknown')}</span>
+          <button class="btn btn-ghost" onclick="event.stopPropagation(); deleteScan('${s.id}')" style="font-size:0.75rem; color:var(--dim)">Delete</button>
+        </div>
+      `).join('');
     }
   } catch { toast('Failed to load history', 'err'); }
 }
@@ -398,7 +422,7 @@ async function loadFindings() {
     const data = await get('/api/history?limit=100');
     const all = [];
     for (const s of data.scans || []) {
-      if (s.total > 0) {
+      if ((s.total || 0) > 0) {
         try {
           const full = await get(`/api/history/${s.id}`);
           (full.report?.findings || []).forEach(f => all.push(f));
@@ -408,9 +432,9 @@ async function loadFindings() {
     State.findings = all;
     const el = document.getElementById('findingsList');
     if (!all.length) {
-      el.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">No findings</div></div>`;
+      el.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">No findings</div><div class="empty-d">Run a scan to see vulnerability findings</div></div>`;
     } else {
-      el.innerHTML = all.map(f => findingRow(f)).join('');
+      el.innerHTML = all.map(findingRow).join('');
     }
   } catch { toast('Failed to load findings', 'err'); }
 }
@@ -425,8 +449,10 @@ function findingRow(f) {
         <span class="finding-cat">${esc(f.category || '')}</span>
       </div>
       <div class="finding-b">
-        ${f.description ? `<p style="margin-bottom:0.5rem; color:var(--muted); font-size:0.8125rem">${esc(f.description)}</p>` : ''}
-        ${f.evidence ? `<pre style="padding:0.75rem; background:var(--elevated); border-radius:4px; font-size:0.75rem; overflow:auto">${esc(String(f.evidence).substring(0, 300))}</pre>` : ''}
+        ${f.description ? `<p style="margin-bottom:0.5rem; color:var(--muted); font-size:0.8125rem; line-height:1.6">${esc(f.description)}</p>` : ''}
+        ${f.impact ? `<p style="margin-bottom:0.5rem; color:var(--muted); font-size:0.8125rem"><strong style="color:var(--text)">Impact:</strong> ${esc(f.impact)}</p>` : ''}
+        ${f.evidence ? `<pre style="margin-top:0.5rem; padding:0.75rem; background:var(--elevated); border-radius:4px; font-size:0.75rem; overflow-x:auto; white-space:pre-wrap; word-break:break-all">${esc(String(f.evidence).substring(0, 500))}</pre>` : ''}
+        ${f.remediation ? `<p style="margin-top:0.5rem; color:var(--muted); font-size:0.8125rem"><strong style="color:var(--text)">Fix:</strong> ${esc(f.remediation)}</p>` : ''}
       </div>
     </div>`;
 }
@@ -434,32 +460,34 @@ function findingRow(f) {
 // ── RESULTS ────────────────────────────────────────────────────────────────
 function showResults(report) {
   if (!report) return;
-  const f = report.findings || [];
+  const findings = report.findings || [];
 
   document.getElementById('resultsTarget').textContent = shortUrl(report.target_url || 'Results');
 
-  const cls = riskClass(report.risk_verdict);
-  document.getElementById('resultsBadge').outerHTML = `<span class="badge ${cls}">${report.risk_verdict || 'Unknown'}</span>`;
-
   const counts = {
-    c: f.filter(x => sevClass(x.severity) === 'Critical').length,
-    h: f.filter(x => sevClass(x.severity) === 'High').length,
-    m: f.filter(x => sevClass(x.severity) === 'Medium').length,
-    l: f.filter(x => sevClass(x.severity) === 'Low').length,
+    c: findings.filter(x => sevClass(x.severity) === 'Critical').length,
+    h: findings.filter(x => sevClass(x.severity) === 'High').length,
+    m: findings.filter(x => sevClass(x.severity) === 'Medium').length,
+    l: findings.filter(x => sevClass(x.severity) === 'Low').length,
   };
 
-  document.getElementById('rcBadge').outerHTML = counts.c ? `<span class="badge critical">${counts.c} Critical</span>` : '';
-  document.getElementById('rhBadge').outerHTML = counts.h ? `<span class="badge high">${counts.h} High</span>` : '';
-  document.getElementById('rmBadge').outerHTML = counts.m ? `<span class="badge medium">${counts.m} Medium</span>` : '';
-  document.getElementById('rlBadge').outerHTML = counts.l ? `<span class="badge low">${counts.l} Low</span>` : '';
+  const cls = riskClass(report.risk_verdict);
+  const badgesEl = document.getElementById('resultsBadges');
+  const parts = [`<span class="badge ${cls}">${esc(report.risk_verdict || 'Unknown')}${report.risk_score != null ? ' · ' + report.risk_score : ''}</span>`];
+  if (counts.c) parts.push(`<span class="badge critical">${counts.c} Critical</span>`);
+  if (counts.h) parts.push(`<span class="badge high">${counts.h} High</span>`);
+  if (counts.m) parts.push(`<span class="badge medium">${counts.m} Medium</span>`);
+  if (counts.l) parts.push(`<span class="badge low">${counts.l} Low</span>`);
+  badgesEl.innerHTML = parts.join('');
 
-  const sorted = [...f].sort((a, b) => {
+  const sorted = [...findings].sort((a, b) => {
     const o = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
     return (o[sevClass(a.severity)] ?? 5) - (o[sevClass(b.severity)] ?? 5);
   });
 
-  document.getElementById('resultsFindings').innerHTML = sorted.map(findingRow).join('') ||
-    `<div class="empty" style="padding:2rem"><div class="empty-t">No findings</div></div>`;
+  document.getElementById('resultsFindings').innerHTML = sorted.length
+    ? sorted.map(findingRow).join('')
+    : `<div class="empty" style="padding:2rem"><div class="empty-t">No findings</div></div>`;
 }
 
 // ── ATTACK PATHS ───────────────────────────────────────────────────────────
@@ -475,16 +503,18 @@ async function loadAttackPaths() {
     }
     const el = document.getElementById('attackPathsList');
     if (!paths.length) {
-      el.innerHTML = `<div class="empty"><div class="empty-t">No attack paths</div><div class="empty-d">Run a full scan to discover chains</div></div>`;
+      el.innerHTML = `<div class="empty"><div class="empty-t">No attack paths discovered</div><div class="empty-d">Run a full scan to find chained vulnerabilities</div></div>`;
     } else {
-      el.innerHTML = paths.map(p => `
-        <div style="padding:1rem; border-bottom:1px solid var(--border)">
-          <div style="font-weight:500; margin-bottom:0.375rem">${esc(p.title || 'Path')}</div>
-          <div style="font-size:0.75rem; color:var(--dim)">${(p.steps || []).join(' → ')}</div>
-        </div>
-      `).join('');
+      el.innerHTML = `<div class="scan-list">${paths.map(p => {
+        const steps = Array.isArray(p.steps) ? p.steps : (p.chain || p.path || []);
+        return `<div style="padding:1rem 1.25rem; border-bottom:1px solid var(--border)">
+          <div style="font-weight:500; margin-bottom:0.375rem">${esc(p.title || p.name || 'Attack Path')}</div>
+          <div style="font-size:0.75rem; color:var(--dim); font-family:var(--mono)">${steps.map(s => esc(String(s))).join(' → ')}</div>
+          ${p.impact ? `<div style="font-size:0.75rem; color:var(--muted); margin-top:0.25rem">${esc(p.impact)}</div>` : ''}
+        </div>`;
+      }).join('')}</div>`;
     }
-  } catch {}
+  } catch { toast('Failed to load attack paths', 'err'); }
 }
 
 // ── INVESTIGATION ──────────────────────────────────────────────────────────
@@ -492,23 +522,30 @@ async function runChainLookup() {
   const addr = document.getElementById('chainAddr').value.trim();
   if (!addr) { toast('Enter an address', 'err'); return; }
   const el = document.getElementById('chainResult');
-  el.textContent = 'Looking up…';
+  el.textContent = 'Looking up…'; el.style.color = '';
   try {
-    const r = await post('/api/scan', { url: 'https://etherscan.io', goal: `Lookup: ${addr}`, scope: 'passive' });
-    el.textContent = `Address: ${addr}\nRisk: ${r.risk_verdict || '—'}\nFindings: ${(r.findings || []).length}`;
-  } catch (e) { el.textContent = 'Error: ' + e.message; }
+    const r = await post('/api/scan', { url: 'https://etherscan.io', goal: `Blockchain lookup: ${addr}`, scope: 'passive' });
+    const lines = [`Address: ${addr}`, `Risk: ${r.risk_verdict || '—'}`, `Score: ${r.risk_score ?? '—'}`, `Findings: ${(r.findings || []).length}`];
+    (r.findings || []).slice(0, 5).forEach(f => lines.push(`  [${f.severity}] ${f.title}`));
+    el.textContent = lines.join('\n');
+  } catch (e) { el.textContent = 'Error: ' + e.message; el.style.color = 'var(--red)'; }
 }
 
 async function runOsint() {
   const d = document.getElementById('osintDomain').value.trim();
   if (!d) { toast('Enter a domain', 'err'); return; }
   const el = document.getElementById('osintResult');
-  el.textContent = 'Running…';
+  el.textContent = 'Investigating…'; el.style.color = '';
   try {
     const url = d.startsWith('http') ? d : 'https://' + d;
     const r = await post('/api/scan', { url, scope: 'recon' });
-    el.textContent = `Domain: ${d}\nVerdict: ${r.risk_verdict || '—'}\nFindings: ${(r.findings || []).length}`;
-  } catch (e) { el.textContent = 'Error: ' + e.message; }
+    const lines = [`Domain: ${d}`, `Verdict: ${r.risk_verdict || '—'}`, `Score: ${r.risk_score ?? '—'}`, `Findings: ${(r.findings || []).length}`, ''];
+    (r.findings || []).slice(0, 8).forEach(f => {
+      lines.push(`[${f.severity}] ${f.title}`);
+      if (f.evidence) lines.push(`  ${String(f.evidence).substring(0, 80)}`);
+    });
+    el.textContent = lines.join('\n');
+  } catch (e) { el.textContent = 'Error: ' + e.message; el.style.color = 'var(--red)'; }
 }
 
 async function runPoc() {
@@ -516,38 +553,39 @@ async function runPoc() {
   const url = document.getElementById('pocUrl').value.trim();
   if (!url) { toast('Enter a URL', 'err'); return; }
   const el = document.getElementById('pocResult');
-  el.textContent = 'Running…';
+  el.textContent = 'Running…'; el.style.color = '';
   try {
     const body = { type, url };
     if (type === 'idor') {
-      body.param_to_change = 'id';
-      body.new_value = '2';
+      body.param_to_change = document.getElementById('pocParam')?.value.trim() || 'id';
+      body.new_value = document.getElementById('pocValue')?.value.trim() || '2';
     }
     const r = await post('/api/poc/simulate', body);
-    el.textContent = `Result: ${r.conclusion}\nSuccess: ${r.success}\nStatus: ${r.status_code || '—'}`;
+    el.textContent = `Result: ${r.conclusion}\nSuccess: ${r.success}\nStatus: ${r.status_code || '—'}${r.body_preview ? '\n\n' + r.body_preview.substring(0, 300) : ''}`;
     el.style.color = r.success ? 'var(--green)' : 'var(--red)';
-  } catch (e) { el.textContent = 'Error: ' + e.message; }
+  } catch (e) { el.textContent = 'Error: ' + e.message; el.style.color = 'var(--red)'; }
 }
 
 async function runReputation() {
   const t = document.getElementById('reputationTarget').value.trim();
   if (!t) { toast('Enter a target', 'err'); return; }
   const el = document.getElementById('reputationResult');
-  el.textContent = 'Checking…';
+  el.textContent = 'Checking…'; el.style.color = '';
   try {
     const url = t.startsWith('http') ? t : 'https://' + t;
-    const r = await post('/api/scan', { url, scope: 'passive', goal: `Reputation: ${t}` });
-    el.textContent = `Target: ${t}\nVerdict: ${r.risk_verdict || '—'}`;
-  } catch (e) { el.textContent = 'Error: ' + e.message; }
+    const r = await post('/api/scan', { url, scope: 'passive', goal: `Entity reputation: ${t}` });
+    const lines = [`Target: ${t}`, `Verdict: ${r.risk_verdict || '—'}`, `Score: ${r.risk_score ?? '—'}`, ''];
+    (r.findings || []).slice(0, 8).forEach(f => lines.push(`[${f.severity}] ${f.title}`));
+    if (!(r.findings || []).length) lines.push('No significant findings.');
+    el.textContent = lines.join('\n');
+  } catch (e) { el.textContent = 'Error: ' + e.message; el.style.color = 'var(--red)'; }
 }
 
 // ── SETTINGS ────────────────────────────────────────────────────────────────
 function loadSettings() {
   document.getElementById('settingsApiUrl').value = CFG.apiUrl;
-  const hKey = localStorage.getItem('diverg_helius_key') || '';
-  const hNet = localStorage.getItem('diverg_helius_network') || 'mainnet';
-  document.getElementById('heliusApiKey').value = hKey;
-  document.getElementById('heliusNetwork').value = hNet;
+  document.getElementById('heliusApiKey').value = localStorage.getItem('diverg_helius_key') || '';
+  document.getElementById('heliusNetwork').value = localStorage.getItem('diverg_helius_network') || 'mainnet';
 }
 
 function saveSettings() {
@@ -557,14 +595,16 @@ function saveSettings() {
 
 async function testConnection() {
   const el = document.getElementById('connStatus');
-  el.textContent = 'Testing…';
+  el.textContent = 'Testing…'; el.style.color = 'var(--dim)';
   try {
     const r = await get('/api/health');
-    el.textContent = `Connected — ${r.service}`;
+    el.textContent = `Connected — ${r.service} v${r.version}`;
     el.style.color = 'var(--green)';
+    toast('API connected', 'ok');
   } catch (e) {
-    el.textContent = 'Failed';
+    el.textContent = 'Failed: ' + e.message;
     el.style.color = 'var(--red)';
+    toast('Connection failed', 'err');
   }
 }
 
@@ -580,19 +620,19 @@ async function testHeliusKey() {
   const key = document.getElementById('heliusApiKey').value.trim();
   const el = document.getElementById('heliusStatus');
   if (!key) { el.textContent = 'Enter a key'; el.style.color = 'var(--red)'; return; }
-  el.textContent = 'Testing…';
+  el.textContent = 'Testing…'; el.style.color = 'var(--dim)';
   try {
     const r = await fetch(`https://mainnet.helius-rpc.com/?api-key=${key}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getHealth' }),
     });
     if (r.ok) {
-      el.textContent = 'Connected';
-      el.style.color = 'var(--green)';
+      el.textContent = 'Connected'; el.style.color = 'var(--green)';
+      toast('Helius key valid', 'ok');
     } else throw new Error('Invalid');
   } catch {
-    el.textContent = 'Invalid key';
-    el.style.color = 'var(--red)';
+    el.textContent = 'Invalid key'; el.style.color = 'var(--red)';
+    toast('Invalid key', 'err');
   }
 }
 
@@ -601,20 +641,17 @@ async function exportHistory() {
     const d = await get('/api/history?limit=200');
     const blob = new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `diverg-${Date.now()}.json`;
-    a.click();
-    toast('Exported', 'ok');
+    a.href = URL.createObjectURL(blob); a.download = `diverg-${Date.now()}.json`;
+    a.click(); toast('Exported', 'ok');
   } catch { toast('Export failed', 'err'); }
 }
 
 async function clearHistory() {
-  if (!confirm('Clear all scans?')) return;
+  if (!confirm('Clear all scans? This cannot be undone.')) return;
   try {
     const d = await get('/api/history?limit=200');
     for (const s of d.scans || []) await del(`/api/history/${s.id}`);
-    toast('Cleared', 'ok');
-    loadHistory();
+    toast('Cleared', 'ok'); loadHistory();
   } catch { toast('Failed', 'err'); }
 }
 
@@ -622,9 +659,8 @@ function exportReport() {
   if (!State.report) return;
   const blob = new Blob([JSON.stringify(State.report, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `scan-${Date.now()}.json`;
-  a.click();
+  a.href = URL.createObjectURL(blob); a.download = `scan-${Date.now()}.json`;
+  a.click(); toast('Exported', 'ok');
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────
