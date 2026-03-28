@@ -30,12 +30,16 @@ from onchain_clients import (
     helius_wallet_identity,
 )
 
-# Tunables via env
+# Tunables via env (defaults tuned for deeper always-on bundle analysis; slower, more API calls)
 FUNDING_TIME_BUCKET_SEC = float(os.environ.get("SOLANA_BUNDLE_FUNDING_BUCKET_SEC", "5"))
 LAMPORTS_REL_TOL = float(os.environ.get("SOLANA_BUNDLE_LAMPORTS_REL_TOL", "0.002"))  # 0.2%
-MAX_TRANSFER_FETCH = int(os.environ.get("SOLANA_BUNDLE_MAX_TRANSFER_FETCH", "40"))
-MAX_ENHANCED_FETCH = int(os.environ.get("SOLANA_BUNDLE_MAX_ENHANCED_FETCH", "14"))
-MAX_FUNDER_IDENTITY = int(os.environ.get("SOLANA_BUNDLE_MAX_FUNDER_IDENTITY", "24"))
+MAX_TRANSFER_FETCH = int(os.environ.get("SOLANA_BUNDLE_MAX_TRANSFER_FETCH", "72"))
+MAX_ENHANCED_FETCH = int(os.environ.get("SOLANA_BUNDLE_MAX_ENHANCED_FETCH", "32"))
+MAX_FUNDER_IDENTITY = int(os.environ.get("SOLANA_BUNDLE_MAX_FUNDER_IDENTITY", "56"))
+# Helius enhanced txs per wallet when sampling mint co-movement / program overlap
+ENHANCED_TX_LIMIT = int(os.environ.get("SOLANA_BUNDLE_ENHANCED_TX_LIMIT", "55"))
+# Extra /transfers fetch during coordination pass (Helius max 100)
+SIGNAL_TRANSFERS_LIMIT = max(1, min(int(os.environ.get("SOLANA_BUNDLE_SIGNAL_TRANSFERS_LIMIT", "100")), 100))
 
 
 def _safe_float(x: Any) -> Optional[float]:
@@ -521,9 +525,9 @@ def compute_coordination_bundle(
     n_fetch = min(len(lookup_wallets), MAX_TRANSFER_FETCH)
     pending = [w for w in lookup_wallets[:n_fetch] if transfers_cache.get(w) is None]
     for i, w in enumerate(pending):
-        transfers_cache[w] = helius_transfers(w, limit=80)
+        transfers_cache[w] = helius_transfers(w, limit=SIGNAL_TRANSFERS_LIMIT)
         if i < len(pending) - 1:
-            time.sleep(0.05)
+            time.sleep(0.045)
 
     for w in lookup_wallets:
         meta_by_wallet[w] = enrich_wallet_funding(w, funded_by.get(w), transfers_cache.get(w))
@@ -543,12 +547,12 @@ def compute_coordination_bundle(
     program_sets: dict[str, set[str]] = {}
     mw = [w for w in (focus_wallets or lookup_wallets) if w in meta_by_wallet][:MAX_ENHANCED_FETCH]
     for i, w in enumerate(mw):
-        em = enhanced_co_movement_mint(w, mint, limit=35)
+        em = enhanced_co_movement_mint(w, mint, limit=ENHANCED_TX_LIMIT)
         if em:
             co_slots_by_w[w] = em.get("mint_touch_slots") or []
             program_sets[w] = set(em.get("programs_sample") or [])
         if i < len(mw) - 1:
-            time.sleep(0.08)
+            time.sleep(0.085)
     enhanced_sample = {"wallets_analyzed": mw, "mint_touch_slots_by_wallet": co_slots_by_w}
 
     # Same-slot mint touch: wallets that appear in same slot for mint-related txs (any pair)
@@ -621,5 +625,7 @@ def compute_coordination_bundle(
             "lamports_rel_tol": LAMPORTS_REL_TOL,
             "max_transfer_fetch": n_fetch,
             "max_enhanced_fetch": len(mw),
+            "signal_transfers_limit": SIGNAL_TRANSFERS_LIMIT,
+            "enhanced_tx_limit": ENHANCED_TX_LIMIT,
         },
     }

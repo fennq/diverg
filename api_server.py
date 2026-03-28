@@ -1043,8 +1043,8 @@ def investigation_solana_bundle():
             out = sb.run_bundle_snapshot(
                 mint,
                 wallet,
-                max_holders=100,
-                max_funded_by_lookups=100,
+                max_holders=120,
+                max_funded_by_lookups=120,
                 exclude_wallets=exclude_wallets,
             )
         finally:

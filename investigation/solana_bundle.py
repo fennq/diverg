@@ -12,7 +12,7 @@ import concurrent.futures
 import os
 import re
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Any, Optional
 
 from onchain_clients import (
@@ -87,12 +87,40 @@ def _cluster_key_sources(
     wallet: str,
     funded: Optional[dict],
     transfers: Optional[dict],
+    *,
+    hop_funded: Optional[dict[str, Optional[dict]]] = None,
+    hop_transfers: Optional[dict[str, Any]] = None,
 ) -> str:
-    """Cluster by first inbound SOL sender (/transfers) when possible, else funded-by API."""
-    f = effective_funder_address(funded, transfers)
-    if f:
-        return f"funder:{f}"
-    return f"singleton:{wallet}"
+    """
+    Cluster by shared *ultimate* funder when 2-hop Helius data exists (hop wallet → root),
+    else by direct funder; singleton if unknown.
+    """
+    hf = hop_funded or {}
+    ht = hop_transfers or {}
+    direct = effective_funder_address(funded, transfers)
+    if not direct:
+        return f"singleton:{wallet}"
+    root = effective_funder_address(hf.get(direct), ht.get(direct))
+    if root and root != wallet and root != direct:
+        return f"funder:{root}"
+    return f"funder:{direct}"
+
+
+def _direct_and_root_funder(
+    wallet: str,
+    funded: Optional[dict],
+    transfers: Optional[dict],
+    hop_funded: dict[str, Optional[dict]],
+    hop_transfers: dict[str, Any],
+) -> tuple[Optional[str], Optional[str]]:
+    """(direct_funder, root_funder_or_None). Root is set only when a distinct 2-hop parent exists."""
+    direct = effective_funder_address(funded, transfers)
+    if not direct:
+        return None, None
+    root = effective_funder_address(hop_funded.get(direct), hop_transfers.get(direct))
+    if root and root != wallet and root != direct:
+        return direct, root
+    return direct, None
 
 
 def _balance_ui_for_mint(owner: str, mint: str) -> Optional[float]:
@@ -248,10 +276,10 @@ def run_bundle_snapshot(
     mf = (
         max_funded_by_lookups
         if max_funded_by_lookups is not None
-        else int(os.environ.get("SOLANA_BUNDLE_MAX_FUNDED_BY", "100"))
+        else int(os.environ.get("SOLANA_BUNDLE_MAX_FUNDED_BY", "120"))
     )
     mh = max(5, min(mh, 200))
-    mf = max(5, min(mf, 200))
+    mf = max(5, min(mf, 150))
     # Helius Wallet API allows max 100 transfers per request (larger values error or fail open).
     tr_limit = max(1, min(int(os.environ.get("SOLANA_BUNDLE_FUNDER_TRANSFERS_LIMIT", "100")), 100))
 
@@ -286,7 +314,7 @@ def run_bundle_snapshot(
         }
 
     supply_decimals = int(supply_val.get("decimals", 0))
-    das_pages = max(1, int(os.environ.get("SOLANA_BUNDLE_DAS_MAX_PAGES", "30")))
+    das_pages = max(1, int(os.environ.get("SOLANA_BUNDLE_DAS_MAX_PAGES", "45")))
     das_rows, das_err = helius_das_token_accounts_for_mint(
         mint, max_pages=das_pages, page_limit=100
     )
@@ -368,10 +396,10 @@ def run_bundle_snapshot(
         funded_by[ww] = fb_d
         transfers_by[ww] = tr_o
     elif n_w > 1:
-        workers = min(14, max(4, n_w))
+        workers = min(12, max(4, n_w))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futs = {pool.submit(_fetch_intel, w): w for w in lookup_order}
-            for fut in concurrent.futures.as_completed(futs, timeout=300):
+            for fut in concurrent.futures.as_completed(futs, timeout=480):
                 w0 = futs[fut]
                 try:
                     ww, fb_d, tr_o = fut.result(timeout=120)
@@ -381,16 +409,66 @@ def run_bundle_snapshot(
                     funded_by[w0] = None
                     transfers_by[w0] = None
 
-    # Build clusters (shared funder: prefer first inbound SOL from /transfers, else funded-by)
+    hop_funded_by: dict[str, Optional[dict]] = {}
+    hop_transfers_by: dict[str, Any] = {}
+    hop_max = max(0, int(os.environ.get("SOLANA_BUNDLE_FUNDER_HOP2_MAX", "56")))
+    hop_targets: list[str] = []
+    if hop_max > 0:
+        funder_counts: Counter[str] = Counter()
+        for w in lookup_order:
+            d = effective_funder_address(funded_by.get(w), transfers_by.get(w))
+            if d:
+                funder_counts[d] += 1
+        hop_targets = [a for a, _ in funder_counts.most_common(hop_max)]
+
+        def _fetch_hop_intel(addr: str) -> tuple[str, Optional[dict], Any]:
+            fb = helius_wallet_funded_by(addr)
+            tr = helius_transfers(addr, limit=tr_limit)
+            fb_d = fb if isinstance(fb, dict) else None
+            if isinstance(tr, dict):
+                tr_o: Any = tr
+            elif isinstance(tr, list):
+                tr_o = tr
+            else:
+                tr_o = None
+            return addr, fb_d, tr_o
+
+        if hop_targets:
+            hw = min(12, max(3, len(hop_targets)))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=hw) as pool:
+                hfuts = {pool.submit(_fetch_hop_intel, a): a for a in hop_targets}
+                for fut in concurrent.futures.as_completed(hfuts, timeout=420):
+                    a0 = hfuts[fut]
+                    try:
+                        aa, fb_d, tr_o = fut.result(timeout=120)
+                        hop_funded_by[aa] = fb_d
+                        hop_transfers_by[aa] = tr_o
+                    except Exception:
+                        hop_funded_by[a0] = None
+                        hop_transfers_by[a0] = None
+
+    # Build clusters (ultimate funder when 2-hop data ties intermediaries to one source)
     cluster_members: dict[str, set[str]] = defaultdict(set)
     for w in lookup_order:
-        fk = _cluster_key_sources(w, funded_by.get(w), transfers_by.get(w))
+        fk = _cluster_key_sources(
+            w,
+            funded_by.get(w),
+            transfers_by.get(w),
+            hop_funded=hop_funded_by,
+            hop_transfers=hop_transfers_by,
+        )
         cluster_members[fk].add(w)
 
     # Focus cluster
     focus_cluster_key: Optional[str] = None
     if sw:
-        focus_cluster_key = _cluster_key_sources(sw, funded_by.get(sw), transfers_by.get(sw))
+        focus_cluster_key = _cluster_key_sources(
+            sw,
+            funded_by.get(sw),
+            transfers_by.get(sw),
+            hop_funded=hop_funded_by,
+            hop_transfers=hop_transfers_by,
+        )
     else:
         # Largest multi-wallet cluster by supply
         best_key = None
@@ -416,7 +494,13 @@ def run_bundle_snapshot(
         if seed_balance_ui is None:
             seed_balance_ui = owner_amount.get(sw)
         if focus_cluster_key and sw not in focus_members:
-            fk = _cluster_key_sources(sw, funded_by.get(sw), transfers_by.get(sw))
+            fk = _cluster_key_sources(
+                sw,
+                funded_by.get(sw),
+                transfers_by.get(sw),
+                hop_funded=hop_funded_by,
+                hop_transfers=hop_transfers_by,
+            )
             if fk == focus_cluster_key:
                 focus_members.add(sw)
 
@@ -441,26 +525,34 @@ def run_bundle_snapshot(
 
     holders_out = []
     for w in owners_sorted[:20]:
+        d_fund, r_fund = _direct_and_root_funder(
+            w,
+            funded_by.get(w),
+            transfers_by.get(w),
+            hop_funded_by,
+            hop_transfers_by,
+        )
         holders_out.append(
             {
                 "wallet": w,
                 "amount_ui": round(owner_amount[w], 8),
                 "pct_supply": supply_pct(owner_amount[w]),
-                "funder": effective_funder_address(funded_by.get(w), transfers_by.get(w)),
+                "funder": d_fund,
+                "funder_root": r_fund,
                 "in_focus_cluster": w in focus_members if focus_members else False,
             }
         )
 
     disclaimer = (
-        "Heuristic only: clusters use the same *direct* funder where possible from first inbound SOL "
-        "(Helius /transfers), else Helius funded-by. This aligns better with explorer-style 'funded by' "
-        "graphs. Wallets not in the sampled top holders may be missing. Not financial advice."
+        "Heuristic only: clusters prefer a shared *2-hop* ultimate funder when Helius returns funding data "
+        "for intermediate wallets (otherwise direct first inbound SOL / funded-by). Coordination signals "
+        "sample more transfers and enhanced txs by default (slower, deeper). Not financial advice."
     )
 
     focus_note: Optional[str] = None
     if not focus_cluster_key and not sw:
         focus_note = (
-            "No multi-wallet cluster with a shared direct funder in this sample. "
+            "No multi-wallet cluster with a shared ultimate funder in this sample. "
             "Optional: enter a wallet to focus that address’s funder-linked group."
         )
 
@@ -505,6 +597,9 @@ def run_bundle_snapshot(
             "das_token_account_rows": len(das_rows) if holder_source == "das" else 0,
             "unique_holders_sampled": len(owners_sorted),
             "lp_skip_min_pct": lp_min_pct,
+            "funder_hop2_max": hop_max,
+            "funder_hop2_wallets_fetched": len(hop_targets),
+            "deep_bundle_scan": True,
         },
         "disclaimer": disclaimer,
         "pnl_note": "PnL not computed here; use an explorer or portfolio tool for full buy/sell history.",

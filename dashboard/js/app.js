@@ -688,11 +688,19 @@ function _invTokenBundleSummaryHtml(d) {
     const rows = d.top_holders.slice(0, 20).map(h => {
       const w = h.wallet || '';
       const short = w.length > 10 ? w.slice(0, 8) + '…' : w;
-      const fund = h.funder ? String(h.funder).slice(0, 14) + (String(h.funder).length > 14 ? '…' : '') : '—';
+      let fund = '—';
+      if (h.funder) {
+        const f1 = String(h.funder).slice(0, 12) + (String(h.funder).length > 12 ? '…' : '');
+        fund = f1;
+        if (h.funder_root) {
+          const f2 = String(h.funder_root).slice(0, 10) + (String(h.funder_root).length > 10 ? '…' : '');
+          fund = `${f1} → ${f2}`;
+        }
+      }
       const cl = h.in_focus_cluster ? '<span class="inv-cluster-dot" title="In cluster">●</span>' : '';
       return `<tr><td class="mono">${esc(short)}</td><td>${esc(String(h.pct_supply != null ? h.pct_supply : '—'))}%</td><td>${cl}</td><td class="mono" style="font-size:0.65rem">${esc(fund)}</td></tr>`;
     }).join('');
-    holders = `<div class="inv-holders"><div class="inv-subhead" style="margin-top:0.75rem">Top holders</div><table><thead><tr><th>Wallet</th><th>% supply</th><th>Cluster</th><th>Funder</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    holders = `<div class="inv-holders"><div class="inv-subhead" style="margin-top:0.75rem">Top holders</div><table><thead><tr><th>Wallet</th><th>% supply</th><th>Cluster</th><th title="Direct funder → 2-hop root when resolvable">Funder / root</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }
   const p = d.params || {};
   let scanMeta = '';
@@ -715,7 +723,7 @@ async function runTokenBundle() {
   const key = (localStorage.getItem('diverg_helius_key') || '').trim();
   if (!key) { toast('Add Helius API key in Settings', 'err'); return; }
   _invSetOut('tokenBundleOut', 'tokenBundleSummary', 'tokenBundleRaw', 'inv-out-empty',
-    '<p class="inv-muted">Analyzing token via Helius (holders, funders, coordination)… Can take up to a minute.</p>', null);
+    '<p class="inv-muted">Deep bundle scan: paginated holders, up to 120 wallets + 2-hop funder graph, coordination signals (many Helius calls). Often 2–6+ minutes — do not refresh.</p>', null);
   try {
     const body = { mint, helius_api_key: key };
     if (wallet) body.wallet = wallet;
