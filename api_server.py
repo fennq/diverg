@@ -17,6 +17,7 @@ Scan endpoints:
 
 Investigation (console):
   POST /api/investigation/blockchain   Solana via Helius + EVM via public RPC
+  POST /api/investigation/solana-bundle  Token mint: holders, cluster %, coordination / risk score (extension parity)
   POST /api/investigation/domain       OSINT + recon + headers (full skill JSON)
   POST /api/investigation/reputation   OSINT context + entity reputation
 
@@ -720,6 +721,8 @@ def poc_simulate():
 
 # ── Investigation tools (full skill / chain data for console) ─────────────────
 
+_bundle_api_lock = Lock()
+
 _ETH_ADDR_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
 
@@ -949,6 +952,92 @@ def investigation_reputation():
         })
     except Exception as e:
         return jsonify({"error": str(e), "domain": domain}), 500
+
+
+def _enrich_solana_bundle_payload(raw: dict) -> dict:
+    """Top-level risk_score / cluster fields for dashboard + extension parity."""
+    if not raw.get("ok"):
+        return raw
+    bs = raw.get("bundle_signals") or {}
+    coord = bs.get("coordination_score")
+    try:
+        coord_f = float(coord) if coord is not None else 0.0
+    except (TypeError, ValueError):
+        coord_f = 0.0
+    coord_f = max(0.0, min(100.0, coord_f))
+    cluster_pct = raw.get("focus_cluster_pct_supply")
+    try:
+        cp = float(cluster_pct) if cluster_pct is not None else 0.0
+    except (TypeError, ValueError):
+        cp = 0.0
+    raw["risk_score"] = round(coord_f, 2)
+    raw["cluster_pct_supply"] = cp
+    raw["cluster_wallet_count"] = len(raw.get("focus_cluster_wallets") or [])
+    reasons = bs.get("coordination_reasons") or []
+    raw["risk_signals"] = reasons if isinstance(reasons, list) else []
+    if coord_f >= 50 or cp >= 35:
+        verdict = "Elevated"
+    elif coord_f >= 28 or cp >= 18:
+        verdict = "Moderate"
+    else:
+        verdict = "Lower in sampled holders"
+    raw["risk_verdict"] = verdict
+    sig_txt = ", ".join(str(x) for x in raw["risk_signals"][:8]) if raw["risk_signals"] else "none"
+    raw["risk_summary"] = (
+        f"{verdict}: coordination {raw['risk_score']}/100; "
+        f"cluster {raw['cluster_wallet_count']} wallets hold ~{cp}% of sampled supply. "
+        f"Signals: {sig_txt}."
+    )
+    return raw
+
+
+@app.route("/api/investigation/solana-bundle", methods=["OPTIONS"])
+def investigation_solana_bundle_options():
+    return "", 204
+
+
+@app.route("/api/investigation/solana-bundle", methods=["POST"])
+@require_auth
+def investigation_solana_bundle():
+    """
+    Solana SPL token bundle snapshot — same logic as extension/solana_bundle.js +
+    investigation/solana_bundle.py (holders, same-funder cluster %, coordination score).
+    """
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json(silent=True) or {}
+    mint = sanitize_text(data.get("mint") or "", 128).strip()
+    wallet = sanitize_text(data.get("wallet") or "", 128).strip() or None
+    env_key = (os.environ.get("HELIUS_API_KEY") or "").strip()
+    body_key = sanitize_text(data.get("helius_api_key") or "", 256).strip()
+    api_key = env_key or body_key
+    if not mint:
+        return jsonify({"error": "Missing mint"}), 400
+    if not api_key:
+        return jsonify({"error": "Helius API key required. Add it in Settings or set HELIUS_API_KEY on the server."}), 400
+
+    inv_dir = ROOT / "investigation"
+    inv_path = str(inv_dir)
+    if inv_path not in sys.path:
+        sys.path.insert(0, inv_path)
+
+    try:
+        import onchain_clients as oc  # type: ignore
+        import solana_bundle as sb  # type: ignore
+    except ImportError as e:
+        return jsonify({"error": f"Solana bundle module unavailable: {e}"}), 503
+
+    with _bundle_api_lock:
+        old_key = getattr(oc, "HELIUS_KEY", "") or ""
+        try:
+            oc.HELIUS_KEY = api_key.strip()
+            out = sb.run_bundle_snapshot(mint, wallet)
+        finally:
+            oc.HELIUS_KEY = old_key
+
+    if isinstance(out, dict) and out.get("ok"):
+        out = _enrich_solana_bundle_payload(out)
+    return jsonify(out if isinstance(out, dict) else {"ok": False, "error": "Unexpected response"})
 
 
 # ── History endpoints ─────────────────────────────────────────────────────────

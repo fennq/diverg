@@ -652,6 +652,75 @@ async function runChainLookup() {
   }
 }
 
+function _invTokenBundleSummaryHtml(d) {
+  if (!d.ok) {
+    return `<p class="inv-err">${esc(d.error || 'Bundle analysis failed')}</p>`;
+  }
+  const rs = d.risk_score != null ? d.risk_score : (d.bundle_signals && d.bundle_signals.coordination_score);
+  const rv = d.risk_verdict || '—';
+  const cp = d.cluster_pct_supply != null ? d.cluster_pct_supply : d.focus_cluster_pct_supply;
+  const cw = d.cluster_wallet_count != null ? d.cluster_wallet_count : (d.focus_cluster_wallets || []).length;
+  const metrics = `<div class="inv-metric-grid">
+    <div class="inv-metric inv-metric--hi"><div class="inv-metric-k">Risk score</div><div class="inv-metric-v">${esc(String(rs != null ? rs : '—'))}/100</div><div class="inv-muted" style="font-size:0.65rem;margin-top:0.25rem">${esc(rv)}</div></div>
+    <div class="inv-metric inv-metric--hi"><div class="inv-metric-k">Cluster (same funder)</div><div class="inv-metric-v">${esc(String(cw))} wallets</div><div class="inv-muted" style="font-size:0.65rem;margin-top:0.25rem">${esc(String(cp != null ? cp : '—'))}% of supply</div></div>
+    <div class="inv-metric"><div class="inv-metric-k">Cluster balance (tokens)</div><div class="inv-metric-v">${esc(String(d.focus_cluster_supply_ui != null ? d.focus_cluster_supply_ui : '—'))}</div></div>
+    <div class="inv-metric"><div class="inv-metric-k">Total supply</div><div class="inv-metric-v">${esc(String(d.token_supply_ui != null ? d.token_supply_ui : '—'))}</div></div>
+  </div>`;
+  const bs = d.bundle_signals || {};
+  let coordLine = '';
+  if (bs.coordination_score != null || (bs.coordination_reasons && bs.coordination_reasons.length)) {
+    const cr = Array.isArray(bs.coordination_reasons) ? bs.coordination_reasons.join(', ') : '';
+    coordLine = `<p class="inv-muted">Coordination signals: <strong>${esc(String(bs.coordination_score != null ? bs.coordination_score : rs))}/100</strong>${cr ? ' · ' + esc(cr) : ''}</p>`;
+  }
+  if (d.risk_summary) {
+    coordLine += `<p class="inv-muted" style="margin-top:0.35rem">${esc(d.risk_summary)}</p>`;
+  }
+  if (bs.error) {
+    coordLine += `<p class="inv-err" style="margin-top:0.35rem">${esc(String(bs.error))}</p>`;
+  }
+  let seed = '';
+  if (d.seed_wallet) {
+    seed = `<p class="inv-kv"><span>Focus wallet</span> ${esc(d.seed_wallet)}</p>`;
+    if (d.seed_balance_ui != null) seed += `<p class="inv-kv"><span>Balance</span> ${esc(String(d.seed_balance_ui))} tokens (${esc(String(d.seed_pct_supply != null ? d.seed_pct_supply : '—'))}% supply)</p>`;
+  }
+  let holders = '';
+  if (d.top_holders && d.top_holders.length) {
+    const rows = d.top_holders.slice(0, 20).map(h => {
+      const w = h.wallet || '';
+      const short = w.length > 10 ? w.slice(0, 8) + '…' : w;
+      const fund = h.funder ? String(h.funder).slice(0, 14) + (String(h.funder).length > 14 ? '…' : '') : '—';
+      const cl = h.in_focus_cluster ? '<span class="inv-cluster-dot" title="In cluster">●</span>' : '';
+      return `<tr><td class="mono">${esc(short)}</td><td>${esc(String(h.pct_supply != null ? h.pct_supply : '—'))}%</td><td>${cl}</td><td class="mono" style="font-size:0.65rem">${esc(fund)}</td></tr>`;
+    }).join('');
+    holders = `<div class="inv-holders"><div class="inv-subhead" style="margin-top:0.75rem">Top holders</div><table><thead><tr><th>Wallet</th><th>% supply</th><th>Cluster</th><th>Funder</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+  const notes = [d.focus_cluster_note, d.disclaimer, d.pnl_note].filter(Boolean).map(x => `<p class="inv-muted">${esc(x)}</p>`).join('');
+  return `<p class="mono" style="font-size:0.75rem;margin-bottom:0.35rem">${esc(d.mint || '')}</p>${metrics}${coordLine}${seed}${holders}${notes}`;
+}
+
+async function runTokenBundle() {
+  const mint = document.getElementById('tokenMint').value.trim();
+  const wallet = document.getElementById('tokenSeedWallet').value.trim();
+  if (!mint) { toast('Enter token mint', 'err'); return; }
+  const key = localStorage.getItem('diverg_helius_key') || '';
+  if (!key) { toast('Add Helius API key in Settings', 'err'); return; }
+  _invSetOut('tokenBundleOut', 'tokenBundleSummary', 'tokenBundleRaw', 'inv-out-empty',
+    '<p class="inv-muted">Analyzing token via Helius (holders, funders, coordination)… Can take up to a minute.</p>', null);
+  try {
+    const body = { mint, helius_api_key: key };
+    if (wallet) body.wallet = wallet;
+    const r = await post('/api/investigation/solana-bundle', body);
+    const html = _invTokenBundleSummaryHtml(r);
+    _invSetOut('tokenBundleOut', 'tokenBundleSummary', 'tokenBundleRaw', 'inv-out-empty', html, r);
+    if (r.ok) toast('Token bundle analysis complete', 'ok');
+    else toast(r.error || 'Bundle failed', 'err');
+  } catch (e) {
+    _invSetOut('tokenBundleOut', 'tokenBundleSummary', 'tokenBundleRaw', 'inv-out-empty',
+      `<p class="inv-err">${esc(e.message)}</p>`, { error: e.message });
+    toast(e.message, 'err');
+  }
+}
+
 async function runOsint() {
   const d = document.getElementById('osintDomain').value.trim();
   if (!d) { toast('Enter a domain', 'err'); return; }

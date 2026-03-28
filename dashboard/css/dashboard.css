@@ -649,6 +649,63 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
 }
 
 /* Investigation panels — summary + expandable raw JSON */
+.inv-subhead {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+  margin: 0 0 0.5rem;
+}
+
+.inv-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.625rem;
+  margin: 0.75rem 0;
+}
+.inv-metric {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.625rem 0.75rem;
+}
+.inv-metric.inv-metric--hi {
+  border-color: rgba(59, 111, 245, 0.35);
+  background: var(--accent-dim);
+}
+.inv-metric-k {
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  margin-bottom: 0.25rem;
+}
+.inv-metric-v {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text);
+  font-family: var(--mono);
+  word-break: break-all;
+}
+.inv-holders {
+  margin-top: 0.75rem;
+  font-size: 0.75rem;
+}
+.inv-holders table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.6875rem;
+}
+.inv-holders th, .inv-holders td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.inv-holders th { color: var(--dim); font-weight: 500; }
+.inv-cluster-dot { color: var(--accent); font-weight: 700; }
+
 .inv-hint {
   font-size: 0.6875rem;
   color: var(--dim);

@@ -341,17 +341,30 @@
         <div class="settings-grid">
           <div class="settings-card">
             <div class="settings-h">
-              <h4>Blockchain Lookup</h4>
-              <p>Trace wallets &amp; transactions</p>
+              <h4>Blockchain</h4>
+              <p>Wallet RPC lookup &amp; Solana token bundle (extension parity)</p>
             </div>
+            <div class="inv-subhead">Wallet or contract</div>
             <div class="settings-f">
               <input type="text" id="chainAddr" placeholder="0x… or Solana address" class="input" style="font-family:var(--mono)">
             </div>
-            <p class="inv-hint">Solana: uses your Helius key from Settings. Ethereum <span class="mono">0x…</span>: public RPC (balance / nonce).</p>
-            <button class="btn btn-primary" onclick="runChainLookup()">Look up</button>
+            <p class="inv-hint">Solana balance uses your Helius key from Settings. Ethereum <span class="mono">0x…</span>: public RPC (balance / nonce).</p>
+            <button class="btn btn-primary" onclick="runChainLookup()">Look up address</button>
             <div id="chainOut" class="inv-out inv-out-empty">
               <div class="inv-summary" id="chainSummary">Enter an address to look up.</div>
               <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="chainRaw"></pre></details>
+            </div>
+
+            <div class="inv-subhead" style="margin-top:1.35rem">Solana token mint</div>
+            <div class="settings-f">
+              <input type="text" id="tokenMint" placeholder="Token mint (SPL)" class="input" style="font-family:var(--mono)">
+              <input type="text" id="tokenSeedWallet" placeholder="Optional: wallet to focus cluster / % supply" class="input" style="font-family:var(--mono); margin-top:0.5rem">
+            </div>
+            <p class="inv-hint">Same engine as the Chrome extension: risk / coordination score, cluster size &amp; % of supply (shared funder), top holders, Helius identities.</p>
+            <button class="btn btn-secondary" onclick="runTokenBundle()">Analyze token bundle</button>
+            <div id="tokenBundleOut" class="inv-out inv-out-empty">
+              <div class="inv-summary" id="tokenBundleSummary">Run an analysis to see risk score, cluster %, and wallets.</div>
+              <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="tokenBundleRaw"></pre></details>
             </div>
           </div>
 
