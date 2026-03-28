@@ -1,7 +1,8 @@
 /**
  * Solana bundle snapshot — runs entirely in the extension (Helius BYOK).
- * Mirrors investigation/solana_bundle.py: top holders, shared direct-funder clustering,
- * and multi-signal coordination heuristics (see investigation/solana_bundle_signals.py).
+ * Parity with Sectester investigation/solana_bundle.py + solana_bundle_signals.py:
+ * DAS getTokenAccounts (paginated holders), largest-accounts fallback, LP skip, up to 120 wallets,
+ * 2-hop ultimate-funder clustering, parallel Helius fetches, deeper coordination defaults.
  */
 (function (global) {
   var ADDR_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -57,6 +58,44 @@
       })
       .catch(function (e) {
         return { result: null, error: e.message || 'RPC network error' };
+      });
+  }
+
+  /** DAS methods (getTokenAccounts, getAsset) require object `params`, not a JSON array. */
+  function heliusDasRpc(apiKey, method, paramsObj) {
+    var url = HELIUS_RPC + '/?api-key=' + encodeURIComponent(apiKey);
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: paramsObj || {} }),
+    })
+      .then(function (r) {
+        return r.text().then(function (text) {
+          var data;
+          try {
+            data = text ? JSON.parse(text) : {};
+          } catch (parseErr) {
+            return {
+              result: null,
+              error: (r.ok ? 'Invalid JSON from RPC' : 'HTTP ' + r.status) + (text ? ': ' + String(text).slice(0, 200) : ''),
+            };
+          }
+          if (!r.ok) {
+            var httpMsg =
+              (data.error && (data.error.message || data.error)) ||
+              (typeof data === 'object' && data.message) ||
+              'HTTP ' + r.status;
+            return { result: null, error: String(httpMsg) };
+          }
+          if (data.error) {
+            var msg = (data.error && data.error.message) || JSON.stringify(data.error);
+            return { result: null, error: msg };
+          }
+          return { result: data.result, error: null };
+        });
+      })
+      .catch(function (e) {
+        return { result: null, error: e.message || 'DAS RPC network error' };
       });
   }
 
@@ -162,13 +201,27 @@
     return Math.round((10000 * amount) / totalUi) / 100;
   }
 
-  /** Defaults match investigation/solana_bundle_signals.py env defaults. */
+  /** Defaults match investigation/solana_bundle_signals.py (deep scan). */
   var BUNDLE_SIGNAL_DEFAULTS = {
     fundingBucketSec: 5,
     lamportsRelTol: 0.002,
-    maxTransferFetch: 40,
-    maxEnhancedFetch: 14,
-    maxFunderIdentity: 24,
+    maxTransferFetch: 72,
+    maxEnhancedFetch: 32,
+    maxFunderIdentity: 56,
+    signalTransfersLimit: 100,
+    enhancedTxLimit: 55,
+  };
+
+  var BUNDLE_DEEP_DEFAULTS = {
+    maxHolders: 100,
+    maxFundedBy: 120,
+    maxFundedByCap: 150,
+    dasMaxPages: 45,
+    lpSkipMinPct: 12,
+    funderTransfersLimit: 100,
+    funderHop2Max: 56,
+    holderFetchConcurrency: 10,
+    hopFetchConcurrency: 10,
   };
 
   function safeInt(x) {
@@ -411,10 +464,130 @@
     return funderAddressFromApi(funded);
   }
 
-  function clusterKeyFromSources(wallet, funded, transfersRaw) {
-    var f = effectiveFunderAddress(funded, transfersRaw);
-    if (f) return 'funder:' + f;
-    return 'singleton:' + wallet;
+  function clusterKeyFromSources(wallet, funded, transfersRaw, hopCtx) {
+    hopCtx = hopCtx || {};
+    var hopF = hopCtx.hopFunded || {};
+    var hopT = hopCtx.hopTransfers || {};
+    var direct = effectiveFunderAddress(funded, transfersRaw);
+    if (!direct) return 'singleton:' + wallet;
+    var root = effectiveFunderAddress(hopF[direct], hopT[direct]);
+    if (root && root !== wallet && root !== direct) return 'funder:' + root;
+    return 'funder:' + direct;
+  }
+
+  function directAndRootFunder(wallet, funded, transfersRaw, hopF, hopT) {
+    hopF = hopF || {};
+    hopT = hopT || {};
+    var direct = effectiveFunderAddress(funded, transfersRaw);
+    if (!direct) return { direct: null, root: null };
+    var root = effectiveFunderAddress(hopF[direct], hopT[direct]);
+    if (root && root !== wallet && root !== direct) return { direct: direct, root: root };
+    return { direct: direct, root: null };
+  }
+
+  async function asyncPool(concurrency, items, fn) {
+    var results = new Array(items.length);
+    var next = 0;
+    async function worker() {
+      while (true) {
+        var i = next++;
+        if (i >= items.length) break;
+        results[i] = await fn(items[i], i);
+      }
+    }
+    var n = Math.min(concurrency, Math.max(1, items.length));
+    var workers = [];
+    for (var w = 0; w < n; w++) workers.push(worker());
+    await Promise.all(workers);
+    return results;
+  }
+
+  async function fetchDasTokenAccountsForMint(apiKey, mint, maxPages, pageLimit) {
+    var rows = [];
+    var cursor = null;
+    var pages = Math.max(1, maxPages);
+    var lim = Math.min(100, Math.max(1, pageLimit || 100));
+    var lastErr = null;
+    for (var p = 0; p < pages; p++) {
+      var params = { mint: mint, limit: lim };
+      if (cursor) params.cursor = cursor;
+      var das = await heliusDasRpc(apiKey, 'getTokenAccounts', params);
+      if (das.error) {
+        lastErr = das.error;
+        if (!rows.length) return { rows: [], error: das.error };
+        break;
+      }
+      var result = das.result;
+      if (!result || typeof result !== 'object') break;
+      var accounts = result.token_accounts;
+      if (!Array.isArray(accounts)) break;
+      for (var i = 0; i < accounts.length; i++) {
+        var a = accounts[i];
+        if (!a || typeof a !== 'object') continue;
+        var owner = a.owner;
+        var amt = a.amount;
+        if (typeof owner !== 'string' || !owner || amt == null) continue;
+        var raw = parseInt(String(amt), 10);
+        if (isNaN(raw)) continue;
+        rows.push({ owner: owner, amount: raw });
+      }
+      cursor = result.cursor;
+      if (!cursor || !accounts.length) break;
+    }
+    return { rows: rows, error: lastErr };
+  }
+
+  function ownerAmountFromDasRows(rows, decimals) {
+    var dec = Math.max(0, parseInt(String(decimals), 10) || 0);
+    var scale = Math.pow(10, dec);
+    var map = {};
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      if (!r || !r.owner || r.amount == null) continue;
+      var ui = r.amount / scale;
+      map[r.owner] = (map[r.owner] || 0) + ui;
+    }
+    return map;
+  }
+
+  async function holdersViaLargestAccountsAsync(apiKey, mintNorm, mh) {
+    var lg = await heliusRpc(apiKey, 'getTokenLargestAccounts', [mintNorm]);
+    if (lg.error) return { ownerAmount: null, error: 'getTokenLargestAccounts: ' + lg.error };
+    var list = lg.result && lg.result.value;
+    if (!Array.isArray(list)) return { ownerAmount: null, error: 'Unexpected getTokenLargestAccounts shape' };
+    var entries = list.slice(0, mh);
+    var tokenAccountAddrs = [];
+    var uiFromLargest = {};
+    entries.forEach(function (e) {
+      if (!e || !e.address) return;
+      tokenAccountAddrs.push(e.address);
+      if (e.uiAmount != null) {
+        var u = parseFloat(e.uiAmount);
+        uiFromLargest[e.address] = isNaN(u) ? 0 : u;
+      } else uiFromLargest[e.address] = 0;
+    });
+    var ownerAmount = {};
+    for (var start = 0; start < tokenAccountAddrs.length; start += 100) {
+      var batch = tokenAccountAddrs.slice(start, start + 100);
+      var mult = await heliusRpc(apiKey, 'getMultipleAccounts', [batch, { encoding: 'jsonParsed' }]);
+      if (mult.error) return { ownerAmount: null, error: 'getMultipleAccounts: ' + mult.error };
+      var accList = mult.result && mult.result.value;
+      if (!Array.isArray(accList)) return { ownerAmount: null, error: 'getMultipleAccounts missing value list' };
+      for (var j = 0; j < accList.length; j++) {
+        var acc = accList[j];
+        var ta = batch[j];
+        var owner = parseTokenAccountOwner(acc);
+        if (!owner) continue;
+        var uiTa = uiFromLargest[ta];
+        var parsedAmt = parseTokenAccountUiAmount(acc);
+        var amt =
+          uiTa != null && !isNaN(parseFloat(uiTa)) && parseFloat(uiTa) > 0
+            ? parseFloat(uiTa)
+            : parsedAmt;
+        ownerAmount[owner] = (ownerAmount[owner] || 0) + amt;
+      }
+    }
+    return { ownerAmount: ownerAmount, error: null };
   }
 
   function enrichWalletFunding(wallet, fundedByRow, transfersRaw) {
@@ -702,6 +875,8 @@
     var maxTransferFetch = cfg.maxTransferFetch;
     var maxEnhancedFetch = cfg.maxEnhancedFetch;
     var maxFunderIdentity = cfg.maxFunderIdentity;
+    var signalTrLimit = cfg.signalTransfersLimit != null ? cfg.signalTransfersLimit : 100;
+    var enhancedLim = cfg.enhancedTxLimit != null ? cfg.enhancedTxLimit : 55;
 
     var lookupOrder = opts.lookupOrder || [];
     var fundedBy = opts.fundedBy || {};
@@ -721,8 +896,8 @@
     }
     for (var ti = 0; ti < pending.length; ti++) {
       var w = pending[ti];
-      transfersCache[w] = await heliusTransfers(apiKey, w, 80);
-      if (ti < pending.length - 1) await sleep(50);
+      transfersCache[w] = await heliusTransfers(apiKey, w, signalTrLimit);
+      if (ti < pending.length - 1) await sleep(45);
     }
 
     var metaByWallet = {};
@@ -770,7 +945,7 @@
     }
     for (var ei = 0; ei < mw.length; ei++) {
       var we = mw[ei];
-      var em = await enhancedCoMovementMint(apiKey, mint, we, 35);
+      var em = await enhancedCoMovementMint(apiKey, mint, we, enhancedLim);
       if (em) {
         coSlotsByW[we] = em.mint_touch_slots || [];
         var ps = {};
@@ -779,7 +954,7 @@
         });
         programSets[we] = ps;
       }
-      if (ei < mw.length - 1) await sleep(80);
+      if (ei < mw.length - 1) await sleep(85);
     }
 
     var enhancedSample = { wallets_analyzed: mw, mint_touch_slots_by_wallet: coSlotsByW };
@@ -875,6 +1050,8 @@
         lamports_rel_tol: relTol,
         max_transfer_fetch: nFetch,
         max_enhanced_fetch: mw.length,
+        signal_transfers_limit: signalTrLimit,
+        enhanced_tx_limit: enhancedLim,
       },
     };
   }
@@ -887,14 +1064,32 @@
   }
 
   async function runBundleSnapshotAsync(apiKey, mint, opts) {
+    opts = opts || {};
+    var BD = BUNDLE_DEEP_DEFAULTS;
     var sw = opts.wallet ? normalizeAddress(opts.wallet) : null;
     if (opts.wallet && !sw) {
       return { ok: false, error: 'Invalid wallet address' };
     }
-    var mh = opts.maxHolders != null ? opts.maxHolders : 100;
-    var mf = opts.maxFundedBy != null ? opts.maxFundedBy : 80;
+    var mh = opts.maxHolders != null ? opts.maxHolders : BD.maxHolders;
+    var mf = opts.maxFundedBy != null ? opts.maxFundedBy : BD.maxFundedBy;
+    var capMf = opts.maxFundedByCap != null ? opts.maxFundedByCap : BD.maxFundedByCap;
     mh = Math.max(5, Math.min(mh, 200));
-    mf = Math.max(5, Math.min(mf, 200));
+    mf = Math.max(5, Math.min(mf, capMf));
+    var dasPages = opts.dasMaxPages != null ? opts.dasMaxPages : BD.dasMaxPages;
+    var lpMinPct = opts.lpSkipMinPct != null ? opts.lpSkipMinPct : BD.lpSkipMinPct;
+    var trLimit = opts.funderTransfersLimit != null ? opts.funderTransfersLimit : BD.funderTransfersLimit;
+    trLimit = Math.min(100, Math.max(1, trLimit));
+    var hop2Max = opts.funderHop2Max != null ? opts.funderHop2Max : BD.funderHop2Max;
+    var conc = opts.holderFetchConcurrency != null ? opts.holderFetchConcurrency : BD.holderFetchConcurrency;
+    var hopConc = opts.hopFetchConcurrency != null ? opts.hopFetchConcurrency : BD.hopFetchConcurrency;
+
+    var excludeNorm = {};
+    if (opts.excludeWallets && Array.isArray(opts.excludeWallets)) {
+      for (var exi = 0; exi < opts.excludeWallets.length; exi++) {
+        var ax = normalizeAddress(String(opts.excludeWallets[exi]));
+        if (ax) excludeNorm[ax] = true;
+      }
+    }
 
     var mintNorm = normalizeAddress(mint);
     if (!mintNorm) return { ok: false, error: 'Invalid mint address' };
@@ -915,13 +1110,15 @@
     var supplyVal = sup.result && sup.result.value;
     if (!supplyVal) return { ok: false, error: 'getTokenSupply returned empty' };
 
+    var supplyDecimals = parseInt(supplyVal.decimals, 10) || 0;
+
     var totalUi = 0;
     if (supplyVal.uiAmount != null) {
       totalUi = parseFloat(supplyVal.uiAmount);
       if (isNaN(totalUi)) totalUi = 0;
     } else {
       var amt0 = parseFloat(supplyVal.amount || 0);
-      var dec0 = parseInt(supplyVal.decimals, 10) || 0;
+      var dec0 = supplyDecimals;
       totalUi = dec0 >= 0 ? amt0 / Math.pow(10, dec0) : 0;
     }
     if (totalUi <= 0) {
@@ -932,64 +1129,97 @@
       };
     }
 
-    var lg = await heliusRpc(key, 'getTokenLargestAccounts', [mintNorm]);
-    if (lg.error) return { ok: false, error: 'getTokenLargestAccounts: ' + lg.error };
-    var list = lg.result && lg.result.value;
-    if (!Array.isArray(list)) return { ok: false, error: 'Unexpected getTokenLargestAccounts shape' };
-
-    var entries = list.slice(0, mh);
-    var tokenAccountAddrs = [];
-    var uiFromLargest = {};
-    entries.forEach(function (e) {
-      if (!e || !e.address) return;
-      tokenAccountAddrs.push(e.address);
-      if (e.uiAmount != null) {
-        var u = parseFloat(e.uiAmount);
-        uiFromLargest[e.address] = isNaN(u) ? 0 : u;
-      } else uiFromLargest[e.address] = 0;
-    });
-
-    var ownerAmount = {};
-
-    for (var start = 0; start < tokenAccountAddrs.length; start += 100) {
-      var batch = tokenAccountAddrs.slice(start, start + 100);
-      var mult = await heliusRpc(key, 'getMultipleAccounts', [batch, { encoding: 'jsonParsed' }]);
-      if (mult.error) return { ok: false, error: 'getMultipleAccounts: ' + mult.error };
-      var accList = mult.result && mult.result.value;
-      if (!Array.isArray(accList)) return { ok: false, error: 'getMultipleAccounts missing value list' };
-      for (var j = 0; j < accList.length; j++) {
-        var acc = accList[j];
-        var ta = batch[j];
-        var owner = parseTokenAccountOwner(acc);
-        if (!owner) continue;
-        var uiTa = uiFromLargest[ta];
-        var parsedAmt = parseTokenAccountUiAmount(acc);
-        var amt =
-          uiTa != null && !isNaN(parseFloat(uiTa)) && parseFloat(uiTa) > 0
-            ? parseFloat(uiTa)
-            : parsedAmt;
-        ownerAmount[owner] = (ownerAmount[owner] || 0) + amt;
+    var holderSource = 'das';
+    var dasFetch = await fetchDasTokenAccountsForMint(key, mintNorm, dasPages, 100);
+    var dasRows = dasFetch.rows || [];
+    var ownerAmount = ownerAmountFromDasRows(dasRows, supplyDecimals);
+    if (!Object.keys(ownerAmount).length) {
+      holderSource = 'largest_accounts';
+      var fbLa = await holdersViaLargestAccountsAsync(key, mintNorm, mh);
+      if (fbLa.error) {
+        var errMsg = fbLa.error;
+        if (dasFetch.error) errMsg = 'Holders (DAS): ' + dasFetch.error + '; fallback: ' + fbLa.error;
+        return { ok: false, error: errMsg };
       }
+      ownerAmount = fbLa.ownerAmount;
     }
 
     var ownersSorted = Object.keys(ownerAmount).sort(function (a, b) {
       return ownerAmount[b] - ownerAmount[a];
     });
 
+    var excludedLp = null;
+    var scanExclude = {};
+    Object.keys(excludeNorm).forEach(function (ek) {
+      scanExclude[ek] = true;
+    });
+    var skipLp = opts.skipLiquidityWallet !== false;
+    if (skipLp && ownersSorted.length && totalUi > 0) {
+      var topH = ownersSorted[0];
+      if (!excludeNorm[topH]) {
+        var pctTop = (100 * (ownerAmount[topH] || 0)) / totalUi;
+        if (pctTop >= lpMinPct) {
+          excludedLp = topH;
+          scanExclude[topH] = true;
+        }
+      }
+    }
+
     var lookupOrder = [];
     if (sw) lookupOrder.push(sw);
     ownersSorted.forEach(function (w) {
+      if (scanExclude[w]) return;
       if (lookupOrder.indexOf(w) === -1) lookupOrder.push(w);
     });
     lookupOrder = lookupOrder.slice(0, mf);
 
+    if (!lookupOrder.length) {
+      return {
+        ok: false,
+        error:
+          'No holder wallets to scan after liquidity / manual exclusions. Set skipLiquidityWallet: false or raise lpSkipMinPct (e.g. 100+ to disable LP skip).',
+      };
+    }
+
     var fundedBy = {};
     var transfersBy = {};
-    for (var i = 0; i < lookupOrder.length; i++) {
-      var w = lookupOrder[i];
-      fundedBy[w] = await heliusFundedBy(key, w);
-      transfersBy[w] = await heliusTransfers(key, w, 200);
-      if (i < lookupOrder.length - 1) await sleep(50);
+    var intelRows = await asyncPool(conc, lookupOrder, async function (w) {
+      var fb = await heliusFundedBy(key, w);
+      var tr = await heliusTransfers(key, w, trLimit);
+      return { w: w, fb: fb, tr: tr };
+    });
+    for (var ir = 0; ir < intelRows.length; ir++) {
+      var row = intelRows[ir];
+      fundedBy[row.w] = row.fb;
+      transfersBy[row.w] = row.tr;
+    }
+
+    var hopFundedBy = {};
+    var hopTransfersBy = {};
+    var hopCtxBase = { hopFunded: hopFundedBy, hopTransfers: hopTransfersBy };
+    var hopTargetsFetched = 0;
+    if (hop2Max > 0) {
+      var funderCounts = {};
+      lookupOrder.forEach(function (w) {
+        var df = effectiveFunderAddress(fundedBy[w], transfersBy[w]);
+        if (df) funderCounts[df] = (funderCounts[df] || 0) + 1;
+      });
+      var hopTargets = Object.keys(funderCounts)
+        .sort(function (a, b) {
+          return (funderCounts[b] || 0) - (funderCounts[a] || 0);
+        })
+        .slice(0, hop2Max);
+      hopTargetsFetched = hopTargets.length;
+      var hopRows = await asyncPool(hopConc, hopTargets, async function (addr) {
+        var hfb = await heliusFundedBy(key, addr);
+        var htr = await heliusTransfers(key, addr, trLimit);
+        return { addr: addr, fb: hfb, tr: htr };
+      });
+      for (var hr = 0; hr < hopRows.length; hr++) {
+        var hrw = hopRows[hr];
+        hopFundedBy[hrw.addr] = hrw.fb;
+        hopTransfersBy[hrw.addr] = hrw.tr;
+      }
     }
 
     var clusterMembers = {};
@@ -998,12 +1228,12 @@
       if (clusterMembers[fk].indexOf(w) === -1) clusterMembers[fk].push(w);
     }
     lookupOrder.forEach(function (w) {
-      addToCluster(clusterKeyFromSources(w, fundedBy[w], transfersBy[w]), w);
+      addToCluster(clusterKeyFromSources(w, fundedBy[w], transfersBy[w], hopCtxBase), w);
     });
 
     var focusClusterKey = null;
     if (sw) {
-      focusClusterKey = clusterKeyFromSources(sw, fundedBy[sw], transfersBy[sw]);
+      focusClusterKey = clusterKeyFromSources(sw, fundedBy[sw], transfersBy[sw], hopCtxBase);
     } else {
       var bestKey = null;
       var bestSupply = 0;
@@ -1031,7 +1261,7 @@
       seedBalanceUi = await balanceUiForMint(key, sw, mintNorm);
       if (seedBalanceUi == null) seedBalanceUi = ownerAmount[sw];
       if (focusClusterKey && focusMembers.indexOf(sw) === -1) {
-        if (clusterKeyFromSources(sw, fundedBy[sw], transfersBy[sw]) === focusClusterKey) focusMembers.push(sw);
+        if (clusterKeyFromSources(sw, fundedBy[sw], transfersBy[sw], hopCtxBase) === focusClusterKey) focusMembers.push(sw);
       }
     }
 
@@ -1050,11 +1280,13 @@
     }
 
     var holdersOut = ownersSorted.slice(0, 20).map(function (w) {
+      var dr = directAndRootFunder(w, fundedBy[w], transfersBy[w], hopFundedBy, hopTransfersBy);
       return {
         wallet: w,
         amount_ui: Math.round(ownerAmount[w] * 1e8) / 1e8,
         pct_supply: supplyPct(ownerAmount[w], totalUi),
-        funder: effectiveFunderAddress(fundedBy[w], transfersBy[w]),
+        funder: dr.direct,
+        funder_root: dr.root,
         in_focus_cluster: focusMembers.indexOf(w) >= 0,
       };
     });
@@ -1062,7 +1294,7 @@
     var focusNote = null;
     if (!focusClusterKey && !sw) {
       focusNote =
-        'No multi-wallet cluster with a shared direct funder in this sample. Optional: enter a wallet to focus that address’s funder-linked group.';
+        'No multi-wallet cluster with a shared ultimate funder in this sample. Optional: enter a wallet to focus that address’s funder-linked group.';
     }
 
     var identities = await heliusBatchIdentity(key, focusMembers.slice(0, 100));
@@ -1098,9 +1330,22 @@
       focus_cluster_note: focusNote,
       top_holders: holdersOut,
       identities: identities,
-      params: { max_holders: mh, max_funded_by_lookups: mf, funder_transfers_limit: 200 },
+      excluded_liquidity_wallet: excludedLp,
+      params: {
+        max_holders: mh,
+        max_funded_by_lookups: mf,
+        funder_transfers_limit: trLimit,
+        holder_fetch_source: holderSource,
+        das_max_pages: dasPages,
+        das_token_account_rows: dasRows.length,
+        unique_holders_sampled: ownersSorted.length,
+        lp_skip_min_pct: lpMinPct,
+        funder_hop2_max: hop2Max,
+        funder_hop2_wallets_fetched: hopTargetsFetched,
+        deep_bundle_scan: true,
+      },
       disclaimer:
-        'Heuristic only: clusters use the same *direct* funder where possible from first inbound SOL (Helius /transfers), else funded-by. Aligns better with explorer-style "funded by" graphs. Wallets not in the sampled top holders may be missing. Not financial advice.',
+        'Heuristic only: clusters prefer a shared 2-hop ultimate funder when Helius returns data for intermediate wallets (else direct first inbound SOL / funded-by). Deep scan uses more API calls and time. Not financial advice.',
       pnl_note: 'PnL not computed here; use an explorer or portfolio tool for full buy/sell history.',
       bundle_signals: bundleSignals,
     };

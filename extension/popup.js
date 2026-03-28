@@ -536,11 +536,30 @@
         parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(String(bs.error))}</p>`);
       }
     }
+    const p = data.params || {};
+    if (p.holder_fetch_source || p.unique_holders_sampled != null) {
+      parts.push(
+        `<p class="sol-disclaimer-mini">Holders: <strong>${escapeHtml(String(p.holder_fetch_source || '—'))}</strong> · ${escapeHtml(String(p.unique_holders_sampled ?? '—'))} owners sampled · ${escapeHtml(String(p.max_funded_by_lookups ?? '—'))} wallets scanned</p>`
+      );
+    }
+    if (data.excluded_liquidity_wallet) {
+      const ew = data.excluded_liquidity_wallet;
+      parts.push(
+        `<p class="sol-disclaimer-mini">Skipped LP-sized holder from funder scan: <span class="mono">${escapeHtml(ew.slice(0, 10))}…</span></p>`
+      );
+    }
     if (data.top_holders && data.top_holders.length) {
       parts.push('<div class="sol-h3-mini">Top holders</div><ul class="sol-list-mini">');
       data.top_holders.slice(0, 6).forEach((h) => {
         const tag = h.in_focus_cluster ? ' <span style="color:var(--primary)">●</span>' : '';
-        parts.push(`<li>${escapeHtml(h.wallet.slice(0, 6))}… ${escapeHtml(String(h.pct_supply))}%${tag}</li>`);
+        let fund = '';
+        if (h.funder) {
+          fund = ` · ${escapeHtml(h.funder.slice(0, 6))}…`;
+          if (h.funder_root) fund += `→${escapeHtml(h.funder_root.slice(0, 5))}…`;
+        }
+        parts.push(
+          `<li>${escapeHtml(h.wallet.slice(0, 6))}… ${escapeHtml(String(h.pct_supply))}%${fund}${tag}</li>`
+        );
       });
       parts.push('</ul>');
     }
@@ -574,7 +593,10 @@
       [SOL_MINT_KEY]: mint,
       [SOL_WALLET_KEY]: mode === 'token' ? (wallet || '') : walletOnly
     });
-    solState.textContent = 'Calling Helius…';
+    solState.textContent =
+      mode === 'token'
+        ? 'Deep bundle scan (Helius)… often several minutes — keep this tab open.'
+        : 'Calling Helius…';
     solState.className = 'popup-sol-status scanning';
     solOut.innerHTML = '';
 
