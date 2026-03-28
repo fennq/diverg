@@ -49,9 +49,26 @@ def _preview(body: str | bytes) -> str:
 
 
 def _norm_url(url: str) -> str:
+    """Normalize and validate a URL for PoC requests. Returns '' on invalid input."""
     url = (url or "").strip()
-    if url and not url.startswith("http"):
+    if not url:
+        return ""
+    # Reject non-http(s) schemes before we auto-prefix
+    if "://" in url and not url.startswith("http://") and not url.startswith("https://"):
+        return ""
+    # Reject scheme-like patterns without "://" (e.g. "javascript:alert(1)", "data:text")
+    # but allow "host:port" (digits after colon)
+    if "://" not in url and not url.startswith("http"):
+        colon_idx = url.find(":")
+        if colon_idx != -1:
+            after_colon = url[colon_idx + 1:].split("/")[0]
+            if not after_colon.isdigit():
+                return ""
+    if not url.startswith("http://") and not url.startswith("https://"):
         url = "https://" + url
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return ""
     return url
 
 
