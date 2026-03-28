@@ -26,13 +26,17 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
         Home
       </div>
-      <div class="nav-item" data-page="scanner">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        Scanner
+      <div class="nav-item" data-page="analytics">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        Analytics
       </div>
       <div class="nav-item" data-page="history">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         History
+      </div>
+      <div class="nav-item" data-page="analytics">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        Analytics
       </div>
       <div class="nav-item" data-page="findings">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -125,45 +129,83 @@
         </div>
       </div>
 
-      <!-- ═══ SCANNER ════════════════════════════════════════════════════ -->
-      <div class="page" id="page-scanner">
-        <div class="hero">
-          <div class="hero-title">Configure scan</div>
+      <!-- ═══ ANALYTICS ═══════════════════════════════════════════════════ -->
+      <div class="page" id="page-analytics">
+        <div class="section-h" style="margin-top:2rem">
+          <span class="section-title">Security Overview</span>
         </div>
 
-        <div class="command-box">
-          <input type="text" class="command-input" id="scanUrl" placeholder="https://example.com">
-          <button class="command-btn" onclick="launchScan()">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          </button>
+        <!-- Chart Cards -->
+        <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:1rem; margin-bottom:2rem">
+          <div class="card">
+            <div class="card-h">
+              <h3>Findings by Severity</h3>
+            </div>
+            <div class="card-b">
+              <div class="chart-bars" id="severityChart">
+                <div class="chart-bar-row">
+                  <span class="chart-label">Critical</span>
+                  <div class="chart-bar-wrap"><div class="chart-bar critical" id="barCritical" style="width:0%"></div></div>
+                  <span class="chart-value" id="valCritical">0</span>
+                </div>
+                <div class="chart-bar-row">
+                  <span class="chart-label">High</span>
+                  <div class="chart-bar-wrap"><div class="chart-bar high" id="barHigh" style="width:0%"></div></div>
+                  <span class="chart-value" id="valHigh">0</span>
+                </div>
+                <div class="chart-bar-row">
+                  <span class="chart-label">Medium</span>
+                  <div class="chart-bar-wrap"><div class="chart-bar medium" id="barMedium" style="width:0%"></div></div>
+                  <span class="chart-value" id="valMedium">0</span>
+                </div>
+                <div class="chart-bar-row">
+                  <span class="chart-label">Low</span>
+                  <div class="chart-bar-wrap"><div class="chart-bar low" id="barLow" style="width:0%"></div></div>
+                  <span class="chart-value" id="valLow">0</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-h">
+              <h3>Risk Distribution</h3>
+            </div>
+            <div class="card-b" style="display:flex; align-items:center; justify-content:center; min-height:200px">
+              <div class="donut-chart" id="riskDonut">
+                <div class="donut-center">
+                  <div class="donut-value" id="donutValue">—</div>
+                  <div class="donut-label">avg risk</div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="scope-grid" id="scopeGrid">
-          <div class="scope-opt" data-scope="quick">
-            <div class="scope-opt-title">Quick</div>
-            <div class="scope-opt-desc">Headers & OSINT</div>
+        <!-- Trend Chart -->
+        <div class="card" style="margin-bottom:2rem">
+          <div class="card-h">
+            <h3>Scan Activity (Last 30 Days)</h3>
           </div>
-          <div class="scope-opt active" data-scope="full">
-            <div class="scope-opt-title">Full</div>
-            <div class="scope-opt-desc">Complete assessment</div>
-          </div>
-          <div class="scope-opt" data-scope="web">
-            <div class="scope-opt-title">Web</div>
-            <div class="scope-opt-desc">Vulns & auth</div>
-          </div>
-          <div class="scope-opt" data-scope="crypto">
-            <div class="scope-opt-title">Crypto</div>
-            <div class="scope-opt-desc">DeFi analysis</div>
+          <div class="card-b">
+            <div class="trend-chart" id="trendChart">
+              <div class="trend-bars" id="trendBars"></div>
+              <div class="trend-labels" id="trendLabels"></div>
+            </div>
           </div>
         </div>
 
-        <div class="progress-box" id="progressBox">
-          <div class="progress-h">
-            <div class="progress-dot"></div>
-            <span id="progressText">Scanning…</span>
+        <!-- Top Categories -->
+        <div class="card">
+          <div class="card-h">
+            <h3>Top Vulnerability Categories</h3>
           </div>
-          <div id="skillsList"></div>
-          <div id="liveFindings" style="margin-top:1rem"></div>
+          <div class="card-b" id="topCategories">
+            <div class="empty" style="padding:2rem">
+              <div class="empty-t">No data yet</div>
+              <div class="empty-d">Run scans to see analytics</div>
+            </div>
+          </div>
         </div>
       </div>
 

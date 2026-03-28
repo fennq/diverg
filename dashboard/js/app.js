@@ -15,6 +15,7 @@ function navigate(page, data) {
   document.getElementById('pageTitle').textContent = page.charAt(0).toUpperCase() + page.slice(1);
 
   if (page === 'home') loadHome();
+  if (page === 'analytics') loadAnalytics();
   if (page === 'history') loadHistory();
   if (page === 'findings') loadFindings();
   if (page === 'attack-paths') loadAttackPaths();
@@ -126,6 +127,96 @@ async function loadHome() {
   } catch { document.getElementById('statScans').textContent = '—'; }
 }
 
+// ── ANALYTICS ──────────────────────────────────────────────────────────────
+async function loadAnalytics() {
+  try {
+    const s = await get('/api/stats');
+    const history = await get('/api/history?limit=100');
+    const scans = history.scans || [];
+
+    // Severity breakdown
+    let critical = 0, high = 0, medium = 0, low = 0;
+    scans.forEach(scan => {
+      (scan.findings || []).forEach(f => {
+        if (f.severity === 'Critical') critical++;
+        else if (f.severity === 'High') high++;
+        else if (f.severity === 'Medium') medium++;
+        else low++;
+      });
+    });
+    const max = Math.max(critical, high, medium, low, 1);
+    document.getElementById('valCritical').textContent = critical;
+    document.getElementById('barCritical').style.width = (critical / max * 100) + '%';
+    document.getElementById('valHigh').textContent = high;
+    document.getElementById('barHigh').style.width = (high / max * 100) + '%';
+    document.getElementById('valMedium').textContent = medium;
+    document.getElementById('barMedium').style.width = (medium / max * 100) + '%';
+    document.getElementById('valLow').textContent = low;
+    document.getElementById('barLow').style.width = (low / max * 100) + '%';
+
+    // Donut chart - avg risk
+    const avgRisk = s.avg_risk_score || 0;
+    document.getElementById('donutValue').textContent = avgRisk > 0 ? avgRisk : '—';
+    const donut = document.getElementById('riskDonut');
+    if (avgRisk > 0) {
+      const redPct = Math.min(avgRisk / 10 * 100, 100);
+      donut.style.background = `conic-gradient(var(--red) 0% ${redPct}%, var(--elevated) ${redPct}% 100%)`;
+    }
+
+    // Trend chart (last 30 days)
+    const days = 30;
+    const counts = new Array(days).fill(0);
+    const labels = [];
+    const today = new Date();
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      labels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+    }
+    scans.forEach(scan => {
+      const d = new Date(scan.created_at);
+      const daysAgo = Math.floor((today - d) / (1000 * 60 * 60 * 24));
+      if (daysAgo >= 0 && daysAgo < days) counts[days - 1 - daysAgo]++;
+    });
+    const maxCount = Math.max(...counts, 1);
+    const trendBars = document.getElementById('trendBars');
+    trendBars.innerHTML = counts.map(c =>
+      `<div class="trend-bar" style="height:${Math.max(c / maxCount * 100, 4)}%"></div>`
+    ).join('');
+    const trendLabels = document.getElementById('trendLabels');
+    trendLabels.innerHTML = `
+      <span>${labels[0]}</span>
+      <span>${labels[Math.floor(days/2)]}</span>
+      <span>${labels[days-1]}</span>
+    `;
+
+    // Top categories
+    const cats = {};
+    scans.forEach(scan => {
+      (scan.findings || []).forEach(f => {
+        const cat = f.category || 'Other';
+        cats[cat] = (cats[cat] || 0) + 1;
+      });
+    });
+    const sortedCats = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const topTotal = sortedCats[0]?.[1] || 1;
+    const catsEl = document.getElementById('topCategories');
+    if (sortedCats.length === 0) {
+      catsEl.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">No data yet</div><div class="empty-d">Run scans to see analytics</div></div>`;
+    } else {
+      catsEl.innerHTML = sortedCats.map(([name, count]) => `
+        <div class="category-row">
+          <span class="category-name">${esc(name)}</span>
+          <div class="category-bar-wrap"><div class="category-bar" style="width:${count / topTotal * 100}%"></div></div>
+          <span class="category-count">${count}</span>
+        </div>
+      `).join('');
+    }
+  } catch (e) {
+    console.error('Analytics load failed:', e);
+  }
+}
+
 function scanRow(s) {
   const cls = riskClass(s.risk_verdict);
   return `
@@ -138,14 +229,55 @@ function scanRow(s) {
     </div>`;
 }
 
-function quickLaunch() {
-  const url = document.getElementById('quickUrl').value.trim();
+async function quickLaunch() {
+  let url = document.getElementById('quickUrl').value.trim();
   if (!url) { toast('Enter a URL', 'err'); return; }
-  navigate('scanner');
-  setTimeout(() => {
-    document.getElementById('scanUrl').value = url;
-    launchScan();
-  }, 100);
+  if (!url.startsWith('http')) url = 'https://' + url;
+
+  const btn = document.getElementById('quickBtn');
+  btn.disabled = true;
+  btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="30"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/></circle></svg>`;
+
+  try {
+    toast('Starting scan…', 'ok');
+    const resp = await fetch(api('/api/scan/stream'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_url: url, scope: state.scope })
+    });
+
+    let result = null;
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.event === 'scan:complete') result = msg;
+        } catch {}
+      }
+    }
+
+    if (result?.scan_id) {
+      toast('Scan complete', 'ok');
+      openScan(result.scan_id);
+    } else {
+      toast('Scan finished', 'ok');
+      loadHome();
+    }
+  } catch (e) {
+    toast('Scan failed: ' + (e.message || 'Error'), 'err');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
+  }
 }
 
 // ── SCANNER ────────────────────────────────────────────────────────────────
