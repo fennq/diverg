@@ -85,23 +85,80 @@ def _helius_get(path: str, params: Optional[dict] = None, base: str = HELIUS_WAL
 
 def _helius_post_json_rpc(method: str, params: dict) -> Optional[Any]:
     """POST JSON-RPC to Helius RPC (DAS, etc.). Returns result or None."""
+    res, _err = helius_das_rpc_ex(method, params)
+    return res
+
+
+def helius_das_rpc_ex(method: str, params: dict) -> tuple[Optional[Any], Optional[str]]:
+    """
+    DAS / object-param JSON-RPC on Helius (e.g. getTokenAccounts, getAsset).
+    Standard methods like getTokenLargestAccounts use array params via helius_json_rpc_ex.
+    """
     if not HELIUS_KEY:
-        return None
+        return None, "HELIUS_API_KEY not set"
     url = f"{HELIUS_RPC_BASE}/?api-key={HELIUS_KEY}"
     try:
         r = requests.post(
             url,
-            json={"jsonrpc": "2.0", "id": "1", "method": method, "params": params},
+            json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
             headers={"Content-Type": "application/json"},
-            timeout=30,
+            timeout=90,
         )
         r.raise_for_status()
         data = r.json()
-        if data.get("error"):
-            return None
-        return data.get("result")
-    except Exception:
-        return None
+        err = data.get("error")
+        if err:
+            msg = err.get("message") if isinstance(err, dict) else str(err)
+            return None, msg or "DAS RPC error"
+        return data.get("result"), None
+    except Exception as e:
+        return None, str(e)
+
+
+def helius_das_token_accounts_for_mint(
+    mint: str,
+    *,
+    max_pages: int = 30,
+    page_limit: int = 100,
+) -> tuple[list[dict[str, Any]], Optional[str]]:
+    """
+    Paginated DAS getTokenAccounts for a mint (holder token accounts).
+    Each dict: {"owner": str, "amount": int} raw token amount (before decimals).
+    """
+    rows: list[dict[str, Any]] = []
+    cursor: Optional[str] = None
+    lim = max(1, min(int(page_limit), 100))
+    pages = max(1, int(max_pages))
+    last_err: Optional[str] = None
+    for _ in range(pages):
+        params: dict[str, Any] = {"mint": mint, "limit": lim}
+        if cursor:
+            params["cursor"] = cursor
+        result, err = helius_das_rpc_ex("getTokenAccounts", params)
+        if err:
+            last_err = err
+            if not rows:
+                return [], err
+            break
+        if not result or not isinstance(result, dict):
+            break
+        accounts = result.get("token_accounts")
+        if not isinstance(accounts, list):
+            break
+        for a in accounts:
+            if not isinstance(a, dict):
+                continue
+            owner = a.get("owner")
+            amt = a.get("amount")
+            if isinstance(owner, str) and owner and amt is not None:
+                try:
+                    rows.append({"owner": owner, "amount": int(amt)})
+                except (TypeError, ValueError):
+                    pass
+        cursor = result.get("cursor")
+        if not cursor or not accounts:
+            break
+    return rows, last_err
 
 
 def helius_json_rpc_ex(method: str, params: list) -> tuple[Optional[Any], Optional[str]]:

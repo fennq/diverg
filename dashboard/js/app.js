@@ -78,7 +78,7 @@ function authHeaders(extra) {
 
 async function get(path) {
   const r = await fetch(api(path), { headers: authHeaders() });
-  if (r.status === 401) { Auth.logout(); return; }
+  if (r.status === 401) { Auth.logout(); throw new Error('Session expired. Sign in again.'); }
   let data = {};
   try { data = await r.json(); } catch { /* non-json */ }
   if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
@@ -88,7 +88,7 @@ async function post(path, body) {
   const r = await fetch(api(path), {
     method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body)
   });
-  if (r.status === 401) { Auth.logout(); return; }
+  if (r.status === 401) { Auth.logout(); throw new Error('Session expired. Sign in again.'); }
   let data = {};
   try { data = await r.json(); } catch { /* non-json */ }
   if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
@@ -96,7 +96,7 @@ async function post(path, body) {
 }
 async function del(path) {
   const r = await fetch(api(path), { method: 'DELETE', headers: authHeaders() });
-  if (r.status === 401) { Auth.logout(); return; }
+  if (r.status === 401) { Auth.logout(); throw new Error('Session expired. Sign in again.'); }
   let data = {};
   try { data = await r.json(); } catch { /* non-json */ }
   if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
@@ -694,15 +694,25 @@ function _invTokenBundleSummaryHtml(d) {
     }).join('');
     holders = `<div class="inv-holders"><div class="inv-subhead" style="margin-top:0.75rem">Top holders</div><table><thead><tr><th>Wallet</th><th>% supply</th><th>Cluster</th><th>Funder</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   }
+  const p = d.params || {};
+  let scanMeta = '';
+  if (p.holder_fetch_source || p.unique_holders_sampled != null) {
+    scanMeta = `<p class="inv-muted" style="font-size:0.7rem">Holder data: <strong>${esc(String(p.holder_fetch_source || '—'))}</strong> · ${esc(String(p.unique_holders_sampled ?? '—'))} unique owners in sample · funders fetched for up to ${esc(String(p.max_funded_by_lookups ?? '—'))} wallets</p>`;
+  }
+  if (d.excluded_liquidity_wallet) {
+    const ew = d.excluded_liquidity_wallet;
+    const short = ew.length > 14 ? ew.slice(0, 12) + '…' : ew;
+    scanMeta += `<p class="inv-muted" style="font-size:0.7rem">Excluded from funder scan (liquidity-sized holder): <span class="mono">${esc(short)}</span></p>`;
+  }
   const notes = [d.focus_cluster_note, d.disclaimer, d.pnl_note].filter(Boolean).map(x => `<p class="inv-muted">${esc(x)}</p>`).join('');
-  return `<p class="mono" style="font-size:0.75rem;margin-bottom:0.35rem">${esc(d.mint || '')}</p>${metrics}${coordLine}${seed}${holders}${notes}`;
+  return `<p class="mono" style="font-size:0.75rem;margin-bottom:0.35rem">${esc(d.mint || '')}</p>${scanMeta}${metrics}${coordLine}${seed}${holders}${notes}`;
 }
 
 async function runTokenBundle() {
   const mint = document.getElementById('tokenMint').value.trim();
   const wallet = document.getElementById('tokenSeedWallet').value.trim();
   if (!mint) { toast('Enter token mint', 'err'); return; }
-  const key = localStorage.getItem('diverg_helius_key') || '';
+  const key = (localStorage.getItem('diverg_helius_key') || '').trim();
   if (!key) { toast('Add Helius API key in Settings', 'err'); return; }
   _invSetOut('tokenBundleOut', 'tokenBundleSummary', 'tokenBundleRaw', 'inv-out-empty',
     '<p class="inv-muted">Analyzing token via Helius (holders, funders, coordination)… Can take up to a minute.</p>', null);

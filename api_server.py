@@ -823,7 +823,7 @@ def investigation_blockchain():
 
     env_key = (os.environ.get("HELIUS_API_KEY") or "").strip()
     body_key = sanitize_text(data.get("helius_api_key") or "", 256).strip()
-    api_key = env_key or body_key
+    api_key = body_key or env_key
 
     out: dict = {"address": addr, "network": network}
 
@@ -1010,11 +1010,20 @@ def investigation_solana_bundle():
     wallet = sanitize_text(data.get("wallet") or "", 128).strip() or None
     env_key = (os.environ.get("HELIUS_API_KEY") or "").strip()
     body_key = sanitize_text(data.get("helius_api_key") or "", 256).strip()
-    api_key = env_key or body_key
+    api_key = body_key or env_key
     if not mint:
         return jsonify({"error": "Missing mint"}), 400
     if not api_key:
         return jsonify({"error": "Helius API key required. Add it in Settings or set HELIUS_API_KEY on the server."}), 400
+
+    exclude_wallets = None
+    ex = data.get("exclude_wallets")
+    if isinstance(ex, list):
+        exclude_wallets = [
+            sanitize_text(str(x), 128).strip()
+            for x in ex[:30]
+            if x and str(x).strip()
+        ] or None
 
     inv_dir = ROOT / "investigation"
     inv_path = str(inv_dir)
@@ -1031,7 +1040,13 @@ def investigation_solana_bundle():
         old_key = getattr(oc, "HELIUS_KEY", "") or ""
         try:
             oc.HELIUS_KEY = api_key.strip()
-            out = sb.run_bundle_snapshot(mint, wallet)
+            out = sb.run_bundle_snapshot(
+                mint,
+                wallet,
+                max_holders=100,
+                max_funded_by_lookups=100,
+                exclude_wallets=exclude_wallets,
+            )
         finally:
             oc.HELIUS_KEY = old_key
 
