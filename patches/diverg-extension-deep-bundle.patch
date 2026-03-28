@@ -1,0 +1,1854 @@
+From d49f8dc5c43f6965d329dac46c231699c1612d2b Mon Sep 17 00:00:00 2001
+From: fennq <fennq@users.noreply.github.com>
+Date: Sat, 28 Mar 2026 17:40:12 +0800
+Subject: [PATCH] feat: deep Solana bundle parity with Sectester (DAS, 2-hop,
+ signals)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- solana_bundle: DAS getTokenAccounts pagination, LP skip, 120 wallets, 2-hop
+  funder clustering, parallel Helius fetches, coordination defaults 72/32/100
+- popup: snapshot UI (cluster, coordination, holder source, LP skip, funder→root),
+  depth profile bundle caps aligned, 8m token timeouts, graph token path passes wallet
+
+Made-with: Cursor
+---
+ popup.js         |   83 ++-
+ solana_bundle.js | 1610 +++++++++++++++++++++++++++++++++++++---------
+ 2 files changed, 1367 insertions(+), 326 deletions(-)
+
+diff --git a/popup.js b/popup.js
+index 8b8f06e..0baffba 100644
+--- a/popup.js
++++ b/popup.js
+@@ -96,18 +96,18 @@
+     const p = (profile || 'balanced').toLowerCase();
+     if (p === 'balanced') {
+       return {
+-        bundle: { maxHolders: 80, maxFundedBy: 60 },
++        bundle: { maxHolders: 100, maxFundedBy: 120 },
+         graph: { depth: 3, maxWallets: 120, maxTransfersPerWallet: 80, maxNeighborsPerWallet: 6, maxBalanceLookups: 90 },
+       };
+     }
+     if (p === 'max') {
+       return {
+-        bundle: { maxHolders: 180, maxFundedBy: 140 },
++        bundle: { maxHolders: 150, maxFundedBy: 150 },
+         graph: { depth: 5, maxWallets: 300, maxTransfersPerWallet: 240, maxNeighborsPerWallet: 12, maxBalanceLookups: 200 },
+       };
+     }
+     return {
+-      bundle: { maxHolders: 120, maxFundedBy: 90 },
++      bundle: { maxHolders: 80, maxFundedBy: 80 },
+       graph: { depth: 4, maxWallets: 180, maxTransfersPerWallet: 120, maxNeighborsPerWallet: 8, maxBalanceLookups: 120 },
+     };
+   }
+@@ -469,18 +469,18 @@
+     const p = (profile || 'balanced').toLowerCase();
+     if (p === 'balanced') {
+       return {
+-        bundle: { maxHolders: 80, maxFundedBy: 60 },
++        bundle: { maxHolders: 100, maxFundedBy: 120 },
+         graph: { depth: 3, maxWallets: 120, maxTransfersPerWallet: 80, maxNeighborsPerWallet: 6, maxBalanceLookups: 90 },
+       };
+     }
+     if (p === 'max') {
+       return {
+-        bundle: { maxHolders: 180, maxFundedBy: 140 },
++        bundle: { maxHolders: 150, maxFundedBy: 150 },
+         graph: { depth: 5, maxWallets: 300, maxTransfersPerWallet: 240, maxNeighborsPerWallet: 12, maxBalanceLookups: 200 },
+       };
+     }
+     return {
+-      bundle: { maxHolders: 120, maxFundedBy: 90 },
++      bundle: { maxHolders: 80, maxFundedBy: 80 },
+       graph: { depth: 4, maxWallets: 180, maxTransfersPerWallet: 120, maxNeighborsPerWallet: 8, maxBalanceLookups: 120 },
+     };
+   }
+@@ -642,13 +642,59 @@
+         `</div>`);
+     }
+ 
++    /* ── runBundleSnapshot path (DAS + 2-hop funders; aligns with Sectester / diverg monorepo) ── */
++    if (data.focus_cluster_pct_supply != null || (data.bundle_signals && data.bundle_signals.coordination_score != null)) {
++      if (Array.isArray(data.focus_cluster_wallets)) {
++        p.push(
++          `<div class="sol-card-mini highlight"><div class="sol-k-mini">Cluster (ultimate funder)</div><div class="sol-v-mini">${escapeHtml(String(data.focus_cluster_wallets.length))} wallets · ${escapeHtml(String(data.focus_cluster_pct_supply != null ? data.focus_cluster_pct_supply : '—'))}%</div>` +
++            `<div class="sol-k-mini" style="margin-top:6px">Cluster balance</div><div class="sol-v-mini">${escapeHtml(String(data.focus_cluster_supply_ui != null ? data.focus_cluster_supply_ui : '—'))}</div></div>`
++        );
++      }
++      if (data.bundle_signals && data.bundle_signals.coordination_score != null) {
++        const bs = data.bundle_signals;
++        const rs = Array.isArray(bs.coordination_reasons) ? bs.coordination_reasons.join(', ') : '';
++        p.push(
++          `<div class="sol-card-mini"><div class="sol-k-mini">Coordination score</div><div class="sol-v-mini">${escapeHtml(String(bs.coordination_score))}/100</div>` +
++            (rs ? `<div class="sol-k-mini" style="margin-top:6px">Signals</div><div class="sol-v-mini" style="font-size:11px">${escapeHtml(rs)}</div>` : '') +
++            `</div>`
++        );
++        if (bs.error) p.push(`<p class="sol-disclaimer-mini">${escapeHtml(String(bs.error))}</p>`);
++      }
++      const pr = data.params || {};
++      if (pr.holder_fetch_source || pr.unique_holders_sampled != null) {
++        p.push(
++          `<p class="sol-disclaimer-mini">Holders: <strong>${escapeHtml(String(pr.holder_fetch_source || '—'))}</strong> · ${escapeHtml(String(pr.unique_holders_sampled ?? '—'))} owners · ${escapeHtml(String(pr.max_funded_by_lookups ?? '—'))} wallets scanned</p>`
++        );
++      }
++      if (data.excluded_liquidity_wallet) {
++        const ew = data.excluded_liquidity_wallet;
++        p.push(
++          `<p class="sol-disclaimer-mini">Skipped LP-sized holder from funder scan: <span class="mono">${escapeHtml(ew.slice(0, 10))}…</span></p>`
++        );
++      }
++      if (data.seed_wallet) {
++        p.push(
++          `<div class="sol-card-mini"><div class="sol-k-mini">Focus wallet</div><div class="sol-v-mini mono" style="font-size:10px;word-break:break-all">${escapeHtml(data.seed_wallet)}</div></div>`
++        );
++      }
++    }
++
+     /* ── Top holders ── */
+     if (data.top_holders && data.top_holders.length) {
+       p.push('<div class="sol-h3-mini">Top holders</div><ul class="sol-list-mini">');
+       data.top_holders.slice(0, 10).forEach((h) => {
+-        const fStr = h.funder_short ? ` ← ${h.funder_short}` : '';
+-        const bundleTag = h.in_bundle ? ' <span style="color:#e74c3c">⚑</span>' : '';
+-        p.push(`<li>${escapeHtml(h.wallet_short || h.wallet.slice(0,8)+'…')} &nbsp;<b>${escapeHtml(String(h.pct_supply))}%</b>${escapeHtml(fStr)}${bundleTag}</li>`);
++        let fStr = '';
++        if (h.funder_short) fStr = ` ← ${h.funder_short}`;
++        else if (h.funder) {
++          fStr = ` · ${escapeHtml(String(h.funder).slice(0, 6))}…`;
++          if (h.funder_root) fStr += `→${escapeHtml(String(h.funder_root).slice(0, 5))}…`;
++        }
++        const bundleTag = h.in_bundle
++          ? ' <span style="color:#e74c3c">⚑</span>'
++          : h.in_focus_cluster
++            ? ' <span style="color:var(--primary)">●</span>'
++            : '';
++        p.push(`<li>${escapeHtml(h.wallet_short || h.wallet.slice(0, 8) + '…')} &nbsp;<b>${escapeHtml(String(h.pct_supply))}%</b>${fStr}${bundleTag}</li>`);
+       });
+       p.push('</ul>');
+     }
+@@ -693,6 +739,8 @@
+       }
+     }
+ 
++    if (data.focus_cluster_note) p.push(`<p class="sol-disclaimer-mini">${escapeHtml(data.focus_cluster_note)}</p>`);
++    if (data.pnl_note) p.push(`<p class="sol-disclaimer-mini">${escapeHtml(data.pnl_note)}</p>`);
+     if (data.disclaimer) p.push(`<p class="sol-disclaimer-mini">${escapeHtml(data.disclaimer)}</p>`);
+     solOut.innerHTML = p.join('');
+   }
+@@ -734,7 +782,10 @@
+       [SOL_WALLET_KEY]: wallet || '',
+       [SOL_MODE_KEY]: mode
+     });
+-    solState.textContent = 'Calling Helius…';
++    solState.textContent =
++      mode === 'token'
++        ? 'Deep bundle scan (Helius)… often several minutes — keep this tab open.'
++        : 'Calling Helius…';
+     solState.className = 'popup-sol-status scanning';
+     solOut.innerHTML = '';
+ 
+@@ -765,9 +816,9 @@
+       if (mode === 'token' && !wallet) {
+         progressCb('Starting token scan…');
+         withTimeout(
+-          bundle.runBundleSnapshot(key, mint, { maxHolders: 100, onProgress: progressCb }),
+-          55000,
+-          'Token scan timed out. Helius may be rate-limiting; please retry in a few seconds.'
++          bundle.runBundleSnapshot(key, mint, Object.assign({ onProgress: progressCb }, profileParams.bundle)),
++          480000,
++          'Token scan timed out (8 min). Deep scans use many Helius calls — retry or switch to a lighter depth profile in Options.'
+         )
+           .then((data) => {
+             if (!data || !data.ok) {
+@@ -800,14 +851,14 @@
+             }
+             return graph.analyzeWalletBundle(key, wallet, mint, Object.assign({ onProgress: progressCb }, profileParams.graph));
+           })()
+-        : bundle.runBundleSnapshot(key, mint, { maxHolders: 100, onProgress: progressCb });
++        : bundle.runBundleSnapshot(key, mint, Object.assign({ onProgress: progressCb, wallet: wallet || null }, profileParams.bundle));
+ 
+       withTimeout(
+         runPromise,
+-        mode === 'address' ? 20000 : 12000,
++        mode === 'address' ? 200000 : 480000,
+         mode === 'address'
+           ? 'Address scan timed out. Try again or reduce depth profile in Options.'
+-          : 'Token scan timed out. Helius is slow right now; please retry.'
++          : 'Token scan timed out (8 min). Deep bundle + graph scans need time; retry or use a lighter profile.'
+       )
+         .then((data) => {
+           if (!data || !data.ok) {
+diff --git a/solana_bundle.js b/solana_bundle.js
+index 67c70d9..1abaff0 100644
+--- a/solana_bundle.js
++++ b/solana_bundle.js
+@@ -1,363 +1,1353 @@
+ /**
+- * Diverg — Solana token bundle scanner.
+- * Architecture — standard on-chain bundle detection flow:
+- *   1. getAsset → token name/symbol/supply/decimals
+- *   2. getTokenAccounts (DAS, paginated) → sorted holders
+- *   3. getSignaturesForAddress (RPC) → oldest sig per holder (concurrent)
+- *   4. /v0/transactions batch parse → infer first SOL funder per holder
+- *   5. batch-identity → label funders
+- *   6. group by funder, filter exchanges → suspicious clusters
+- *   7. compute verdict + risk score
++ * Solana bundle snapshot — runs entirely in the extension (Helius BYOK).
++ * Parity with Sectester investigation/solana_bundle.py + solana_bundle_signals.py:
++ * DAS getTokenAccounts (paginated holders), largest-accounts fallback, LP skip, up to 120 wallets,
++ * 2-hop ultimate-funder clustering, parallel Helius fetches, deeper coordination defaults.
+  */
+ (function (global) {
+   var ADDR_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+-  var HELIUS_RPC  = 'https://mainnet.helius-rpc.com';
+-  var HELIUS_API  = 'https://api.helius.xyz';
++  /** Official Helius Solana RPC (OpenAPI); api-mainnet.* can return method not found for some calls. */
++  var HELIUS_RPC = 'https://mainnet.helius-rpc.com';
++  var HELIUS_WALLET = 'https://api.helius.xyz';
++  /** Wrapped SOL — treat inbound wSOL as SOL for "who funded" (matches explorers / Axiom-style views). */
++  var WSOL_MINT = 'So11111111111111111111111111111111111111112';
+ 
+-  /* ── tiny helpers ── */
++  function normalizeAddress(s) {
++    if (!s || typeof s !== 'string') return null;
++    var t = s.trim().replace(/\s+/g, '');
++    return ADDR_RE.test(t) ? t : null;
++  }
+ 
+   function sleep(ms) {
+-    return new Promise(function (r) { setTimeout(r, ms); });
++    return new Promise(function (resolve) {
++      setTimeout(resolve, ms);
++    });
++  }
++
++  function heliusRpc(apiKey, method, params) {
++    var url = HELIUS_RPC + '/?api-key=' + encodeURIComponent(apiKey);
++    return fetch(url, {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params }),
++    })
++      .then(function (r) {
++        return r.text().then(function (text) {
++          var data;
++          try {
++            data = text ? JSON.parse(text) : {};
++          } catch (parseErr) {
++            return {
++              result: null,
++              error: (r.ok ? 'Invalid JSON from RPC' : 'HTTP ' + r.status) + (text ? ': ' + String(text).slice(0, 200) : ''),
++            };
++          }
++          if (!r.ok) {
++            var httpMsg =
++              (data.error && (data.error.message || data.error)) ||
++              (typeof data === 'object' && data.message) ||
++              'HTTP ' + r.status;
++            return { result: null, error: String(httpMsg) };
++          }
++          if (data.error) {
++            var msg = (data.error && data.error.message) || JSON.stringify(data.error);
++            return { result: null, error: msg };
++          }
++          return { result: data.result, error: null };
++        });
++      })
++      .catch(function (e) {
++        return { result: null, error: e.message || 'RPC network error' };
++      });
++  }
++
++  /** DAS methods (getTokenAccounts, getAsset) require object `params`, not a JSON array. */
++  function heliusDasRpc(apiKey, method, paramsObj) {
++    var url = HELIUS_RPC + '/?api-key=' + encodeURIComponent(apiKey);
++    return fetch(url, {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json' },
++      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: paramsObj || {} }),
++    })
++      .then(function (r) {
++        return r.text().then(function (text) {
++          var data;
++          try {
++            data = text ? JSON.parse(text) : {};
++          } catch (parseErr) {
++            return {
++              result: null,
++              error: (r.ok ? 'Invalid JSON from RPC' : 'HTTP ' + r.status) + (text ? ': ' + String(text).slice(0, 200) : ''),
++            };
++          }
++          if (!r.ok) {
++            var httpMsg =
++              (data.error && (data.error.message || data.error)) ||
++              (typeof data === 'object' && data.message) ||
++              'HTTP ' + r.status;
++            return { result: null, error: String(httpMsg) };
++          }
++          if (data.error) {
++            var msg = (data.error && data.error.message) || JSON.stringify(data.error);
++            return { result: null, error: msg };
++          }
++          return { result: data.result, error: null };
++        });
++      })
++      .catch(function (e) {
++        return { result: null, error: e.message || 'DAS RPC network error' };
++      });
++  }
++
++  function heliusFundedBy(apiKey, address) {
++    var url = HELIUS_WALLET + '/v1/wallet/' + encodeURIComponent(address) + '/funded-by';
++    return fetch(url, { headers: { 'X-Api-Key': apiKey } })
++      .then(function (r) {
++        if (r.status === 404) return null;
++        if (!r.ok) return null;
++        return r.json();
++      })
++      .catch(function () {
++        return null;
++      });
++  }
++
++  function heliusWalletBalances(apiKey, address) {
++    var q = '?limit=200&page=1&showNfts=false&showZeroBalance=true';
++    var url = HELIUS_WALLET + '/v1/wallet/' + encodeURIComponent(address) + '/balances' + q;
++    return fetch(url, { headers: { 'X-Api-Key': apiKey } })
++      .then(function (r) {
++        if (!r.ok) return null;
++        return r.json();
++      })
++      .catch(function () {
++        return null;
++      });
++  }
++
++  function heliusBatchIdentity(apiKey, addresses) {
++    if (!addresses || addresses.length === 0) return Promise.resolve(null);
++    var slice = addresses.slice(0, 100);
++    var url = HELIUS_WALLET + '/v1/wallet/batch-identity?api-key=' + encodeURIComponent(apiKey);
++    return fetch(url, {
++      method: 'POST',
++      headers: { 'X-Api-Key': apiKey, 'Content-Type': 'application/json' },
++      body: JSON.stringify({ addresses: slice }),
++    })
++      .then(function (r) {
++        if (!r.ok) return null;
++        return r.json();
++      })
++      .catch(function () {
++        return null;
++      });
++  }
++
++  function parseTokenAccountOwner(acc) {
++    if (!acc || typeof acc !== 'object') return null;
++    var v = acc.value;
++    if (!v) return null;
++    var data = v.data;
++    var parsed = data && typeof data === 'object' ? data.parsed : null;
++    if (!parsed || parsed.type !== 'account') return null;
++    var owner = (parsed.info && parsed.info.owner) || null;
++    return typeof owner === 'string' && ADDR_RE.test(owner) ? owner : null;
++  }
++
++  function parseTokenAccountUiAmount(acc) {
++    if (!acc || typeof acc !== 'object') return 0;
++    var v = acc.value;
++    if (!v) return 0;
++    var data = v.data;
++    var parsed = data && typeof data === 'object' ? data.parsed : null;
++    if (!parsed || !parsed.info) return 0;
++    var ta = parsed.info.tokenAmount || {};
++    if (ta.uiAmount != null) {
++      var u = parseFloat(ta.uiAmount);
++      return isNaN(u) ? 0 : u;
++    }
++    var amt = ta.amount;
++    var dec = parseInt(ta.decimals, 10) || 0;
++    if (amt != null && dec >= 0) {
++      return parseFloat(amt) / Math.pow(10, dec);
++    }
++    return 0;
++  }
++
++  function balanceUiForMint(apiKey, owner, mint) {
++    return heliusWalletBalances(apiKey, owner).then(function (out) {
++      if (!out || typeof out !== 'object') return null;
++      var tokens = out.tokens;
++      if (!Array.isArray(tokens)) return null;
++      for (var i = 0; i < tokens.length; i++) {
++        var t = tokens[i];
++        if (!t || typeof t !== 'object') continue;
++        var m = t.mint || (t.token && t.token.mint);
++        if (m !== mint) continue;
++        if (t.uiAmount != null) {
++          var u = parseFloat(t.uiAmount);
++          return isNaN(u) ? 0 : u;
++        }
++        var raw = t.amount;
++        var dec = parseInt(t.decimals, 10) || 0;
++        if (raw != null) return parseFloat(raw) / Math.pow(10, dec);
++      }
++      return 0;
++    });
++  }
++
++  function supplyPct(amount, totalUi) {
++    if (totalUi <= 0) return 0;
++    return Math.round((10000 * amount) / totalUi) / 100;
++  }
++
++  /** Defaults match investigation/solana_bundle_signals.py (deep scan). */
++  var BUNDLE_SIGNAL_DEFAULTS = {
++    fundingBucketSec: 5,
++    lamportsRelTol: 0.002,
++    maxTransferFetch: 72,
++    maxEnhancedFetch: 32,
++    maxFunderIdentity: 56,
++    signalTransfersLimit: 100,
++    enhancedTxLimit: 55,
++  };
++
++  var BUNDLE_DEEP_DEFAULTS = {
++    maxHolders: 100,
++    maxFundedBy: 120,
++    maxFundedByCap: 150,
++    dasMaxPages: 45,
++    lpSkipMinPct: 12,
++    funderTransfersLimit: 100,
++    funderHop2Max: 56,
++    holderFetchConcurrency: 10,
++    hopFetchConcurrency: 10,
++  };
++
++  function safeInt(x) {
++    if (x == null || x === '') return null;
++    var t = parseInt(String(x), 10);
++    return isNaN(t) ? null : t;
+   }
+ 
+-  function shortAddr(a) {
+-    if (!a || typeof a !== 'string') return '';
+-    return a.length > 12 ? a.slice(0, 4) + '..' + a.slice(-4) : a;
++  function safeFloat(x) {
++    if (x == null || x === '') return null;
++    var t = parseFloat(x);
++    return isNaN(t) ? null : t;
+   }
+ 
+-  function toUi(rawAmount, decimals) {
+-    var d = Math.max(0, parseInt(decimals || 0, 10) || 0);
+-    return (parseFloat(rawAmount || 0) || 0) / Math.pow(10, d);
++  function heliusTransfers(apiKey, address, limit) {
++    var url =
++      HELIUS_WALLET +
++      '/v1/wallet/' +
++      encodeURIComponent(address) +
++      '/transfers?limit=' +
++      encodeURIComponent(String(Math.min(100, Math.max(1, limit || 80)))) +
++      '&api-key=' +
++      encodeURIComponent(apiKey);
++    return fetch(url, { headers: { 'X-Api-Key': apiKey } })
++      .then(function (r) {
++        if (!r.ok) return null;
++        return r.json();
++      })
++      .catch(function () {
++        return null;
++      });
+   }
+ 
+-  function supplyPct(amountRaw, totalRaw) {
+-    if (!totalRaw || totalRaw <= 0) return 0;
+-    return Math.round((10000 * (amountRaw || 0)) / totalRaw) / 100;
++  function heliusWalletIdentity(apiKey, address) {
++    var url =
++      HELIUS_WALLET +
++      '/v1/wallet/' +
++      encodeURIComponent(address) +
++      '/identity?api-key=' +
++      encodeURIComponent(apiKey);
++    return fetch(url, { headers: { 'X-Api-Key': apiKey } })
++      .then(function (r) {
++        if (r.status === 404) return null;
++        if (!r.ok) return null;
++        return r.json();
++      })
++      .catch(function () {
++        return null;
++      });
+   }
+ 
+-  function isExchange(id) {
+-    if (!id) return false;
+-    var txt = ((id.name || '') + ' ' + (id.type || '') + ' ' + (id.category || '')).toLowerCase();
+-    return /exchange|binance|coinbase|kraken|okx|bybit|mexc|kucoin|huobi|gate\.io|bitfinex/.test(txt);
++  function heliusEnhancedTransactions(apiKey, address, limit) {
++    var url =
++      HELIUS_RPC +
++      '/v0/addresses/' +
++      encodeURIComponent(address) +
++      '/transactions?limit=' +
++      encodeURIComponent(String(limit || 35)) +
++      '&token-accounts=balanceChanged&api-key=' +
++      encodeURIComponent(apiKey);
++    return fetch(url, { headers: { 'X-Api-Key': apiKey } })
++      .then(function (r) {
++        if (!r.ok) return null;
++        return r.json();
++      })
++      .catch(function () {
++        return null;
++      });
++  }
++
++  function parseFundedByRow(fb) {
++    var out = { funder: null, lamports: null, signature: null, timestamp_unix: null, slot: null };
++    if (!fb || typeof fb !== 'object') return out;
++    var fk = ['funder', 'fundingWallet', 'funding_wallet', 'from', 'fromAddress', 'from_address', 'sender', 'fundingAddress'];
++    for (var fi = 0; fi < fk.length; fi++) {
++      var fv = fb[fk[fi]];
++      if (typeof fv === 'string' && ADDR_RE.test(fv)) {
++        out.funder = fv;
++        break;
++      }
++    }
++    var kLp = ['lamports', 'amountLamports', 'amount_lamports'];
++    for (var i = 0; i < kLp.length; i++) {
++      var lp = safeInt(fb[kLp[i]]);
++      if (lp != null) {
++        out.lamports = lp;
++        break;
++      }
++    }
++    if (out.lamports == null) {
++      var sol = safeFloat(fb.amountSol != null ? fb.amountSol : fb.solAmount != null ? fb.solAmount : fb.amount);
++      if (sol != null) out.lamports = Math.round(sol * 1e9);
++    }
++    if (typeof fb.signature === 'string') out.signature = fb.signature;
++    var ts = fb.timestamp != null ? fb.timestamp : fb.blockTime != null ? fb.blockTime : fb.time;
++    if (typeof ts === 'number') {
++      out.timestamp_unix = ts > 1e12 ? Math.floor(ts / 1000) : Math.floor(ts);
++    }
++    out.slot = safeInt(fb.slot);
++    return out;
++  }
++
++  function iterTransferRows(raw) {
++    if (!raw) return [];
++    if (Array.isArray(raw)) return raw.filter(function (x) {
++      return x && typeof x === 'object';
++    });
++    if (typeof raw !== 'object') return [];
++    var keys = ['transfers', 'data', 'items', 'results'];
++    for (var i = 0; i < keys.length; i++) {
++      var v = raw[keys[i]];
++      if (Array.isArray(v) && v.length && typeof v[0] === 'object') {
++        return v.filter(function (x) {
++          return x && typeof x === 'object';
++        });
++      }
++    }
++    var merged = [];
++    ['nativeTransfers', 'tokenTransfers'].forEach(function (k) {
++      var arr = raw[k];
++      if (Array.isArray(arr)) {
++        for (var j = 0; j < arr.length; j++) {
++          if (arr[j] && typeof arr[j] === 'object') merged.push(arr[j]);
++        }
++      }
++    });
++    if (merged.length) return merged;
++    return [];
+   }
+ 
+-  /* ── rate-limited concurrency ── */
+-  async function rateLimited(tasks, concurrency, delayMs) {
+-    var results = new Array(tasks.length);
+-    var i = 0;
++  function mintFromTransferRow(t) {
++    var m = t.mint;
++    if (m && typeof m === 'object') m = m.mint || m.address;
++    var tok = t.token;
++    if (tok && typeof tok === 'object') m = m || tok.mint || tok.address;
++    else if (typeof tok === 'string') m = m || tok;
++    return String(m || '').trim();
++  }
++
++  function extractFirstInboundSolFromTransfers(raw) {
++    var rows = iterTransferRows(raw);
++    var candidates = [];
++    var wsolL = WSOL_MINT.toLowerCase();
++    for (var i = 0; i < rows.length; i++) {
++      var t = rows[i];
++      var direction = String(t.direction || t.type || t.transferType || '').toLowerCase();
++      if (direction === 'out' || direction === 'outgoing' || direction === 'sent' || direction === 'send' || direction === 'withdraw') continue;
++      var mintS = mintFromTransferRow(t).toLowerCase();
++      var sym = String(t.symbol || '').toUpperCase();
++      var tokS =
++        t.token && typeof t.token === 'object'
++          ? String((t.token.symbol || t.token.mint || '') + '').toLowerCase()
++          : String(t.token || '').toLowerCase();
++      var isSol =
++        t.isNative === true ||
++        t.native === true ||
++        sym === 'SOL' ||
++        tokS.indexOf('sol') >= 0 ||
++        mintS === wsolL ||
++        (!mintS && !t.mint) ||
++        (!mintS && (direction === 'in' || direction === 'incoming' || direction === 'received' || direction === 'receive'));
++      if (!isSol && mintS && mintS !== wsolL) continue;
++      if (
++        direction !== 'in' &&
++        direction !== 'incoming' &&
++        direction !== 'received' &&
++        direction !== 'receive' &&
++        direction !== 'inbound' &&
++        direction !== 'credit' &&
++        direction !== '' &&
++        direction !== 'transfer' &&
++        direction !== 'unknown' &&
++        direction !== 'nft'
++      ) {
++        if (direction !== '' && !isSol) continue;
++      }
++      var ts = t.timestamp != null ? t.timestamp : t.blockTime != null ? t.blockTime : t.time;
++      var tu = null;
++      if (typeof ts === 'number') {
++        tu = Math.floor(ts);
++        if (tu > 1e12) tu = Math.floor(tu / 1000);
++      }
++      var lam = safeInt(t.lamports != null ? t.lamports : t.amountLamports != null ? t.amountLamports : null);
++      if (lam == null && t.amountRaw != null) {
++        try {
++          lam = parseInt(String(t.amountRaw).split('.')[0], 10);
++          if (isNaN(lam)) lam = null;
++        } catch (e) {
++          lam = null;
++        }
++      }
++      if (lam == null) {
++        var amt = safeFloat(t.amount != null ? t.amount : t.uiAmount != null ? t.uiAmount : t.tokenAmount);
++        var dec = safeInt(t.decimals);
++        if (amt != null) {
++          if (dec != null && dec >= 0) lam = Math.round(amt * Math.pow(10, Math.min(dec, 18)));
++          else lam = Math.round(amt * 1e9);
++        }
++      }
++      var sig = t.signature || t.tx || t.transactionSignature;
++      var fromA =
++        t.from ||
++        t.fromUserAccount ||
++        t.fromAddress ||
++        t.fromUser ||
++        t.sender ||
++        t.source ||
++        t.sourceAccount ||
++        t.counterparty;
++      if (fromA && typeof fromA === 'object') fromA = fromA.address || fromA.pubkey;
++      if (lam == null || tu == null) continue;
++      if (typeof fromA !== 'string' || !ADDR_RE.test(fromA)) continue;
++      candidates.push({
++        lamports: lam,
++        timestamp_unix: tu,
++        signature: typeof sig === 'string' ? sig : null,
++        from_address: fromA,
++      });
++    }
++    if (!candidates.length) return null;
++    candidates.sort(function (a, b) {
++      return a.timestamp_unix - b.timestamp_unix;
++    });
++    return candidates[0];
++  }
++
++  function funderAddressFromApi(funded) {
++    if (!funded || typeof funded !== 'object') return null;
++    var keys = ['funder', 'fundingWallet', 'funding_wallet', 'from', 'fromAddress', 'from_address', 'sender', 'fundingAddress'];
++    for (var i = 0; i < keys.length; i++) {
++      var f = funded[keys[i]];
++      if (typeof f === 'string' && ADDR_RE.test(f)) return f;
++    }
++    return null;
++  }
++
++  function effectiveFunderAddress(funded, transfersRaw) {
++    var ex = extractFirstInboundSolFromTransfers(transfersRaw);
++    if (ex && typeof ex.from_address === 'string' && ADDR_RE.test(ex.from_address)) return ex.from_address;
++    return funderAddressFromApi(funded);
++  }
++
++  function clusterKeyFromSources(wallet, funded, transfersRaw, hopCtx) {
++    hopCtx = hopCtx || {};
++    var hopF = hopCtx.hopFunded || {};
++    var hopT = hopCtx.hopTransfers || {};
++    var direct = effectiveFunderAddress(funded, transfersRaw);
++    if (!direct) return 'singleton:' + wallet;
++    var root = effectiveFunderAddress(hopF[direct], hopT[direct]);
++    if (root && root !== wallet && root !== direct) return 'funder:' + root;
++    return 'funder:' + direct;
++  }
++
++  function directAndRootFunder(wallet, funded, transfersRaw, hopF, hopT) {
++    hopF = hopF || {};
++    hopT = hopT || {};
++    var direct = effectiveFunderAddress(funded, transfersRaw);
++    if (!direct) return { direct: null, root: null };
++    var root = effectiveFunderAddress(hopF[direct], hopT[direct]);
++    if (root && root !== wallet && root !== direct) return { direct: direct, root: root };
++    return { direct: direct, root: null };
++  }
++
++  async function asyncPool(concurrency, items, fn) {
++    var results = new Array(items.length);
++    var next = 0;
+     async function worker() {
+-      while (i < tasks.length) {
+-        var idx = i++;
+-        results[idx] = await tasks[idx]().catch(function () { return null; });
+-        if (delayMs > 0 && i < tasks.length) await sleep(delayMs);
++      while (true) {
++        var i = next++;
++        if (i >= items.length) break;
++        results[i] = await fn(items[i], i);
+       }
+     }
+-    var runners = [];
+-    for (var r = 0; r < Math.max(1, concurrency); r++) runners.push(worker());
+-    await Promise.all(runners);
++    var n = Math.min(concurrency, Math.max(1, items.length));
++    var workers = [];
++    for (var w = 0; w < n; w++) workers.push(worker());
++    await Promise.all(workers);
+     return results;
+   }
+ 
+-  /* ── Helius fetch helpers ── */
++  async function fetchDasTokenAccountsForMint(apiKey, mint, maxPages, pageLimit) {
++    var rows = [];
++    var cursor = null;
++    var pages = Math.max(1, maxPages);
++    var lim = Math.min(100, Math.max(1, pageLimit || 100));
++    var lastErr = null;
++    for (var p = 0; p < pages; p++) {
++      var params = { mint: mint, limit: lim };
++      if (cursor) params.cursor = cursor;
++      var das = await heliusDasRpc(apiKey, 'getTokenAccounts', params);
++      if (das.error) {
++        lastErr = das.error;
++        if (!rows.length) return { rows: [], error: das.error };
++        break;
++      }
++      var result = das.result;
++      if (!result || typeof result !== 'object') break;
++      var accounts = result.token_accounts;
++      if (!Array.isArray(accounts)) break;
++      for (var i = 0; i < accounts.length; i++) {
++        var a = accounts[i];
++        if (!a || typeof a !== 'object') continue;
++        var owner = a.owner;
++        var amt = a.amount;
++        if (typeof owner !== 'string' || !owner || amt == null) continue;
++        var raw = parseInt(String(amt), 10);
++        if (isNaN(raw)) continue;
++        rows.push({ owner: owner, amount: raw });
++      }
++      cursor = result.cursor;
++      if (!cursor || !accounts.length) break;
++    }
++    return { rows: rows, error: lastErr };
++  }
+ 
+-  function fetchJ(url, opts, timeoutMs) {
+-    var ms = Math.max(3000, timeoutMs || 8000);
+-    return Promise.race([
+-      fetch(url, opts || {}).then(function (r) {
+-        if (!r.ok) return null;
+-        return r.json().catch(function () { return null; });
+-      }),
+-      new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout')); }, ms); }),
+-    ]).catch(function () { return null; });
+-  }
+-
+-  /* Standard JSON-RPC (array params) */
+-  function rpc(apiKey, method, params) {
+-    return fetchJ(
+-      HELIUS_RPC + '/?api-key=' + encodeURIComponent(apiKey),
+-      {
+-        method: 'POST',
+-        headers: { 'Content-Type': 'application/json' },
+-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params }),
+-      },
+-      8000
+-    ).then(function (data) {
+-      if (!data) return { result: null, error: 'no response' };
+-      if (data.error) return { result: null, error: data.error.message || JSON.stringify(data.error) };
+-      return { result: data.result, error: null };
+-    });
+-  }
+-
+-  /* DAS RPC (object params — required for getTokenAccounts, getAsset) */
+-  function dasRpc(apiKey, method, params) {
+-    return fetchJ(
+-      HELIUS_RPC + '/?api-key=' + encodeURIComponent(apiKey),
+-      {
+-        method: 'POST',
+-        headers: { 'Content-Type': 'application/json' },
+-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params }),
+-      },
+-      10000
+-    ).then(function (data) {
+-      if (!data) return null;
+-      return data.result || null;
++  function ownerAmountFromDasRows(rows, decimals) {
++    var dec = Math.max(0, parseInt(String(decimals), 10) || 0);
++    var scale = Math.pow(10, dec);
++    var map = {};
++    for (var i = 0; i < rows.length; i++) {
++      var r = rows[i];
++      if (!r || !r.owner || r.amount == null) continue;
++      var ui = r.amount / scale;
++      map[r.owner] = (map[r.owner] || 0) + ui;
++    }
++    return map;
++  }
++
++  async function holdersViaLargestAccountsAsync(apiKey, mintNorm, mh) {
++    var lg = await heliusRpc(apiKey, 'getTokenLargestAccounts', [mintNorm]);
++    if (lg.error) return { ownerAmount: null, error: 'getTokenLargestAccounts: ' + lg.error };
++    var list = lg.result && lg.result.value;
++    if (!Array.isArray(list)) return { ownerAmount: null, error: 'Unexpected getTokenLargestAccounts shape' };
++    var entries = list.slice(0, mh);
++    var tokenAccountAddrs = [];
++    var uiFromLargest = {};
++    entries.forEach(function (e) {
++      if (!e || !e.address) return;
++      tokenAccountAddrs.push(e.address);
++      if (e.uiAmount != null) {
++        var u = parseFloat(e.uiAmount);
++        uiFromLargest[e.address] = isNaN(u) ? 0 : u;
++      } else uiFromLargest[e.address] = 0;
+     });
++    var ownerAmount = {};
++    for (var start = 0; start < tokenAccountAddrs.length; start += 100) {
++      var batch = tokenAccountAddrs.slice(start, start + 100);
++      var mult = await heliusRpc(apiKey, 'getMultipleAccounts', [batch, { encoding: 'jsonParsed' }]);
++      if (mult.error) return { ownerAmount: null, error: 'getMultipleAccounts: ' + mult.error };
++      var accList = mult.result && mult.result.value;
++      if (!Array.isArray(accList)) return { ownerAmount: null, error: 'getMultipleAccounts missing value list' };
++      for (var j = 0; j < accList.length; j++) {
++        var acc = accList[j];
++        var ta = batch[j];
++        var owner = parseTokenAccountOwner(acc);
++        if (!owner) continue;
++        var uiTa = uiFromLargest[ta];
++        var parsedAmt = parseTokenAccountUiAmount(acc);
++        var amt =
++          uiTa != null && !isNaN(parseFloat(uiTa)) && parseFloat(uiTa) > 0
++            ? parseFloat(uiTa)
++            : parsedAmt;
++        ownerAmount[owner] = (ownerAmount[owner] || 0) + amt;
++      }
++    }
++    return { ownerAmount: ownerAmount, error: null };
+   }
+ 
+-  function batchTransactions(apiKey, signatures) {
+-    if (!signatures || !signatures.length) return Promise.resolve([]);
+-    return fetchJ(
+-      HELIUS_API + '/v0/transactions?api-key=' + encodeURIComponent(apiKey),
+-      {
+-        method: 'POST',
+-        headers: { 'Content-Type': 'application/json' },
+-        body: JSON.stringify({ transactions: signatures.slice(0, 100) }),
+-      },
+-      10000
+-    ).then(function (d) { return Array.isArray(d) ? d : []; });
+-  }
+-
+-  function batchIdentity(apiKey, addresses) {
+-    if (!addresses || !addresses.length) return Promise.resolve([]);
+-    return fetchJ(
+-      HELIUS_API + '/v1/wallet/batch-identity?api-key=' + encodeURIComponent(apiKey),
+-      {
+-        method: 'POST',
+-        headers: { 'X-Api-Key': apiKey, 'Content-Type': 'application/json' },
+-        body: JSON.stringify({ addresses: addresses.slice(0, 100) }),
+-      },
+-      8000
+-    ).then(function (d) { return Array.isArray(d) ? d : []; });
++  function enrichWalletFunding(wallet, fundedByRow, transfersRaw) {
++    var fb = parseFundedByRow(fundedByRow);
++    var ex = extractFirstInboundSolFromTransfers(transfersRaw);
++    var lamports = fb.lamports;
++    var ts = fb.timestamp_unix;
++    if (ex) {
++      if (lamports == null) lamports = ex.lamports;
++      if (ts == null) ts = ex.timestamp_unix;
++    }
++    var eff = null;
++    if (ex && typeof ex.from_address === 'string' && ADDR_RE.test(ex.from_address)) eff = ex.from_address;
++    if (!eff) eff = funderAddressFromApi(fundedByRow);
++    return {
++      wallet: wallet,
++      funder: eff,
++      first_fund_lamports: lamports,
++      first_fund_timestamp_unix: ts,
++      first_fund_signature: fb.signature || (ex && ex.signature) || null,
++      first_inbound_from_transfer: ex ? ex.from_address : null,
++    };
+   }
+ 
+-  /* ── Main scan ── */
++  function timeBucket(ts, bucketSec) {
++    if (ts == null) return null;
++    return Math.floor(ts / bucketSec);
++  }
+ 
+-  function runBundleSnapshot(apiKey, mint, opts) {
+-    opts = opts || {};
+-    return runScanAsync(apiKey, mint, opts).catch(function (e) {
+-      return { ok: false, error: e && e.message ? e.message : String(e) };
+-    });
+-  }
+-
+-  async function runScanAsync(apiKey, mint, opts) {
+-    var startedAt = Date.now();
+-    var key = (apiKey || '').trim();
+-    var mintNorm = (mint || '').trim().replace(/\s+/g, '');
+-
+-    if (!ADDR_RE.test(mintNorm)) return { ok: false, error: 'Invalid mint address' };
+-    if (!key) return { ok: false, error: 'Missing Helius API key' };
+-    if (ADDR_RE.test(key)) return { ok: false, error: 'Helius API key looks like a wallet address — check Options.' };
+-
+-    var maxHolders = Math.min(parseInt(opts.maxHolders || 100, 10), 500);
+-    var onProgress  = typeof opts.onProgress === 'function' ? opts.onProgress : function () {};
+-
+-    /* ── Step 1: Token metadata via getAsset ── */
+-    onProgress('Fetching token metadata...');
+-    var assetRes = await dasRpc(key, 'getAsset', { id: mintNorm });
+-    var tokenName    = assetRes && assetRes.content && assetRes.content.metadata && assetRes.content.metadata.name || 'Unknown';
+-    var tokenSymbol  = assetRes && assetRes.content && assetRes.content.metadata && assetRes.content.metadata.symbol || shortAddr(mintNorm);
+-    var decimals     = (assetRes && assetRes.token_info && assetRes.token_info.decimals != null)
+-                       ? parseInt(assetRes.token_info.decimals, 10) : 6;
+-    var totalRaw     = (assetRes && assetRes.token_info && assetRes.token_info.supply)
+-                       ? parseFloat(assetRes.token_info.supply) : 0;
+-
+-    /* fallback supply from getTokenSupply */
+-    if (!totalRaw) {
+-      var supRes = await rpc(key, 'getTokenSupply', [mintNorm]);
+-      if (supRes.error) return { ok: false, error: 'getTokenSupply: ' + supRes.error };
+-      var sv = supRes.result && supRes.result.value;
+-      if (!sv) return { ok: false, error: 'Could not fetch token supply' };
+-      totalRaw = parseFloat(sv.amount || 0) || 0;
+-      decimals = parseInt(sv.decimals || 0, 10) || decimals;
+-    }
+-    if (!totalRaw) return { ok: false, error: 'Token supply is zero or unreadable' };
+-    var totalUi = toUi(totalRaw, decimals);
+-
+-    /* ── Step 2: Holders via getTokenAccounts (DAS, paginated) ── */
+-    onProgress('Fetching holders...');
+-    var allHolders = [];
+-    var pages = Math.max(1, Math.ceil(maxHolders / 100) + 1);
+-    for (var pg = 1; pg <= pages; pg++) {
+-      var res = await dasRpc(key, 'getTokenAccounts', { mint: mintNorm, page: pg, limit: 100 });
+-      var accs = (res && res.token_accounts) || [];
+-      if (!Array.isArray(accs) || !accs.length) break;
+-      accs.forEach(function (a) {
+-        if (a && a.owner && ADDR_RE.test(a.owner)) {
+-          allHolders.push({ owner: a.owner, amountRaw: parseFloat(a.amount || 0) || 0 });
++  function lamportsClose(a, b, relTol) {
++    if (a == null || b == null || a <= 0 || b <= 0) return false;
++    return Math.abs(a - b) / Math.max(a, b) <= relTol;
++  }
++
++  function clusterWalletsByTimeBucket(metaByWallet, bucketSec) {
++    var byBucket = {};
++    Object.keys(metaByWallet).forEach(function (w) {
++      var ts = metaByWallet[w].first_fund_timestamp_unix;
++      var b = ts != null ? timeBucket(ts, bucketSec) : null;
++      if (b == null) return;
++      var key = String(b);
++      if (!byBucket[key]) byBucket[key] = [];
++      byBucket[key].push(w);
++    });
++    var out = [];
++    Object.keys(byBucket).forEach(function (bid) {
++      var wallets = byBucket[bid];
++      if (wallets.length >= 2) {
++        out.push({
++          bucket_id: bid,
++          bucket_sec: bucketSec,
++          wallets: wallets.slice().sort(),
++          count: wallets.length,
++        });
++      }
++    });
++    out.sort(function (a, b) {
++      return b.count - a.count;
++    });
++    return out;
++  }
++
++  function clusterWalletsBySameLamports(metaByWallet, relTol) {
++    var byLam = {};
++    Object.keys(metaByWallet).forEach(function (w) {
++      var lp = metaByWallet[w].first_fund_lamports;
++      if (lp == null) return;
++      lp = parseInt(String(lp), 10);
++      if (!byLam[lp]) byLam[lp] = [];
++      byLam[lp].push(w);
++    });
++    var sortedLams = Object.keys(byLam)
++      .map(function (x) {
++        return parseInt(x, 10);
++      })
++      .sort(function (a, b) {
++        return a - b;
++      });
++    var reps = [];
++    var used = {};
++    for (var i = 0; i < sortedLams.length; i++) {
++      var lam = sortedLams[i];
++      if (used[lam]) continue;
++      var group = byLam[lam].slice();
++      for (var j = 0; j < sortedLams.length; j++) {
++        var other = sortedLams[j];
++        if (other <= lam || used[other]) continue;
++        if (lamportsClose(lam, other, relTol)) {
++          group = group.concat(byLam[other]);
++          used[other] = true;
+         }
++      }
++      var uniq = {};
++      group.forEach(function (x) {
++        uniq[x] = true;
+       });
+-      if (accs.length < 100) break;
+-    }
+-
+-    if (!allHolders.length) return { ok: false, error: 'No holders found for this token' };
+-
+-    /* sort by balance, take top N */
+-    allHolders.sort(function (a, b) { return b.amountRaw - a.amountRaw; });
+-    var totalHolders = allHolders.length;
+-    var holdersToScan = allHolders.slice(0, maxHolders);
+-
+-    onProgress('Scanning ' + holdersToScan.length + ' holders...');
+-
+-    /* ── Step 3: getSignaturesForAddress for each holder (concurrent) ── */
+-    var sigTasks = holdersToScan.map(function (h) {
+-      return function () {
+-        return rpc(key, 'getSignaturesForAddress', [h.owner, { limit: 50 }]).then(function (r) {
+-          var sigs = r && Array.isArray(r.result) ? r.result : [];
+-          var oldest = sigs.length ? sigs[sigs.length - 1] : null;
+-          return {
+-            owner: h.owner,
+-            amountRaw: h.amountRaw,
+-            txCount: sigs.length,
+-            oldestSig: oldest && oldest.signature ? oldest.signature : null,
+-            oldestBlockTime: oldest && oldest.blockTime ? oldest.blockTime : null,
+-          };
++      var wlist = Object.keys(uniq).sort();
++      reps.push({ lamports: lam, wallets: wlist, count: wlist.length });
++      used[lam] = true;
++    }
++    var out = [];
++    for (var r = 0; r < reps.length; r++) {
++      if (reps[r].count >= 2) out.push(reps[r]);
++    }
++    out.sort(function (a, b) {
++      return b.count - a.count;
++    });
++    return out;
++  }
++
++  function isCexIdentity(ident) {
++    if (!ident || typeof ident !== 'object') return false;
++    var cat = String(ident.category || '').toLowerCase();
++    var name = String(ident.name || '').toLowerCase();
++    if (cat.indexOf('exchange') >= 0 || cat.indexOf('cex') >= 0) return true;
++    var tags = ['exchange', 'binance', 'coinbase', 'kraken', 'okx', 'bybit', 'kucoin'];
++    for (var i = 0; i < tags.length; i++) {
++      if (name.indexOf(tags[i]) >= 0) return true;
++    }
++    return false;
++  }
++
++  function sharedInboundSenders(metaByWallet) {
++    var senderCounts = {};
++    Object.keys(metaByWallet).forEach(function (w) {
++      var m = metaByWallet[w];
++      var s = m.first_inbound_from_transfer || m.funder;
++      if (typeof s === 'string' && s.length > 32) {
++        if (!senderCounts[s]) senderCounts[s] = [];
++        senderCounts[s].push(w);
++      }
++    });
++    var hot = {};
++    Object.keys(senderCounts).forEach(function (k) {
++      if (senderCounts[k].length >= 2) hot[k] = senderCounts[k].slice().sort();
++    });
++    var topShared = Object.keys(hot).sort(function (a, b) {
++      return hot[b].length - hot[a].length;
++    });
++    return { shared_sender_to_wallets: hot, top_shared: topShared.slice(0, 12) };
++  }
++
++  function sharedOutboundReceivers(lookupOrder, transfersCache) {
++    var recvToWallets = {};
++    for (var wi = 0; wi < lookupOrder.length; wi++) {
++      var w = lookupOrder[wi];
++      var rows = iterTransferRows(transfersCache[w]);
++      if (!rows.length) continue;
++      var seenForWallet = {};
++      for (var i = 0; i < rows.length; i++) {
++        var t = rows[i];
++        var direction = String(t.direction || t.type || t.transferType || '').toLowerCase();
++        if (direction !== 'out' && direction !== 'outgoing' && direction !== 'sent' && direction !== 'send' && direction !== 'withdraw') continue;
++        var toA =
++          t.to ||
++          t.toUserAccount ||
++          t.toAddress ||
++          t.toUser ||
++          t.recipient ||
++          t.destination ||
++          t.destinationAccount ||
++          t.counterparty;
++        if (toA && typeof toA === 'object') toA = toA.address || toA.pubkey;
++        if (typeof toA !== 'string' || !ADDR_RE.test(toA)) continue;
++        if (toA === w || seenForWallet[toA]) continue;
++        if (!recvToWallets[toA]) recvToWallets[toA] = {};
++        recvToWallets[toA][w] = true;
++        seenForWallet[toA] = true;
++      }
++    }
++    var hot = {};
++    Object.keys(recvToWallets).forEach(function (k) {
++      var wallets = Object.keys(recvToWallets[k]).sort();
++      if (wallets.length >= 2) hot[k] = wallets;
++    });
++    var top = Object.keys(hot).sort(function (a, b) {
++      return hot[b].length - hot[a].length;
++    }).slice(0, 20);
++    return { shared_receiver_to_wallets: hot, top_shared_receivers: top };
++  }
++
++  function programsFromEnhanced(tx) {
++    var progs = {};
++    function fromList(arr) {
++      if (!Array.isArray(arr)) return;
++      for (var i = 0; i < arr.length; i++) {
++        var ins = arr[i];
++        if (!ins || typeof ins !== 'object') continue;
++        var pid = ins.programId || ins.program;
++        if (typeof pid === 'string') progs[pid] = true;
++      }
++    }
++    fromList(tx.instructions);
++    fromList(tx.parsedInstructions);
++    var inner = tx.innerInstructions;
++    if (Array.isArray(inner)) {
++      for (var b = 0; b < inner.length; b++) {
++        var block = inner[b];
++        if (block && typeof block === 'object') fromList(block.instructions);
++      }
++    }
++    return progs;
++  }
++
++  function unwrapEnhancedTxs(raw) {
++    if (Array.isArray(raw)) return raw;
++    if (raw && typeof raw === 'object' && Array.isArray(raw.transactions)) return raw.transactions;
++    return null;
++  }
++
++  function enhancedCoMovementMint(apiKey, mint, wallet, limit) {
++    return heliusEnhancedTransactions(apiKey, wallet, limit).then(function (raw) {
++      var txs = unwrapEnhancedTxs(raw);
++      if (!txs) return null;
++      var slots = [];
++      var programMap = {};
++      for (var i = 0; i < txs.length; i++) {
++        var tx = txs[i];
++        if (!tx || typeof tx !== 'object') continue;
++        var slot = safeInt(tx.slot);
++        var tts = tx.tokenTransfers;
++        var hit = false;
++        if (Array.isArray(tts)) {
++          for (var j = 0; j < tts.length; j++) {
++            var tt = tts[j];
++            if (!tt || typeof tt !== 'object') continue;
++            var m = tt.mint || tt.tokenMint;
++            if (m === mint) {
++              hit = true;
++              break;
++            }
++          }
++        }
++        if (hit && slot != null) slots.push(slot);
++        var pm = programsFromEnhanced(tx);
++        Object.keys(pm).forEach(function (p) {
++          programMap[p] = true;
+         });
++      }
++      var slotSet = {};
++      slots.forEach(function (s) {
++        slotSet[s] = true;
++      });
++      var slotList = Object.keys(slotSet)
++        .map(function (x) {
++          return parseInt(x, 10);
++        })
++        .sort(function (a, b) {
++          return a - b;
++        })
++        .slice(0, 20);
++      var progSample = Object.keys(programMap).sort().slice(0, 40);
++      return {
++        wallet: wallet,
++        mint_touch_slots: slotList,
++        programs_sample: progSample,
+       };
+     });
+-    var concurrency = holdersToScan.length > 100 ? 12 : 8;
+-    var delayMs     = holdersToScan.length > 100 ? 40  : 60;
+-    var sigResults  = await rateLimited(sigTasks, concurrency, delayMs);
+-
+-    /* ── Step 4: Batch parse oldest txs → find funder per holder ── */
+-    onProgress('Parsing first transactions...');
+-    var oldestSigs = [];
+-    var ownerBySig = {};
+-    var statsByOwner = {};
+-    sigResults.forEach(function (r) {
+-      if (!r) return;
+-      statsByOwner[r.owner] = { txCount: r.txCount, oldestBlockTime: r.oldestBlockTime };
+-      if (r.oldestSig) {
+-        oldestSigs.push(r.oldestSig);
+-        ownerBySig[r.oldestSig] = r.owner;
++  }
++
++  function jaccard(aSet, bSet) {
++    var inter = 0;
++    var union = 0;
++    var ak = Object.keys(aSet);
++    var bk = Object.keys(bSet);
++    if (!ak.length && !bk.length) return 0;
++    var u = {};
++    ak.forEach(function (k) {
++      u[k] = true;
++    });
++    bk.forEach(function (k) {
++      u[k] = true;
++    });
++    union = Object.keys(u).length;
++    ak.forEach(function (k) {
++      if (bSet[k]) inter++;
++    });
++    return union ? inter / union : 0;
++  }
++
++  async function computeCoordinationBundleAsync(apiKey, opts) {
++    var cfg = BUNDLE_SIGNAL_DEFAULTS;
++    var bucketSec = cfg.fundingBucketSec;
++    var relTol = cfg.lamportsRelTol;
++    var maxTransferFetch = cfg.maxTransferFetch;
++    var maxEnhancedFetch = cfg.maxEnhancedFetch;
++    var maxFunderIdentity = cfg.maxFunderIdentity;
++    var signalTrLimit = cfg.signalTransfersLimit != null ? cfg.signalTransfersLimit : 100;
++    var enhancedLim = cfg.enhancedTxLimit != null ? cfg.enhancedTxLimit : 55;
++
++    var lookupOrder = opts.lookupOrder || [];
++    var fundedBy = opts.fundedBy || {};
++    var mint = opts.mint;
++    var focusWallets = opts.focusWallets || [];
++    var pre = opts.transfersCache || {};
++
++    var transfersCache = {};
++    Object.keys(pre).forEach(function (k) {
++      transfersCache[k] = pre[k];
++    });
++    var nFetch = Math.min(lookupOrder.length, maxTransferFetch);
++    var pending = [];
++    for (var pi = 0; pi < nFetch; pi++) {
++      var pw = lookupOrder[pi];
++      if (transfersCache[pw] == null) pending.push(pw);
++    }
++    for (var ti = 0; ti < pending.length; ti++) {
++      var w = pending[ti];
++      transfersCache[w] = await heliusTransfers(apiKey, w, signalTrLimit);
++      if (ti < pending.length - 1) await sleep(45);
++    }
++
++    var metaByWallet = {};
++    for (var mi = 0; mi < lookupOrder.length; mi++) {
++      var w2 = lookupOrder[mi];
++      metaByWallet[w2] = enrichWalletFunding(w2, fundedBy[w2], transfersCache[w2]);
++    }
++
++    var timeClusters = clusterWalletsByTimeBucket(metaByWallet, bucketSec);
++    var amountClusters = clusterWalletsBySameLamports(metaByWallet, relTol);
++
++    var fundersSet = {};
++    for (var fi = 0; fi < lookupOrder.length; fi++) {
++      var wf = lookupOrder[fi];
++      var fu = metaByWallet[wf] && metaByWallet[wf].funder;
++      if (fu) fundersSet[fu] = true;
++    }
++    var funders = Object.keys(fundersSet).sort();
++
++    var funderIdents = {};
++    var sliceF = funders.slice(0, maxFunderIdentity);
++    for (var ii = 0; ii < sliceF.length; ii++) {
++      var fa = sliceF[ii];
++      if (!fa) continue;
++      funderIdents[fa] = await heliusWalletIdentity(apiKey, fa);
++      if (ii < sliceF.length - 1) await sleep(40);
++    }
++
++    var cexFunders = {};
++    for (var ci = 0; ci < funders.length; ci++) {
++      var cf = funders[ci];
++      cexFunders[cf] = isCexIdentity(funderIdents[cf]);
++    }
++
++    var sharedInc = sharedInboundSenders(metaByWallet);
++    var sharedOut = sharedOutboundReceivers(lookupOrder, transfersCache);
++
++    var coSlotsByW = {};
++    var programSets = {};
++    var mw = [];
++    var srcList = focusWallets.length ? focusWallets : lookupOrder;
++    for (var qi = 0; qi < srcList.length && mw.length < maxEnhancedFetch; qi++) {
++      var wx = srcList[qi];
++      if (metaByWallet[wx]) mw.push(wx);
++    }
++    for (var ei = 0; ei < mw.length; ei++) {
++      var we = mw[ei];
++      var em = await enhancedCoMovementMint(apiKey, mint, we, enhancedLim);
++      if (em) {
++        coSlotsByW[we] = em.mint_touch_slots || [];
++        var ps = {};
++        (em.programs_sample || []).forEach(function (p) {
++          ps[p] = true;
++        });
++        programSets[we] = ps;
++      }
++      if (ei < mw.length - 1) await sleep(85);
++    }
++
++    var enhancedSample = { wallets_analyzed: mw, mint_touch_slots_by_wallet: coSlotsByW };
++
++    var slotToW = {};
++    Object.keys(coSlotsByW).forEach(function (w3) {
++      var sl = coSlotsByW[w3];
++      for (var si = 0; si < sl.length; si++) {
++        var s = sl[si];
++        if (!slotToW[s]) slotToW[s] = [];
++        slotToW[s].push(w3);
++      }
++    });
++    var coMovePairs = [];
++    Object.keys(slotToW).forEach(function (slotStr) {
++      var ws = slotToW[slotStr];
++      var u = {};
++      ws.forEach(function (x) {
++        u[x] = true;
++      });
++      var ul = Object.keys(u).sort();
++      if (ul.length >= 2) coMovePairs.push({ slot: parseInt(slotStr, 10), wallets: ul });
++    });
++
++    var pOverlap = [];
++    var pKeys = Object.keys(programSets);
++    for (var pi = 0; pi < pKeys.length; pi++) {
++      for (var pj = pi + 1; pj < pKeys.length; pj++) {
++        var a = pKeys[pi];
++        var b = pKeys[pj];
++        pOverlap.push({
++          wallet_a: a,
++          wallet_b: b,
++          program_jaccard: Math.round(jaccard(programSets[a] || {}, programSets[b] || {}) * 1e4) / 1e4,
++        });
+       }
++    }
++    pOverlap.sort(function (x, y) {
++      return y.program_jaccard - x.program_jaccard;
+     });
+ 
+-    var funderMap = {};   /* owner → funder address */
+-    for (var bi = 0; bi < oldestSigs.length; bi += 100) {
+-      var batch = oldestSigs.slice(bi, bi + 100);
+-      var parsed = await batchTransactions(key, batch);
+-      parsed.forEach(function (tx) {
+-        if (!tx || !tx.signature) return;
+-        var owner = ownerBySig[tx.signature];
+-        if (!owner) return;
+-        var nativeIn = Array.isArray(tx.nativeTransfers)
+-          ? tx.nativeTransfers.find(function (t) { return t && t.toUserAccount === owner && (t.amount || 0) > 0; })
+-          : null;
+-        if (nativeIn && ADDR_RE.test(nativeIn.fromUserAccount)) {
+-          funderMap[owner] = nativeIn.fromUserAccount;
+-        } else if (tx.feePayer && tx.feePayer !== owner && ADDR_RE.test(tx.feePayer)) {
+-          funderMap[owner] = tx.feePayer;
++    var score = 0;
++    var reasons = [];
++
++    if (timeClusters.length) {
++      score += Math.min(22, 6 + Math.max(0, timeClusters[0].wallets.length - 2) * 4);
++      reasons.push('funding_time_sync');
++    }
++    if (amountClusters.length) {
++      score += Math.min(18, 5 + Math.max(0, amountClusters[0].wallets.length - 2) * 3);
++      reasons.push('same_first_fund_amount');
++    }
++    var anyCex = false;
++    Object.keys(cexFunders).forEach(function (k) {
++      if (cexFunders[k]) anyCex = true;
++    });
++    if (anyCex) {
++      score += 12;
++      reasons.push('cex_tagged_funder_present');
++    }
++    if (sharedInc.top_shared && sharedInc.top_shared.length) {
++      score += Math.min(15, 5 + sharedInc.top_shared.length * 2);
++      reasons.push('shared_inbound_counterparty');
++    }
++    if (sharedOut.top_shared_receivers && sharedOut.top_shared_receivers.length) {
++      score += Math.min(16, 6 + sharedOut.top_shared_receivers.length * 2);
++      reasons.push('shared_outbound_receiver');
++    }
++    if (coMovePairs.length) {
++      score += Math.min(18, 6 + Math.min(coMovePairs.length, 4) * 3);
++      reasons.push('mint_activity_same_slot');
++    }
++    if (pOverlap.length && pOverlap[0].program_jaccard >= 0.15) {
++      score += Math.min(15, 5 + pOverlap[0].program_jaccard * 40);
++      reasons.push('program_fingerprint_overlap');
++    }
++
++    score = Math.round(Math.min(100, score) * 100) / 100;
++
++    return {
++      funding_metadata_by_wallet: metaByWallet,
++      funding_time_clusters: timeClusters,
++      funding_same_amount_clusters: amountClusters,
++      funder_cex_flags: cexFunders,
++      shared_inbound_senders: sharedInc,
++      shared_outbound_receivers: sharedOut,
++      mint_co_movement: { same_slot_groups: coMovePairs.slice(0, 15), enhanced: enhancedSample },
++      program_overlap_pairs: pOverlap.slice(0, 20),
++      coordination_score: score,
++      coordination_reasons: reasons,
++      params: {
++        funding_bucket_sec: bucketSec,
++        lamports_rel_tol: relTol,
++        max_transfer_fetch: nFetch,
++        max_enhanced_fetch: mw.length,
++        signal_transfers_limit: signalTrLimit,
++        enhanced_tx_limit: enhancedLim,
++      },
++    };
++  }
++
++  function runBundleSnapshot(apiKey, mint, opts) {
++    opts = opts || {};
++    return runBundleSnapshotAsync(apiKey, mint, opts).catch(function (e) {
++      return { ok: false, error: e.message || String(e) };
++    });
++  }
++
++  async function runBundleSnapshotAsync(apiKey, mint, opts) {
++    opts = opts || {};
++    var BD = BUNDLE_DEEP_DEFAULTS;
++    var sw = opts.wallet ? normalizeAddress(opts.wallet) : null;
++    if (opts.wallet && !sw) {
++      return { ok: false, error: 'Invalid wallet address' };
++    }
++    var mh = opts.maxHolders != null ? opts.maxHolders : BD.maxHolders;
++    var mf = opts.maxFundedBy != null ? opts.maxFundedBy : BD.maxFundedBy;
++    var capMf = opts.maxFundedByCap != null ? opts.maxFundedByCap : BD.maxFundedByCap;
++    mh = Math.max(5, Math.min(mh, 200));
++    mf = Math.max(5, Math.min(mf, capMf));
++    var dasPages = opts.dasMaxPages != null ? opts.dasMaxPages : BD.dasMaxPages;
++    var lpMinPct = opts.lpSkipMinPct != null ? opts.lpSkipMinPct : BD.lpSkipMinPct;
++    var trLimit = opts.funderTransfersLimit != null ? opts.funderTransfersLimit : BD.funderTransfersLimit;
++    trLimit = Math.min(100, Math.max(1, trLimit));
++    var hop2Max = opts.funderHop2Max != null ? opts.funderHop2Max : BD.funderHop2Max;
++    var conc = opts.holderFetchConcurrency != null ? opts.holderFetchConcurrency : BD.holderFetchConcurrency;
++    var hopConc = opts.hopFetchConcurrency != null ? opts.hopFetchConcurrency : BD.hopFetchConcurrency;
++
++    var excludeNorm = {};
++    if (opts.excludeWallets && Array.isArray(opts.excludeWallets)) {
++      for (var exi = 0; exi < opts.excludeWallets.length; exi++) {
++        var ax = normalizeAddress(String(opts.excludeWallets[exi]));
++        if (ax) excludeNorm[ax] = true;
++      }
++    }
++
++    var mintNorm = normalizeAddress(mint);
++    if (!mintNorm) return { ok: false, error: 'Invalid mint address' };
++    if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
++      return { ok: false, error: 'Missing Helius API key' };
++    }
++    var key = apiKey.trim();
++    if (ADDR_RE.test(key)) {
++      return {
++        ok: false,
++        error:
++          'Options → Helius key looks like a Solana address (often a token mint was pasted there by mistake). Use your API key from dashboard.helius.dev. Put the mint address only in the Mint field.',
++      };
++    }
++
++    var sup = await heliusRpc(key, 'getTokenSupply', [mintNorm]);
++    if (sup.error) return { ok: false, error: 'getTokenSupply: ' + sup.error };
++    var supplyVal = sup.result && sup.result.value;
++    if (!supplyVal) return { ok: false, error: 'getTokenSupply returned empty' };
++
++    var supplyDecimals = parseInt(supplyVal.decimals, 10) || 0;
++
++    var totalUi = 0;
++    if (supplyVal.uiAmount != null) {
++      totalUi = parseFloat(supplyVal.uiAmount);
++      if (isNaN(totalUi)) totalUi = 0;
++    } else {
++      var amt0 = parseFloat(supplyVal.amount || 0);
++      var dec0 = supplyDecimals;
++      totalUi = dec0 >= 0 ? amt0 / Math.pow(10, dec0) : 0;
++    }
++    if (totalUi <= 0) {
++      return {
++        ok: false,
++        error:
++          'Token supply is zero or unreadable. This mint may be invalid, not an SPL token on mainnet, or the RPC returned no data.',
++      };
++    }
++
++    var holderSource = 'das';
++    var dasFetch = await fetchDasTokenAccountsForMint(key, mintNorm, dasPages, 100);
++    var dasRows = dasFetch.rows || [];
++    var ownerAmount = ownerAmountFromDasRows(dasRows, supplyDecimals);
++    if (!Object.keys(ownerAmount).length) {
++      holderSource = 'largest_accounts';
++      var fbLa = await holdersViaLargestAccountsAsync(key, mintNorm, mh);
++      if (fbLa.error) {
++        var errMsg = fbLa.error;
++        if (dasFetch.error) errMsg = 'Holders (DAS): ' + dasFetch.error + '; fallback: ' + fbLa.error;
++        return { ok: false, error: errMsg };
++      }
++      ownerAmount = fbLa.ownerAmount;
++    }
++
++    var ownersSorted = Object.keys(ownerAmount).sort(function (a, b) {
++      return ownerAmount[b] - ownerAmount[a];
++    });
++
++    var excludedLp = null;
++    var scanExclude = {};
++    Object.keys(excludeNorm).forEach(function (ek) {
++      scanExclude[ek] = true;
++    });
++    var skipLp = opts.skipLiquidityWallet !== false;
++    if (skipLp && ownersSorted.length && totalUi > 0) {
++      var topH = ownersSorted[0];
++      if (!excludeNorm[topH]) {
++        var pctTop = (100 * (ownerAmount[topH] || 0)) / totalUi;
++        if (pctTop >= lpMinPct) {
++          excludedLp = topH;
++          scanExclude[topH] = true;
+         }
++      }
++    }
++
++    var lookupOrder = [];
++    if (sw) lookupOrder.push(sw);
++    ownersSorted.forEach(function (w) {
++      if (scanExclude[w]) return;
++      if (lookupOrder.indexOf(w) === -1) lookupOrder.push(w);
++    });
++    lookupOrder = lookupOrder.slice(0, mf);
++
++    if (!lookupOrder.length) {
++      return {
++        ok: false,
++        error:
++          'No holder wallets to scan after liquidity / manual exclusions. Set skipLiquidityWallet: false or raise lpSkipMinPct (e.g. 100+ to disable LP skip).',
++      };
++    }
++
++    var fundedBy = {};
++    var transfersBy = {};
++    var intelRows = await asyncPool(conc, lookupOrder, async function (w) {
++      var fb = await heliusFundedBy(key, w);
++      var tr = await heliusTransfers(key, w, trLimit);
++      return { w: w, fb: fb, tr: tr };
++    });
++    for (var ir = 0; ir < intelRows.length; ir++) {
++      var row = intelRows[ir];
++      fundedBy[row.w] = row.fb;
++      transfersBy[row.w] = row.tr;
++    }
++
++    var hopFundedBy = {};
++    var hopTransfersBy = {};
++    var hopCtxBase = { hopFunded: hopFundedBy, hopTransfers: hopTransfersBy };
++    var hopTargetsFetched = 0;
++    if (hop2Max > 0) {
++      var funderCounts = {};
++      lookupOrder.forEach(function (w) {
++        var df = effectiveFunderAddress(fundedBy[w], transfersBy[w]);
++        if (df) funderCounts[df] = (funderCounts[df] || 0) + 1;
+       });
+-      if (bi + 100 < oldestSigs.length) onProgress('Parsing transactions (' + Math.min(bi + 100, oldestSigs.length) + '/' + oldestSigs.length + ')...');
+-    }
+-
+-    /* ── Step 5: Identify funders ── */
+-    onProgress('Identifying funders...');
+-    var uniqueFunders = Object.values ? Object.values(funderMap).filter(function (v, i, a) { return a.indexOf(v) === i; })
+-      : Object.keys(funderMap).map(function (k) { return funderMap[k]; }).filter(function (v, i, a) { return a.indexOf(v) === i; });
+-    var funderIds = {};
+-    var idBatches = [];
+-    for (var fi = 0; fi < uniqueFunders.length; fi += 100) idBatches.push(uniqueFunders.slice(fi, fi + 100));
+-    for (var ib = 0; ib < idBatches.length; ib++) {
+-      var idRes = await batchIdentity(key, idBatches[ib]);
+-      idRes.forEach(function (id) { if (id && id.address) funderIds[id.address] = id; });
+-    }
+-
+-    /* ── Step 6: Cluster by funder ── */
+-    onProgress('Analyzing clusters...');
+-    var clustersByFunder = {};
+-    holdersToScan.forEach(function (h) {
+-      var f = funderMap[h.owner];
+-      if (!f) return;
+-      if (!clustersByFunder[f]) clustersByFunder[f] = [];
+-      clustersByFunder[f].push(h);
+-    });
+-
+-    var suspiciousClusters = Object.keys(clustersByFunder)
+-      .map(function (f) {
+-        var ws = clustersByFunder[f];
+-        var totalBalRaw = ws.reduce(function (s, w) { return s + (w.amountRaw || 0); }, 0);
+-        var fId = funderIds[f] || null;
+-        var walletRows = ws.map(function (w) {
+-          var st = statsByOwner[w.owner] || {};
+-          var ageDays = st.oldestBlockTime ? Math.max(0, Math.floor((Date.now() / 1000 - st.oldestBlockTime) / 86400)) : null;
+-          return {
+-            wallet: w.owner,
+-            wallet_short: shortAddr(w.owner),
+-            amount_ui: Math.round(toUi(w.amountRaw, decimals) * 1e4) / 1e4,
+-            pct_supply: supplyPct(w.amountRaw, totalRaw),
+-            tx_count: st.txCount || 0,
+-            wallet_age_days: ageDays,
+-          };
+-        }).sort(function (a, b) { return b.pct_supply - a.pct_supply; });
+-        return {
+-          funder: f,
+-          funder_short: shortAddr(f),
+-          funder_name: fId && fId.name ? fId.name : null,
+-          wallet_count: ws.length,
+-          wallet_rows: walletRows,
+-          pct_supply: supplyPct(totalBalRaw, totalRaw),
+-          is_exchange: isExchange(fId),
+-          identity: fId,
+-        };
+-      })
+-      .filter(function (c) { return c.wallet_count >= 2 && !c.is_exchange; })
+-      .sort(function (a, b) {
+-        if (b.wallet_count !== a.wallet_count) return b.wallet_count - a.wallet_count;
+-        return b.pct_supply - a.pct_supply;
++      var hopTargets = Object.keys(funderCounts)
++        .sort(function (a, b) {
++          return (funderCounts[b] || 0) - (funderCounts[a] || 0);
++        })
++        .slice(0, hop2Max);
++      hopTargetsFetched = hopTargets.length;
++      var hopRows = await asyncPool(hopConc, hopTargets, async function (addr) {
++        var hfb = await heliusFundedBy(key, addr);
++        var htr = await heliusTransfers(key, addr, trLimit);
++        return { addr: addr, fb: hfb, tr: htr };
+       });
++      for (var hr = 0; hr < hopRows.length; hr++) {
++        var hrw = hopRows[hr];
++        hopFundedBy[hrw.addr] = hrw.fb;
++        hopTransfersBy[hrw.addr] = hrw.tr;
++      }
++    }
++
++    var clusterMembers = {};
++    function addToCluster(fk, w) {
++      if (!clusterMembers[fk]) clusterMembers[fk] = [];
++      if (clusterMembers[fk].indexOf(w) === -1) clusterMembers[fk].push(w);
++    }
++    lookupOrder.forEach(function (w) {
++      addToCluster(clusterKeyFromSources(w, fundedBy[w], transfersBy[w], hopCtxBase), w);
++    });
+ 
+-    var bundleWalletCount = suspiciousClusters.reduce(function (s, c) { return s + c.wallet_count; }, 0);
+-    var bundlePct         = suspiciousClusters.reduce(function (s, c) { return s + c.pct_supply; }, 0);
+-    bundlePct             = Math.round(bundlePct * 100) / 100;
+-
+-    /* ── Step 7: Verdict ── */
+-    var riskScore = Math.min(100, Math.round(
+-      bundlePct         * 1.8 +
+-      suspiciousClusters.length * 8 +
+-      bundleWalletCount * 0.5
+-    ));
+-    var verdict = riskScore >= 75 ? 'BUNDLER'
+-                : riskScore >= 50 ? 'SUSPICIOUS'
+-                : riskScore >= 30 ? 'WATCHLIST'
+-                : 'CLEAN';
+-
+-    /* top holders output */
+-    var topHolders = holdersToScan.slice(0, 20).map(function (h) {
+-      var funder = funderMap[h.owner] || null;
+-      var inCluster = suspiciousClusters.some(function (c) {
+-        return c.wallet_rows.some(function (w) { return w.wallet === h.owner; });
++    var focusClusterKey = null;
++    if (sw) {
++      focusClusterKey = clusterKeyFromSources(sw, fundedBy[sw], transfersBy[sw], hopCtxBase);
++    } else {
++      var bestKey = null;
++      var bestSupply = 0;
++      Object.keys(clusterMembers).forEach(function (ck) {
++        if (ck.indexOf('funder:') !== 0) return;
++        var members = clusterMembers[ck];
++        if (members.length < 2) return;
++        var s = 0;
++        members.forEach(function (x) {
++          s += ownerAmount[x] || 0;
++        });
++        if (s > bestSupply) {
++          bestSupply = s;
++          bestKey = ck;
++        }
+       });
++      focusClusterKey = bestKey;
++    }
++
++    var focusMembers =
++      focusClusterKey && clusterMembers[focusClusterKey] ? clusterMembers[focusClusterKey].slice() : [];
++
++    var seedBalanceUi = null;
++    if (sw) {
++      seedBalanceUi = await balanceUiForMint(key, sw, mintNorm);
++      if (seedBalanceUi == null) seedBalanceUi = ownerAmount[sw];
++      if (focusClusterKey && focusMembers.indexOf(sw) === -1) {
++        if (clusterKeyFromSources(sw, fundedBy[sw], transfersBy[sw], hopCtxBase) === focusClusterKey) focusMembers.push(sw);
++      }
++    }
++
++    var clusterSupplyUi = 0;
++    focusMembers.forEach(function (w) {
++      var bal = ownerAmount[w] || 0;
++      if (sw && w === sw && seedBalanceUi != null) {
++        bal = Math.max(bal, seedBalanceUi);
++      }
++      clusterSupplyUi += bal;
++    });
++
++    var seedPct = null;
++    if (sw && seedBalanceUi != null) {
++      seedPct = supplyPct(seedBalanceUi, totalUi);
++    }
++
++    var holdersOut = ownersSorted.slice(0, 20).map(function (w) {
++      var dr = directAndRootFunder(w, fundedBy[w], transfersBy[w], hopFundedBy, hopTransfersBy);
+       return {
+-        wallet: h.owner,
+-        wallet_short: shortAddr(h.owner),
+-        amount_ui: Math.round(toUi(h.amountRaw, decimals) * 1e4) / 1e4,
+-        pct_supply: supplyPct(h.amountRaw, totalRaw),
+-        funder: funder,
+-        funder_short: funder ? shortAddr(funder) : null,
+-        in_bundle: inCluster,
++        wallet: w,
++        amount_ui: Math.round(ownerAmount[w] * 1e8) / 1e8,
++        pct_supply: supplyPct(ownerAmount[w], totalUi),
++        funder: dr.direct,
++        funder_root: dr.root,
++        in_focus_cluster: focusMembers.indexOf(w) >= 0,
+       };
+     });
+ 
++    var focusNote = null;
++    if (!focusClusterKey && !sw) {
++      focusNote =
++        'No multi-wallet cluster with a shared ultimate funder in this sample. Optional: enter a wallet to focus that address’s funder-linked group.';
++    }
++
++    var identities = await heliusBatchIdentity(key, focusMembers.slice(0, 100));
++
++    var bundleSignals = null;
++    try {
++      bundleSignals = await computeCoordinationBundleAsync(key, {
++        lookupOrder: lookupOrder,
++        fundedBy: fundedBy,
++        mint: mintNorm,
++        focusWallets: focusMembers.slice().sort(),
++        transfersCache: transfersBy,
++      });
++    } catch (e) {
++      bundleSignals = {
++        coordination_score: 0,
++        coordination_reasons: [],
++        error: String((e && e.message) || e),
++      };
++    }
++
+     return {
+       ok: true,
+       mint: mintNorm,
+-      token_name: tokenName,
+-      token_symbol: tokenSymbol,
+-      token_supply_ui: Math.round(totalUi),
+-      decimals: decimals,
+-      total_holders: totalHolders,
+-      scanned_wallets: holdersToScan.length,
+-      verdict: verdict,
+-      risk_score: riskScore,
+-      bundle_wallet_count: bundleWalletCount,
+-      bundle_pct_supply: bundlePct,
+-      suspicious_clusters: suspiciousClusters.slice(0, 12),
+-      top_holders: topHolders,
+-      scan_time_ms: Date.now() - startedAt,
+-      scanned_at: new Date().toISOString(),
+-      disclaimer: 'Heuristic only. Funder inferred from first parsed native SOL inbound transfer. Sample-limited.',
++      token_supply_ui: totalUi,
++      seed_wallet: sw || null,
++      seed_balance_ui: seedBalanceUi != null ? Math.round(seedBalanceUi * 1e8) / 1e8 : null,
++      seed_pct_supply: seedPct,
++      focus_cluster_key: focusClusterKey,
++      focus_cluster_wallets: focusMembers.slice().sort(),
++      focus_cluster_supply_ui: Math.round(clusterSupplyUi * 1e8) / 1e8,
++      focus_cluster_pct_supply: supplyPct(clusterSupplyUi, totalUi),
++      focus_cluster_note: focusNote,
++      top_holders: holdersOut,
++      identities: identities,
++      excluded_liquidity_wallet: excludedLp,
++      params: {
++        max_holders: mh,
++        max_funded_by_lookups: mf,
++        funder_transfers_limit: trLimit,
++        holder_fetch_source: holderSource,
++        das_max_pages: dasPages,
++        das_token_account_rows: dasRows.length,
++        unique_holders_sampled: ownersSorted.length,
++        lp_skip_min_pct: lpMinPct,
++        funder_hop2_max: hop2Max,
++        funder_hop2_wallets_fetched: hopTargetsFetched,
++        deep_bundle_scan: true,
++      },
++      disclaimer:
++        'Heuristic only: clusters prefer a shared 2-hop ultimate funder when Helius returns data for intermediate wallets (else direct first inbound SOL / funded-by). Deep scan uses more API calls and time. Not financial advice.',
++      pnl_note: 'PnL not computed here; use an explorer or portfolio tool for full buy/sell history.',
++      bundle_signals: bundleSignals,
+     };
+   }
+ 
+-- 
+2.50.1 (Apple Git-155)
+
