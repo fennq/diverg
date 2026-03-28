@@ -1523,8 +1523,14 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     Otherwise runs phase 1 then phase 2. When target is detected as crypto/DeFi, chain_validation_abuse is added automatically.
     Returns dict with target_url, findings, summary, scanned_at, skills_run.
     """
-    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
+    from urllib.parse import urlparse as _urlparse
     target_url = target if target.startswith("http") else f"https://{target}"
+    _parsed = _urlparse(target_url)
+    if _parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported scheme '{_parsed.scheme}' — only http and https are allowed")
+    if not _parsed.hostname:
+        raise ValueError("Invalid URL — no hostname found")
+    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
 
     site_classification = _get_crypto_detection(target_url)
     chain_validation_abuse_reason: str | None = None
@@ -1671,8 +1677,14 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
     Generator that runs the same scan as run_web_scan but yields progress events (NDJSON).
     Yields: skill_start, skill_done per skill, then done with full report (including site_classification).
     """
-    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
+    from urllib.parse import urlparse as _urlparse
     target_url = target if target.startswith("http") else f"https://{target}"
+    _parsed = _urlparse(target_url)
+    if _parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported scheme '{_parsed.scheme}' — only http and https are allowed")
+    if not _parsed.hostname:
+        raise ValueError("Invalid URL — no hostname found")
+    domain = target.replace("https://", "").replace("http://", "").split("/")[0]
 
     site_classification = _get_crypto_detection(target_url)
     chain_validation_abuse_reason: str | None = None
