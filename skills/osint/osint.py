@@ -141,7 +141,12 @@ def _safe_str(val: Any) -> Optional[str]:
 
 
 def lookup_whois(domain: str) -> WHOISInfo:
-    w = whois.whois(domain)
+    old_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(8)
+    try:
+        w = whois.whois(domain)
+    finally:
+        socket.setdefaulttimeout(old_timeout)
     emails = w.emails if isinstance(w.emails, list) else ([w.emails] if w.emails else [])
     ns = w.name_servers if isinstance(w.name_servers, list) else ([w.name_servers] if w.name_servers else [])
     ns = [n.lower() for n in ns if n]
@@ -234,7 +239,7 @@ def harvest_subdomains_crtsh(domain: str) -> list[SubdomainEntry]:
         resp = SESSION.get(
             CRT_SH_URL,
             params={"q": f"%.{domain}", "output": "json"},
-            timeout=30,
+            timeout=10,
         )
         if resp.status_code != 200:
             return entries
@@ -872,7 +877,7 @@ def check_data_breaches(domain: str) -> list[BreachInfo]:
     try:
         resp = SESSION.get(
             f"https://haveibeenpwned.com/api/v2/breaches?domain={domain}",
-            timeout=15,
+            timeout=8,
         )
         if resp.status_code == 200:
             try:
@@ -1046,7 +1051,7 @@ def query_wayback(domain: str, limit: int = 200) -> list[WaybackSnapshot]:
             "collapse": "urlkey",
             "filter": "statuscode:200",
         }
-        resp = SESSION.get(WAYBACK_API, params=params, timeout=30)
+        resp = SESSION.get(WAYBACK_API, params=params, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
             for row in data[1:]:
@@ -1074,7 +1079,7 @@ def query_wayback(domain: str, limit: int = 200) -> list[WaybackSnapshot]:
             "collapse": "urlkey",
             "filter": "statuscode:404",
         }
-        resp = SESSION.get(WAYBACK_API, params=params_removed, timeout=20)
+        resp = SESSION.get(WAYBACK_API, params=params_removed, timeout=8)
         if resp.status_code == 200:
             data = resp.json()
             for row in data[1:]:
@@ -1122,15 +1127,23 @@ def run(target: str, scan_type: str = "full") -> str:
     }
 
     to_run = {k: v for k, v in tasks.items() if scan_type in ("full", k)}
+    per_task_timeout = max(5, RUN_BUDGET_SEC // 2)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(6, len(to_run))) as pool:
-        futures = {pool.submit(fn): (key, attr) for key, (attr, fn) in to_run.items()}
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=min(6, len(to_run)))
+    futures = {pool.submit(fn): (key, attr) for key, (attr, fn) in to_run.items()}
+    try:
         for future in concurrent.futures.as_completed(futures, timeout=RUN_BUDGET_SEC):
             key, attr = futures[future]
             try:
-                setattr(report, attr, future.result(timeout=2))
+                setattr(report, attr, future.result(timeout=per_task_timeout))
             except Exception as exc:
                 report.errors.append(f"{key} error: {exc}")
+    except concurrent.futures.TimeoutError:
+        report.errors.append("Budget expired, returning partial results")
+    finally:
+        for f in futures:
+            f.cancel()
+        pool.shutdown(wait=False)
 
     return json.dumps(asdict(report), indent=2)
 
