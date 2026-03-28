@@ -10,10 +10,23 @@
     return;
   }
 
+  function syncRefInputFromStorage() {
+    var inp = document.getElementById('authReferralCode');
+    if (!inp) return;
+    try {
+      var st = sessionStorage.getItem('diverg_ref');
+      if (st && !inp.value.trim()) inp.value = st;
+    } catch (e) { /* ignore */ }
+  }
+
   try {
     var refParam = new URL(window.location.href).searchParams.get('ref');
-    if (refParam && refParam.trim()) sessionStorage.setItem('diverg_ref', refParam.trim().toUpperCase().slice(0, 16));
+    if (refParam && refParam.trim()) {
+      var normalized = refParam.trim().toUpperCase().slice(0, 32);
+      sessionStorage.setItem('diverg_ref', normalized);
+    }
   } catch (e) { /* ignore */ }
+  syncRefInputFromStorage();
 
   function showError(msg) {
     document.getElementById('authErrorText').textContent = msg;
@@ -34,8 +47,10 @@
     document.getElementById('toggleText').textContent = isRegister ? 'Already have an account?' : 'No account?';
     document.getElementById('toggleLink').textContent = isRegister ? 'Sign in' : 'Create one';
     document.getElementById('nameField').classList.toggle('show', isRegister);
+    document.getElementById('referralField').classList.toggle('show', isRegister);
     document.getElementById('authPassword').autocomplete = isRegister ? 'new-password' : 'current-password';
     document.getElementById('authPassword').placeholder = isRegister ? 'Create a password' : 'Min 8 characters';
+    if (isRegister) syncRefInputFromStorage();
     hideError();
   }
 
@@ -69,8 +84,11 @@
     var endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
     var body = isRegister ? { email: email, password: password, name: name } : { email: email, password: password };
     if (isRegister) {
-      var storedRef = sessionStorage.getItem('diverg_ref');
-      if (storedRef) body.referral_code = storedRef;
+      var refInput = (document.getElementById('authReferralCode').value || '').trim().toUpperCase().slice(0, 64);
+      var storedRef = '';
+      try { storedRef = (sessionStorage.getItem('diverg_ref') || '').trim(); } catch (e2) { /* ignore */ }
+      var referralCode = refInput || storedRef;
+      if (referralCode) body.referral_code = referralCode;
     }
 
     try {
@@ -90,7 +108,11 @@
 
       localStorage.setItem('diverg_token', data.token);
       localStorage.setItem('diverg_user', JSON.stringify(data.user));
-      sessionStorage.removeItem('diverg_ref');
+      try {
+        sessionStorage.removeItem('diverg_ref');
+        var refEl = document.getElementById('authReferralCode');
+        if (refEl) refEl.value = '';
+      } catch (e3) { /* ignore */ }
       window.location.href = '/dashboard/';
     } catch (err) {
       showError('Connection failed — is the server running?');
