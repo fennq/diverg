@@ -110,6 +110,25 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
 .user-name { font-size: 0.75rem; font-weight: 500; color: var(--text); }
 .user-role { font-size: 0.6875rem; color: var(--dim); }
 
+/* ── User menu ──────────────────────────────────────────────────────── */
+.user-menu {
+  display: none;
+  margin-top: 0.25rem;
+  padding: 0.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.user-menu.show { display: block; }
+.user-menu-item {
+  display: block; width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem; color: var(--muted);
+  border-radius: 4px; text-align: left;
+  cursor: pointer; transition: all 0.1s;
+}
+.user-menu-item:hover { color: var(--red); background: rgba(239,68,68,0.06); }
+
 /* ── Main ───────────────────────────────────────────────────────────── */
 .main {
   margin-left: var(--sidebar);

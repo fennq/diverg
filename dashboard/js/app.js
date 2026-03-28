@@ -5,6 +5,20 @@ const api = p => CFG.apiUrl + p;
 
 const State = { scope: 'full', scanId: null, report: null, historyData: [], findings: [] };
 
+// ── Auth ──────────────────────────────────────────────────────────────────
+const Auth = {
+  get token() { return localStorage.getItem('diverg_token') || ''; },
+  get user() { try { return JSON.parse(localStorage.getItem('diverg_user') || 'null'); } catch { return null; } },
+  get headers() { return this.token ? { 'Authorization': 'Bearer ' + this.token } : {}; },
+  logout() {
+    localStorage.removeItem('diverg_token');
+    localStorage.removeItem('diverg_user');
+    window.location.href = '/login';
+  }
+};
+
+if (!Auth.token) { window.location.href = '/login'; }
+
 // ── Navigation ───────────────────────────────────────────────────────────
 function navigate(page, data) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -58,20 +72,27 @@ function toast(msg, type = 'ok') {
 }
 
 // ── API helpers ────────────────────────────────────────────────────────────
+function authHeaders(extra) {
+  return { ...Auth.headers, ...extra };
+}
+
 async function get(path) {
-  const r = await fetch(api(path));
+  const r = await fetch(api(path), { headers: authHeaders() });
+  if (r.status === 401) { Auth.logout(); return; }
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
 async function post(path, body) {
   const r = await fetch(api(path), {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body)
   });
+  if (r.status === 401) { Auth.logout(); return; }
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
 async function del(path) {
-  const r = await fetch(api(path), { method: 'DELETE' });
+  const r = await fetch(api(path), { method: 'DELETE', headers: authHeaders() });
+  if (r.status === 401) { Auth.logout(); return; }
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
@@ -158,9 +179,10 @@ async function quickLaunch() {
     toast('Starting scan…', 'ok');
     const resp = await fetch(api('/api/scan/stream'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ url, scope: State.scope }),
     });
+    if (resp.status === 401) { Auth.logout(); return; }
     if (!resp.ok) throw new Error('API error ' + resp.status);
 
     let lastReport = null;
@@ -214,9 +236,10 @@ async function launchScan() {
 
   try {
     const resp = await fetch(api('/api/scan/stream'), {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ url, scope: State.scope }),
     });
+    if (resp.status === 401) { Auth.logout(); return; }
     if (!resp.ok) throw new Error('API error ' + resp.status);
 
     const reader = resp.body.getReader();
@@ -664,4 +687,14 @@ function exportReport() {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────
+(function initUser() {
+  const u = Auth.user;
+  if (u) {
+    const nameEl = document.getElementById('userName');
+    const avatarEl = document.getElementById('userAvatar');
+    if (nameEl) nameEl.textContent = u.name || u.email.split('@')[0];
+    if (avatarEl) avatarEl.textContent = (u.name || u.email)[0].toUpperCase();
+  }
+})();
+
 loadHome();

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diverg — Sign in</title>
+  <link rel="icon" href="/website/logo.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/dashboard/css/dashboard.css">
+  <style>
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+
+    .auth-wrap { width: 100%; max-width: 400px; padding: 2rem; }
+
+    .auth-brand {
+      display: flex; align-items: center; gap: 0.75rem;
+      justify-content: center; margin-bottom: 2.5rem;
+    }
+    .auth-brand img { height: 32px; }
+    .auth-brand-badge {
+      font-size: 0.625rem; font-weight: 600;
+      color: var(--accent); background: var(--accent-dim);
+      padding: 2px 6px; border-radius: 4px;
+      border: 1px solid rgba(59,111,245,0.2);
+    }
+
+    .auth-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 2rem;
+    }
+
+    .auth-title {
+      font-size: 1.125rem; font-weight: 500;
+      text-align: center; margin-bottom: 0.375rem;
+    }
+    .auth-subtitle {
+      font-size: 0.8125rem; color: var(--dim);
+      text-align: center; margin-bottom: 1.5rem;
+    }
+
+    .auth-field { margin-bottom: 1rem; }
+    .auth-field label {
+      display: block; font-size: 0.75rem;
+      color: var(--muted); margin-bottom: 0.375rem;
+    }
+    .auth-field input {
+      width: 100%; padding: 0.75rem 1rem;
+      background: var(--elevated); border: 1px solid var(--border);
+      border-radius: 8px; font-size: 0.875rem;
+      transition: all 0.15s;
+    }
+    .auth-field input:focus { border-color: var(--accent); }
+    .auth-field input::placeholder { color: var(--dim); }
+
+    .auth-btn {
+      width: 100%; padding: 0.75rem;
+      background: var(--text); color: var(--bg);
+      border: none; border-radius: 8px;
+      font-size: 0.875rem; font-weight: 500;
+      cursor: pointer; transition: opacity 0.15s;
+      margin-top: 0.5rem;
+    }
+    .auth-btn:hover { opacity: 0.85; }
+    .auth-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .auth-divider {
+      display: flex; align-items: center; gap: 1rem;
+      margin: 1.25rem 0; color: var(--dim); font-size: 0.75rem;
+    }
+    .auth-divider::before, .auth-divider::after {
+      content: ''; flex: 1; height: 1px; background: var(--border);
+    }
+
+    .google-btn {
+      width: 100%; padding: 0.75rem;
+      background: var(--elevated); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      font-size: 0.875rem; font-weight: 450;
+      cursor: pointer; transition: all 0.15s;
+      display: flex; align-items: center; justify-content: center; gap: 0.625rem;
+    }
+    .google-btn:hover { border-color: var(--border-hi); background: var(--surface); }
+
+    .auth-toggle {
+      text-align: center; margin-top: 1.25rem;
+      font-size: 0.8125rem; color: var(--dim);
+    }
+    .auth-toggle a {
+      color: var(--accent); cursor: pointer;
+      text-decoration: none; font-weight: 500;
+    }
+    .auth-toggle a:hover { text-decoration: underline; }
+
+    .auth-error {
+      background: rgba(239,68,68,0.08);
+      border: 1px solid rgba(239,68,68,0.2);
+      border-radius: 6px; padding: 0.625rem 0.875rem;
+      font-size: 0.8125rem; color: var(--red);
+      margin-bottom: 1rem; display: none;
+    }
+    .auth-error.show { display: block; }
+
+    .name-field { display: none; }
+    .name-field.show { display: block; }
+  </style>
+</head>
+<body>
+  <div class="auth-wrap">
+    <div class="auth-brand">
+      <img src="/dashboard/logo.png" alt="Diverg">
+      <span class="auth-brand-badge">Console</span>
+    </div>
+
+    <div class="auth-card">
+      <div class="auth-title" id="authTitle">Sign in</div>
+      <div class="auth-subtitle" id="authSubtitle">Welcome back to Diverg</div>
+
+      <div class="auth-error" id="authError"></div>
+
+      <form id="authForm" onsubmit="handleAuth(event)">
+        <div class="auth-field name-field" id="nameField">
+          <label>Full name</label>
+          <input type="text" id="authName" placeholder="Your name" autocomplete="name">
+        </div>
+
+        <div class="auth-field">
+          <label>Email</label>
+          <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email" required>
+        </div>
+
+        <div class="auth-field">
+          <label>Password</label>
+          <input type="password" id="authPassword" placeholder="Min 8 characters" autocomplete="current-password" required minlength="8">
+        </div>
+
+        <button type="submit" class="auth-btn" id="authBtn">Sign in</button>
+      </form>
+
+      <div class="auth-divider">or</div>
+
+      <button class="google-btn" id="googleBtn" onclick="googleSignIn()">
+        <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59a14.5 14.5 0 0 1 0-9.18l-7.98-6.19a24.01 24.01 0 0 0 0 21.56l7.98-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+        Continue with Google
+      </button>
+
+      <div class="auth-toggle">
+        <span id="toggleText">Don't have an account?</span>
+        <a id="toggleLink" onclick="toggleMode()">Create one</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script>
+    const API = 'http://127.0.0.1:5000';
+    let isRegister = false;
+
+    if (localStorage.getItem('diverg_token')) {
+      window.location.href = '/dashboard/';
+    }
+
+    function toggleMode() {
+      isRegister = !isRegister;
+      document.getElementById('authTitle').textContent = isRegister ? 'Create account' : 'Sign in';
+      document.getElementById('authSubtitle').textContent = isRegister ? 'Get started with Diverg' : 'Welcome back to Diverg';
+      document.getElementById('authBtn').textContent = isRegister ? 'Create account' : 'Sign in';
+      document.getElementById('toggleText').textContent = isRegister ? 'Already have an account?' : "Don't have an account?";
+      document.getElementById('toggleLink').textContent = isRegister ? 'Sign in' : 'Create one';
+      document.getElementById('nameField').classList.toggle('show', isRegister);
+      document.getElementById('authPassword').autocomplete = isRegister ? 'new-password' : 'current-password';
+      hideError();
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('authError');
+      el.textContent = msg; el.classList.add('show');
+    }
+    function hideError() {
+      document.getElementById('authError').classList.remove('show');
+    }
+
+    function toast(msg, type) {
+      const el = document.createElement('div');
+      el.className = 'toast ' + type;
+      el.textContent = msg;
+      document.getElementById('toastContainer').appendChild(el);
+      setTimeout(() => el.remove(), 3000);
+    }
+
+    async function handleAuth(e) {
+      e.preventDefault();
+      hideError();
+      const btn = document.getElementById('authBtn');
+      btn.disabled = true;
+
+      const email = document.getElementById('authEmail').value.trim();
+      const password = document.getElementById('authPassword').value;
+      const name = document.getElementById('authName').value.trim();
+
+      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+      const body = isRegister ? { email, password, name } : { email, password };
+
+      try {
+        const r = await fetch(API + endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await r.json();
+
+        if (!r.ok) {
+          showError(data.error || 'Something went wrong');
+          btn.disabled = false;
+          return;
+        }
+
+        localStorage.setItem('diverg_token', data.token);
+        localStorage.setItem('diverg_user', JSON.stringify(data.user));
+        window.location.href = '/dashboard/';
+      } catch (err) {
+        showError('Connection failed — is the server running?');
+        btn.disabled = false;
+      }
+    }
+
+    async function googleSignIn() {
+      try {
+        const tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: '',
+          scope: 'openid email profile',
+          callback: async (response) => {
+            if (response.error) {
+              showError('Google sign-in cancelled');
+              return;
+            }
+            try {
+              const r = await fetch(API + '/api/auth/google', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ credential: response.access_token }),
+              });
+              const data = await r.json();
+              if (!r.ok) {
+                showError(data.error || 'Google sign-in failed');
+                return;
+              }
+              localStorage.setItem('diverg_token', data.token);
+              localStorage.setItem('diverg_user', JSON.stringify(data.user));
+              window.location.href = '/dashboard/';
+            } catch {
+              showError('Google sign-in failed');
+            }
+          },
+        });
+        tokenClient.requestAccessToken();
+      } catch {
+        showError('Google sign-in not configured — use email instead');
+      }
+    }
+  </script>
+  <script src="https://accounts.google.com/gsi/client" async defer onerror=""></script>
+</body>
+</html>

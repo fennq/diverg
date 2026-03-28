@@ -56,12 +56,15 @@
     </div>
 
     <div class="nav-bottom">
-      <div class="user">
-        <div class="user-avatar">DV</div>
+      <div class="user" onclick="document.getElementById('userMenu').classList.toggle('show')">
+        <div class="user-avatar" id="userAvatar">DV</div>
         <div class="user-info">
-          <div class="user-name">Operator</div>
+          <div class="user-name" id="userName">Operator</div>
           <div class="user-role">Full Access</div>
         </div>
+      </div>
+      <div class="user-menu" id="userMenu">
+        <button class="user-menu-item" onclick="Auth.logout()">Sign out</button>
       </div>
     </div>
   </aside>

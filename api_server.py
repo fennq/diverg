@@ -4,6 +4,12 @@ Diverg Web Scan API — HTTP server for Chrome extension + dashboard console.
 
 Start: python api_server.py [--port 5000]
 
+Auth endpoints:
+  POST /api/auth/register          Create account (email+password)
+  POST /api/auth/login             Login, returns JWT
+  POST /api/auth/google            Google OAuth login
+  GET  /api/auth/me                Get current user
+
 Scan endpoints:
   POST /api/scan                 Run blocking full scan
   POST /api/scan/stream          Stream scan progress as NDJSON
@@ -25,13 +31,16 @@ Dashboard static files:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
+import secrets
 import sqlite3
 import sys
 import uuid
-from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from functools import wraps
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -44,8 +53,27 @@ except ImportError:
     sys.exit(1)
 
 from flask import Response, stream_with_context
+
+try:
+    import bcrypt
+except ImportError:
+    print("Install bcrypt: pip install bcrypt")
+    sys.exit(1)
+
+try:
+    import jwt
+except ImportError:
+    print("Install PyJWT: pip install pyjwt")
+    sys.exit(1)
+
 from orchestrator import run_web_scan, run_web_scan_streaming
 from poc_runner import run_poc_for_finding, run_idor_poc, run_unauth_poc
+
+# ── Config ────────────────────────────────────────────────────────────────
+
+JWT_SECRET = os.environ.get("DIVERG_JWT_SECRET", secrets.token_hex(32))
+JWT_EXPIRY_HOURS = 72
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 
 # ── Database ────────────────────────────────────────────────────────────────
 
@@ -53,8 +81,19 @@ DB_PATH = ROOT / "data" / "dashboard.db"
 DB_PATH.parent.mkdir(exist_ok=True)
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id           TEXT PRIMARY KEY,
+    email        TEXT UNIQUE NOT NULL,
+    name         TEXT DEFAULT '',
+    password     TEXT,
+    provider     TEXT DEFAULT 'email',
+    avatar_url   TEXT DEFAULT '',
+    created_at   TEXT
+);
+
 CREATE TABLE IF NOT EXISTS scans (
     id           TEXT PRIMARY KEY,
+    user_id      TEXT,
     target_url   TEXT NOT NULL,
     scope        TEXT DEFAULT 'full',
     scanned_at   TEXT,
@@ -77,29 +116,34 @@ CREATE TABLE IF NOT EXISTS scans (
 def _db():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
 def init_db():
     with _db() as conn:
         conn.executescript(SCHEMA)
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(scans)").fetchall()]
+        if "user_id" not in cols:
+            conn.execute("ALTER TABLE scans ADD COLUMN user_id TEXT DEFAULT ''")
 
 
 def _count_severity(findings: list, level: str) -> int:
     return sum(1 for f in findings if (f.get("severity") or "").lower() == level.lower())
 
 
-def save_scan(scan_id: str, result: dict, scope: str):
+def save_scan(scan_id: str, result: dict, scope: str, user_id: str = ""):
     findings = result.get("findings") or []
     sev = {s: _count_severity(findings, s) for s in ("Critical", "High", "Medium", "Low", "Info")}
     with _db() as conn:
         conn.execute(
             """INSERT OR REPLACE INTO scans
-               (id, target_url, scope, scanned_at, status, risk_score, risk_verdict,
+               (id, user_id, target_url, scope, scanned_at, status, risk_score, risk_verdict,
                 total, critical, high, medium, low, info, report_json, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 scan_id,
+                user_id,
                 result.get("target_url", ""),
                 scope,
                 result.get("scanned_at", datetime.now(timezone.utc).isoformat()),
@@ -114,6 +158,65 @@ def save_scan(scan_id: str, result: dict, scope: str):
         )
 
 
+# ── Auth helpers ────────────────────────────────────────────────────────────
+
+def hash_password(pw: str) -> str:
+    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+
+
+def check_password(pw: str, hashed: str) -> bool:
+    return bcrypt.checkpw(pw.encode(), hashed.encode())
+
+
+def create_token(user_id: str, email: str) -> str:
+    payload = {
+        "sub": user_id,
+        "email": email,
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+
+def decode_token(token: str) -> dict | None:
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        return None
+
+
+def get_current_user():
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    else:
+        token = request.cookies.get("diverg_token", "")
+    if not token:
+        return None
+    payload = decode_token(token)
+    if not payload:
+        return None
+    with _db() as conn:
+        row = conn.execute("SELECT id, email, name, provider, avatar_url, created_at FROM users WHERE id = ?",
+                           (payload["sub"],)).fetchone()
+    return dict(row) if row else None
+
+
+def require_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = get_current_user()
+        if not user:
+            return jsonify({"error": "Authentication required"}), 401
+        request.user = user
+        return f(*args, **kwargs)
+    return decorated
+
+
+def validate_email(email: str) -> bool:
+    return bool(re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email))
+
+
 # ── Flask app ────────────────────────────────────────────────────────────────
 
 app = Flask(__name__, static_folder=None)
@@ -125,11 +228,158 @@ init_db()
 
 
 @app.after_request
-def _cors(resp):
-    resp.headers["Access-Control-Allow-Origin"] = "*"
+def _security_headers(resp):
+    resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    resp.headers["Access-Control-Allow-Credentials"] = "true"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["X-XSS-Protection"] = "0"
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    resp.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    resp.headers["Cross-Origin-Resource-Policy"] = "same-site"
+    resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    if request.path.startswith("/dashboard"):
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' https://fonts.googleapis.com; "
+            "font-src https://fonts.gstatic.com; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self' http://127.0.0.1:* https://mainnet.helius-rpc.com https://accounts.google.com https://www.googleapis.com; "
+            "frame-src https://accounts.google.com; "
+            "frame-ancestors 'none'"
+        )
     return resp
+
+
+# ── Auth endpoints ────────────────────────────────────────────────────────────
+
+@app.route("/api/auth/register", methods=["POST", "OPTIONS"])
+def auth_register():
+    if request.method == "OPTIONS":
+        return "", 204
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    password = (data.get("password") or "").strip()
+    name = (data.get("name") or "").strip()
+
+    if not email or not validate_email(email):
+        return jsonify({"error": "Valid email required"}), 400
+    if not password or len(password) < 8:
+        return jsonify({"error": "Password must be at least 8 characters"}), 400
+
+    with _db() as conn:
+        existing = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
+        if existing:
+            return jsonify({"error": "Email already registered"}), 409
+
+        user_id = str(uuid.uuid4())
+        conn.execute(
+            "INSERT INTO users (id, email, name, password, provider, created_at) VALUES (?,?,?,?,?,?)",
+            (user_id, email, name or email.split("@")[0], hash_password(password), "email",
+             datetime.now(timezone.utc).isoformat()),
+        )
+
+    token = create_token(user_id, email)
+    return jsonify({
+        "token": token,
+        "user": {"id": user_id, "email": email, "name": name or email.split("@")[0], "provider": "email"},
+    }), 201
+
+
+@app.route("/api/auth/login", methods=["POST", "OPTIONS"])
+def auth_login():
+    if request.method == "OPTIONS":
+        return "", 204
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    password = (data.get("password") or "").strip()
+
+    if not email or not password:
+        return jsonify({"error": "Email and password required"}), 400
+
+    with _db() as conn:
+        row = conn.execute("SELECT id, email, name, password, provider, avatar_url FROM users WHERE email = ?",
+                           (email,)).fetchone()
+    if not row:
+        return jsonify({"error": "Invalid credentials"}), 401
+    user = dict(row)
+    if not user.get("password"):
+        return jsonify({"error": "This account uses Google sign-in"}), 401
+    if not check_password(password, user["password"]):
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    token = create_token(user["id"], user["email"])
+    return jsonify({
+        "token": token,
+        "user": {"id": user["id"], "email": user["email"], "name": user["name"], "provider": user["provider"],
+                 "avatar_url": user.get("avatar_url", "")},
+    })
+
+
+@app.route("/api/auth/google", methods=["POST", "OPTIONS"])
+def auth_google():
+    if request.method == "OPTIONS":
+        return "", 204
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json() or {}
+    credential = data.get("credential", "")
+
+    if not credential:
+        return jsonify({"error": "Missing Google credential"}), 400
+
+    try:
+        import urllib.request
+        url = f"https://www.googleapis.com/oauth2/v3/tokeninfo?id_token={credential}"
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            info = json.loads(resp.read().decode())
+    except Exception as e:
+        return jsonify({"error": f"Google verification failed: {e}"}), 401
+
+    email = info.get("email", "").lower()
+    name = info.get("name", "")
+    avatar = info.get("picture", "")
+    google_sub = info.get("sub", "")
+
+    if not email:
+        return jsonify({"error": "Could not get email from Google"}), 401
+
+    with _db() as conn:
+        existing = conn.execute("SELECT id, email, name, provider, avatar_url FROM users WHERE email = ?",
+                                (email,)).fetchone()
+        if existing:
+            user = dict(existing)
+            if user["provider"] != "google":
+                conn.execute("UPDATE users SET provider = 'google', avatar_url = ? WHERE id = ?",
+                             (avatar, user["id"]))
+        else:
+            user_id = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO users (id, email, name, password, provider, avatar_url, created_at) VALUES (?,?,?,?,?,?,?)",
+                (user_id, email, name, None, "google", avatar, datetime.now(timezone.utc).isoformat()),
+            )
+            user = {"id": user_id, "email": email, "name": name, "provider": "google", "avatar_url": avatar}
+
+    token = create_token(user["id"], email)
+    return jsonify({
+        "token": token,
+        "user": {"id": user["id"], "email": email, "name": user.get("name", name),
+                 "provider": "google", "avatar_url": user.get("avatar_url", avatar)},
+    })
+
+
+@app.route("/api/auth/me", methods=["GET"])
+@require_auth
+def auth_me():
+    return jsonify({"user": request.user})
 
 
 # ── Dashboard static files ───────────────────────────────────────────────────
@@ -146,6 +396,12 @@ def dashboard_root():
 @app.route("/dashboard/<path:filename>")
 def dashboard_static(filename):
     return send_from_directory(str(DASHBOARD_DIR), filename)
+
+
+@app.route("/login")
+@app.route("/login/")
+def login_page():
+    return send_from_directory(str(DASHBOARD_DIR), "login.html")
 
 
 # ── Scan endpoints ───────────────────────────────────────────────────────────
@@ -172,6 +428,7 @@ def api_scan_options():
 
 
 @app.route("/api/scan", methods=["POST"])
+@require_auth
 def api_scan():
     url, goal, scope, err = _parse_scan_body()
     if err:
@@ -179,7 +436,7 @@ def api_scan():
     try:
         result = run_web_scan(url, scope=scope, goal=goal)
         scan_id = str(uuid.uuid4())
-        save_scan(scan_id, result, scope)
+        save_scan(scan_id, result, scope, user_id=request.user["id"])
         payload = {
             "id": scan_id,
             "target_url": result["target_url"],
@@ -211,17 +468,18 @@ def api_scan_stream_options():
 
 
 @app.route("/api/scan/stream", methods=["POST"])
+@require_auth
 def api_scan_stream():
     url, goal, scope, err = _parse_scan_body()
     if err:
         return err
 
     scan_id = str(uuid.uuid4())
+    user_id = request.user["id"]
 
     def generate():
         accumulated = None
         try:
-            # Emit scan ID immediately so client can track it
             yield json.dumps({"event": "scan_start", "id": scan_id, "url": url, "scope": scope}) + "\n"
             for event in run_web_scan_streaming(url, scope=scope, goal=goal):
                 if event.get("event") == "done":
@@ -235,7 +493,7 @@ def api_scan_stream():
         finally:
             if accumulated:
                 try:
-                    save_scan(scan_id, accumulated, scope)
+                    save_scan(scan_id, accumulated, scope, user_id=user_id)
                 except Exception:
                     pass
 
@@ -254,6 +512,7 @@ def poc_simulate_options():
 
 
 @app.route("/api/poc/simulate", methods=["POST"])
+@require_auth
 def poc_simulate():
     if not request.is_json:
         return jsonify({"error": "Content-Type must be application/json"}), 400
@@ -300,32 +559,21 @@ def poc_simulate():
 # ── History endpoints ─────────────────────────────────────────────────────────
 
 @app.route("/api/history", methods=["GET"])
+@require_auth
 def history_list():
     limit = min(int(request.args.get("limit", 50)), 200)
     offset = int(request.args.get("offset", 0))
-    scope_filter = request.args.get("scope", "").strip()
-    verdict_filter = request.args.get("verdict", "").strip()
-
-    where_clauses = []
-    params: list = []
-    if scope_filter:
-        where_clauses.append("scope = ?")
-        params.append(scope_filter)
-    if verdict_filter:
-        where_clauses.append("risk_verdict = ?")
-        params.append(verdict_filter)
-
-    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    user_id = request.user["id"]
 
     with _db() as conn:
-        total = conn.execute(f"SELECT COUNT(*) FROM scans {where_sql}", params).fetchone()[0]
+        total = conn.execute("SELECT COUNT(*) FROM scans WHERE user_id = ?", (user_id,)).fetchone()[0]
         rows = conn.execute(
-            f"""SELECT id, target_url, scope, scanned_at, status, risk_score,
+            """SELECT id, target_url, scope, scanned_at, status, risk_score,
                        risk_verdict, total, critical, high, medium, low, info, label, created_at
-                FROM scans {where_sql}
+                FROM scans WHERE user_id = ?
                 ORDER BY created_at DESC
                 LIMIT ? OFFSET ?""",
-            params + [limit, offset],
+            (user_id, limit, offset),
         ).fetchall()
 
     return jsonify({
@@ -337,9 +585,11 @@ def history_list():
 
 
 @app.route("/api/history/<scan_id>", methods=["GET"])
+@require_auth
 def history_get(scan_id):
     with _db() as conn:
-        row = conn.execute("SELECT * FROM scans WHERE id = ?", (scan_id,)).fetchone()
+        row = conn.execute("SELECT * FROM scans WHERE id = ? AND user_id = ?",
+                           (scan_id, request.user["id"])).fetchone()
     if not row:
         return jsonify({"error": "Scan not found"}), 404
     data = dict(row)
@@ -354,24 +604,31 @@ def history_get(scan_id):
 def history_delete(scan_id):
     if request.method == "OPTIONS":
         return "", 204
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Authentication required"}), 401
     with _db() as conn:
-        conn.execute("DELETE FROM scans WHERE id = ?", (scan_id,))
+        conn.execute("DELETE FROM scans WHERE id = ? AND user_id = ?", (scan_id, user["id"]))
     return jsonify({"deleted": scan_id})
 
 
 @app.route("/api/history/<scan_id>", methods=["PATCH"])
+@require_auth
 def history_patch(scan_id):
     data = (request.get_json() or {}) if request.is_json else {}
     label = data.get("label", "")
     with _db() as conn:
-        conn.execute("UPDATE scans SET label = ? WHERE id = ?", (label, scan_id))
+        conn.execute("UPDATE scans SET label = ? WHERE id = ? AND user_id = ?",
+                     (label, scan_id, request.user["id"]))
     return jsonify({"id": scan_id, "label": label})
 
 
 # ── Stats endpoint ────────────────────────────────────────────────────────────
 
 @app.route("/api/stats", methods=["GET"])
+@require_auth
 def stats():
+    user_id = request.user["id"]
     with _db() as conn:
         row = conn.execute("""
             SELECT
@@ -382,18 +639,20 @@ def stats():
                 COALESCE(SUM(low), 0) AS total_low,
                 COALESCE(AVG(risk_score), 0) AS avg_risk_score,
                 COUNT(DISTINCT target_url) AS unique_targets
-            FROM scans
-        """).fetchone()
+            FROM scans WHERE user_id = ?
+        """, (user_id,)).fetchone()
 
         recent = conn.execute("""
             SELECT id, target_url, risk_score, risk_verdict, total, critical, scanned_at, label
-            FROM scans ORDER BY created_at DESC LIMIT 5
-        """).fetchall()
+            FROM scans WHERE user_id = ?
+            ORDER BY created_at DESC LIMIT 5
+        """, (user_id,)).fetchall()
 
         verdicts = conn.execute("""
             SELECT risk_verdict, COUNT(*) as cnt FROM scans
-            WHERE risk_verdict IS NOT NULL GROUP BY risk_verdict
-        """).fetchall()
+            WHERE risk_verdict IS NOT NULL AND user_id = ?
+            GROUP BY risk_verdict
+        """, (user_id,)).fetchall()
 
     return jsonify({
         "total_scans": row["total_scans"],
@@ -412,7 +671,15 @@ def stats():
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "service": "diverg-console", "version": "2.0"})
+    return jsonify({"status": "ok", "service": "diverg-console", "version": "2.1"})
+
+
+# ── Catch-all redirect to login ──────────────────────────────────────────────
+
+@app.route("/")
+def root_redirect():
+    from flask import redirect
+    return redirect("/login")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -423,7 +690,11 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
     print(f"  Diverg Console  →  http://{args.host}:{args.port}/dashboard/")
+    print(f"  Login           →  http://{args.host}:{args.port}/login")
     print(f"  API             →  http://{args.host}:{args.port}/api/health")
+    from werkzeug.serving import WSGIRequestHandler
+    WSGIRequestHandler.server_version = "Diverg"
+    WSGIRequestHandler.sys_version = ""
     app.run(host=args.host, port=args.port, threaded=True)
 
 
