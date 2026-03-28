@@ -1,2 +1,8 @@
 [phases.setup]
-nixPkgs = ["nmap"]
+nixPkgs = ["python311", "nmap"]
+
+[phases.install]
+cmds = ["python3 -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install -r requirements.txt"]
+
+[start]
+cmd = "gunicorn api_server:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 300"
