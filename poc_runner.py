@@ -49,9 +49,15 @@ def _preview(body: str | bytes) -> str:
 
 
 def _norm_url(url: str) -> str:
+    """Normalize URL and return empty string if invalid (no hostname)."""
     url = (url or "").strip()
-    if url and not url.startswith("http"):
+    if not url:
+        return ""
+    if not url.startswith("http"):
         url = "https://" + url
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return ""
     return url
 
 
@@ -74,7 +80,7 @@ def run_idor_poc(
 
     url = _norm_url(url)
     if not url:
-        return PoCResult(success=False, error="Missing url", poc_type="idor")
+        return PoCResult(success=False, error="Missing or invalid URL", poc_type="idor")
 
     method = (method or "GET").upper()
     headers = dict(headers or {})
@@ -206,7 +212,7 @@ def run_unauth_poc(
 
     url = _norm_url(url)
     if not url:
-        return PoCResult(success=False, error="Missing url", poc_type="unauthenticated")
+        return PoCResult(success=False, error="Missing or invalid URL", poc_type="unauthenticated")
 
     method = (method or "GET").upper()
     headers = dict(headers or {})

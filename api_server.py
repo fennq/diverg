@@ -33,6 +33,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
@@ -148,17 +149,40 @@ def dashboard_static(filename):
     return send_from_directory(str(DASHBOARD_DIR), filename)
 
 
+# ── URL validation ───────────────────────────────────────────────────────────
+
+def _validate_url(url: str) -> tuple[str, str | None]:
+    """Validate and normalize a URL. Returns (normalized_url, error_string_or_None)."""
+    url = (url or "").strip()
+    if not url:
+        return "", "Missing URL"
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return "", f"Unsupported scheme '{parsed.scheme}' — only http and https are allowed"
+    if not parsed.hostname:
+        return "", "Invalid URL — no hostname found"
+    return url, None
+
+
+def _error_response(message: str, status: int = 400):
+    """Return a standardized error JSON response for scan/history endpoints."""
+    return jsonify({"error": True, "message": message}), status
+
+
 # ── Scan endpoints ───────────────────────────────────────────────────────────
 
 def _parse_scan_body():
     if not request.is_json:
-        return None, None, None, (jsonify({"error": "Content-Type must be application/json"}), 400)
+        return None, None, None, _error_response("Content-Type must be application/json")
     data = request.get_json() or {}
-    url = (data.get("url") or "").strip()
-    if not url:
-        return None, None, None, (jsonify({"error": "Missing 'url' in body"}), 400)
-    if not url.startswith("http://") and not url.startswith("https://"):
-        url = "https://" + url
+    raw_url = (data.get("url") or "").strip()
+    if not raw_url:
+        return None, None, None, _error_response("Missing 'url' in body")
+    url, err = _validate_url(raw_url)
+    if err:
+        return None, None, None, _error_response(err)
     goal = (data.get("goal") or "").strip() or None
     scope = (data.get("scope") or "full").strip().lower()
     if scope not in VALID_SCOPES:
@@ -202,7 +226,7 @@ def api_scan():
         }
         return jsonify(payload)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _error_response(str(e), 500)
 
 
 @app.route("/api/scan/stream", methods=["OPTIONS"])
@@ -273,19 +297,25 @@ def poc_simulate():
             return jsonify({"success": False, "error": str(e), "conclusion": ""}), 200
     else:
         poc_type = (data.get("type") or "").strip().lower()
-        url = (data.get("url") or "").strip()
-        if not url:
+        raw_url = (data.get("url") or "").strip()
+        if not raw_url:
             return jsonify({"error": "Missing url (or provide finding)"}), 400
+        url, url_err = _validate_url(raw_url)
+        if url_err:
+            return jsonify({"error": url_err}), 400
         if poc_type not in ("idor", "unauthenticated"):
             return jsonify({"error": "type must be 'idor' or 'unauthenticated'"}), 400
-        if poc_type == "idor":
-            result = run_idor_poc(url=url, method=data.get("method") or "GET",
-                                  params=data.get("params"), data=data.get("data"),
-                                  headers=data.get("headers"), param_to_change=data.get("param_to_change"),
-                                  new_value=str(data.get("new_value") or "1"), cookies=data.get("cookies"))
-        else:
-            result = run_unauth_poc(url=url, method=data.get("method") or "GET",
-                                    headers=data.get("headers"), cookies=data.get("cookies"))
+        try:
+            if poc_type == "idor":
+                result = run_idor_poc(url=url, method=data.get("method") or "GET",
+                                      params=data.get("params"), data=data.get("data"),
+                                      headers=data.get("headers"), param_to_change=data.get("param_to_change"),
+                                      new_value=str(data.get("new_value") or "1"), cookies=data.get("cookies"))
+            else:
+                result = run_unauth_poc(url=url, method=data.get("method") or "GET",
+                                        headers=data.get("headers"), cookies=data.get("cookies"))
+        except Exception as e:
+            return jsonify({"success": False, "error": str(e), "conclusion": ""}), 200
 
     return jsonify({
         "success": result.success,
@@ -301,8 +331,14 @@ def poc_simulate():
 
 @app.route("/api/history", methods=["GET"])
 def history_list():
-    limit = min(int(request.args.get("limit", 50)), 200)
-    offset = int(request.args.get("offset", 0))
+    try:
+        limit = min(int(request.args.get("limit", 50)), 200)
+    except (ValueError, TypeError):
+        return _error_response("'limit' must be a number")
+    try:
+        offset = int(request.args.get("offset", 0))
+    except (ValueError, TypeError):
+        return _error_response("'offset' must be a number")
     scope_filter = request.args.get("scope", "").strip()
     verdict_filter = request.args.get("verdict", "").strip()
 
@@ -317,16 +353,19 @@ def history_list():
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
-    with _db() as conn:
-        total = conn.execute(f"SELECT COUNT(*) FROM scans {where_sql}", params).fetchone()[0]
-        rows = conn.execute(
-            f"""SELECT id, target_url, scope, scanned_at, status, risk_score,
-                       risk_verdict, total, critical, high, medium, low, info, label, created_at
-                FROM scans {where_sql}
-                ORDER BY created_at DESC
-                LIMIT ? OFFSET ?""",
-            params + [limit, offset],
-        ).fetchall()
+    try:
+        with _db() as conn:
+            total = conn.execute(f"SELECT COUNT(*) FROM scans {where_sql}", params).fetchone()[0]
+            rows = conn.execute(
+                f"""SELECT id, target_url, scope, scanned_at, status, risk_score,
+                           risk_verdict, total, critical, high, medium, low, info, label, created_at
+                    FROM scans {where_sql}
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?""",
+                params + [limit, offset],
+            ).fetchall()
+    except sqlite3.Error as e:
+        return _error_response(f"Database error: {e}", 500)
 
     return jsonify({
         "total": total,
@@ -338,10 +377,13 @@ def history_list():
 
 @app.route("/api/history/<scan_id>", methods=["GET"])
 def history_get(scan_id):
-    with _db() as conn:
-        row = conn.execute("SELECT * FROM scans WHERE id = ?", (scan_id,)).fetchone()
+    try:
+        with _db() as conn:
+            row = conn.execute("SELECT * FROM scans WHERE id = ?", (scan_id,)).fetchone()
+    except sqlite3.Error as e:
+        return _error_response(f"Database error: {e}", 500)
     if not row:
-        return jsonify({"error": "Scan not found"}), 404
+        return _error_response("Scan not found", 404)
     data = dict(row)
     if data.get("report_json"):
         data["report"] = json.loads(data.pop("report_json"))
@@ -354,8 +396,11 @@ def history_get(scan_id):
 def history_delete(scan_id):
     if request.method == "OPTIONS":
         return "", 204
-    with _db() as conn:
-        conn.execute("DELETE FROM scans WHERE id = ?", (scan_id,))
+    try:
+        with _db() as conn:
+            conn.execute("DELETE FROM scans WHERE id = ?", (scan_id,))
+    except sqlite3.Error as e:
+        return _error_response(f"Database error: {e}", 500)
     return jsonify({"deleted": scan_id})
 
 
@@ -363,8 +408,11 @@ def history_delete(scan_id):
 def history_patch(scan_id):
     data = (request.get_json() or {}) if request.is_json else {}
     label = data.get("label", "")
-    with _db() as conn:
-        conn.execute("UPDATE scans SET label = ? WHERE id = ?", (label, scan_id))
+    try:
+        with _db() as conn:
+            conn.execute("UPDATE scans SET label = ? WHERE id = ?", (label, scan_id))
+    except sqlite3.Error as e:
+        return _error_response(f"Database error: {e}", 500)
     return jsonify({"id": scan_id, "label": label})
 
 
@@ -372,28 +420,31 @@ def history_patch(scan_id):
 
 @app.route("/api/stats", methods=["GET"])
 def stats():
-    with _db() as conn:
-        row = conn.execute("""
-            SELECT
-                COUNT(*) AS total_scans,
-                COALESCE(SUM(critical), 0) AS total_critical,
-                COALESCE(SUM(high), 0) AS total_high,
-                COALESCE(SUM(medium), 0) AS total_medium,
-                COALESCE(SUM(low), 0) AS total_low,
-                COALESCE(AVG(risk_score), 0) AS avg_risk_score,
-                COUNT(DISTINCT target_url) AS unique_targets
-            FROM scans
-        """).fetchone()
+    try:
+        with _db() as conn:
+            row = conn.execute("""
+                SELECT
+                    COUNT(*) AS total_scans,
+                    COALESCE(SUM(critical), 0) AS total_critical,
+                    COALESCE(SUM(high), 0) AS total_high,
+                    COALESCE(SUM(medium), 0) AS total_medium,
+                    COALESCE(SUM(low), 0) AS total_low,
+                    COALESCE(AVG(risk_score), 0) AS avg_risk_score,
+                    COUNT(DISTINCT target_url) AS unique_targets
+                FROM scans
+            """).fetchone()
 
-        recent = conn.execute("""
-            SELECT id, target_url, risk_score, risk_verdict, total, critical, scanned_at, label
-            FROM scans ORDER BY created_at DESC LIMIT 5
-        """).fetchall()
+            recent = conn.execute("""
+                SELECT id, target_url, risk_score, risk_verdict, total, critical, scanned_at, label
+                FROM scans ORDER BY created_at DESC LIMIT 5
+            """).fetchall()
 
-        verdicts = conn.execute("""
-            SELECT risk_verdict, COUNT(*) as cnt FROM scans
-            WHERE risk_verdict IS NOT NULL GROUP BY risk_verdict
-        """).fetchall()
+            verdicts = conn.execute("""
+                SELECT risk_verdict, COUNT(*) as cnt FROM scans
+                WHERE risk_verdict IS NOT NULL GROUP BY risk_verdict
+            """).fetchall()
+    except sqlite3.Error as e:
+        return _error_response(f"Database error: {e}", 500)
 
     return jsonify({
         "total_scans": row["total_scans"],
