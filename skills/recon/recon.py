@@ -1082,7 +1082,7 @@ def run(
         return (time.time() - run_start) > RUN_BUDGET_SEC
 
     # Fast phases first so we get value before budget runs out
-    if scan_type in ("full", "techstack") and not _over_budget():
+    if scan_type in ("full", "techstack", "quick") and not _over_budget():
         try:
             remaining = max(2, RUN_BUDGET_SEC - (time.time() - run_start))
             tech_timeout = min(remaining - 1, 28)
@@ -1100,7 +1100,7 @@ def run(
         except Exception as exc:
             report.errors.append(f"Tech fingerprint error: {exc}")
 
-    if scan_type in ("full", "waf") and not _over_budget():
+    if scan_type in ("full", "waf", "quick") and not _over_budget():
         try:
             report.waf = detect_waf(target)
         except Exception as exc:
@@ -1133,7 +1133,7 @@ def run(
             report.errors.append(f"Subdomain enum error: {exc}")
 
     # Port scan last with hard cap so it never blows the budget
-    if scan_type in ("full", "ports") and not _over_budget():
+    if scan_type in ("full", "ports", "quick") and not _over_budget():
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(scan_ports, target, port_range, host_timeout=12)

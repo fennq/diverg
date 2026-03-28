@@ -377,13 +377,13 @@ def run(target_url: str, scan_type: str = "full") -> str:
     report = HeadersSSLReport(target_url=target_url)
     run_start = time.time()
 
-    if scan_type in ("full", "headers") and (time.time() - run_start) < RUN_BUDGET_SEC:
+    if scan_type in ("full", "headers", "quick") and (time.time() - run_start) < RUN_BUDGET_SEC:
         try:
             report.header_findings = check_headers(target_url)
         except Exception as exc:
             report.errors.append(f"Header analysis error: {exc}")
 
-    if scan_type in ("full", "ssl") and (time.time() - run_start) < RUN_BUDGET_SEC:
+    if scan_type in ("full", "ssl", "quick") and (time.time() - run_start) < RUN_BUDGET_SEC:
         try:
             report.ssl_findings = check_ssl(target_url)
         except Exception as exc:

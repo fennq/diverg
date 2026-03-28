@@ -55,7 +55,13 @@ SCAN_PROFILES = {
     "passive": ["osint", "headers_ssl", "company_exposure"],
 }
 
-SKILL_TIMEOUT_SECONDS = 45
+
+def skill_scan_type_for_scope(scope: str) -> str:
+    """Per-skill intensity: dashboard 'quick' uses lighter internal passes."""
+    return "quick" if scope == "quick" else "full"
+
+
+SKILL_TIMEOUT_SECONDS = 20
 MAX_DIRECT_WORKERS = 6
 OPENCLAW_AGENT_RETRIES = 2
 OPENCLAW_AGENT_TIMEOUTS = {
@@ -656,9 +662,21 @@ def run_skill_variant(
         return {"error": str(exc), "skill": skill_name}
 
 
-def run_skill(skill_name: str, target: str, target_url: str, context: dict | None = None) -> dict:
-    """Backward-compatible runner for default full scan."""
-    return run_skill_variant(skill_name, target, target_url, scan_type="full", wordlist="medium", crawl_depth=2, context=context)
+def run_skill(
+    skill_name: str,
+    target: str,
+    target_url: str,
+    context: dict | None = None,
+    *,
+    scan_type: str = "full",
+    wordlist: str = "medium",
+    crawl_depth: int = 2,
+) -> dict:
+    """Run one skill; scan_type 'quick' triggers lighter work inside supported skills."""
+    return run_skill_variant(
+        skill_name, target, target_url,
+        scan_type=scan_type, wordlist=wordlist, crawl_depth=crawl_depth, context=context,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1117,14 +1135,20 @@ def _fallback_stage_payload(agent_role: str, direct_results: dict[str, dict], re
     return payload
 
 
-def _run_direct_subset(skills_to_run: list[str], domain: str, target_url: str) -> dict[str, dict]:
+def _run_direct_subset(
+    skills_to_run: list[str],
+    domain: str,
+    target_url: str,
+    *,
+    scan_type: str = "full",
+) -> dict[str, dict]:
     """Run a subset of skills in parallel with per-skill hard timeout; cancel on overrun."""
     if not skills_to_run:
         return {}
     results: dict[str, dict] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_to_run))) as pool:
         future_to_skill = {
-            pool.submit(run_skill, skill_name, domain, target_url): skill_name
+            pool.submit(run_skill, skill_name, domain, target_url, None, scan_type=scan_type): skill_name
             for skill_name in skills_to_run
         }
         for future in concurrent.futures.as_completed(future_to_skill):
@@ -1525,6 +1549,7 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     """
     domain = target.replace("https://", "").replace("http://", "").split("/")[0]
     target_url = target if target.startswith("http") else f"https://{target}"
+    skill_st = skill_scan_type_for_scope(scope)
 
     needs_crypto = scope in ("full", "crypto")
     site_classification = _get_crypto_detection(target_url) if needs_crypto else {"is_crypto": False, "confidence": 0.0, "signals": []}
@@ -1563,7 +1588,7 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     # Phase 1: run all skills that do not need context
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_phase1))) as pool:
         future_to_skill = {
-            pool.submit(run_skill, skill_name, domain, target_url): skill_name
+            pool.submit(run_skill, skill_name, domain, target_url, None, scan_type=skill_st): skill_name
             for skill_name in skills_phase1
         }
         for future in concurrent.futures.as_completed(future_to_skill):
@@ -1589,7 +1614,7 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
         }
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_phase2))) as pool:
             future_to_skill = {
-                pool.submit(run_skill, skill_name, domain, target_url, ctx): skill_name
+                pool.submit(run_skill, skill_name, domain, target_url, ctx, scan_type=skill_st): skill_name
                 for skill_name in skills_phase2
             }
             for future in concurrent.futures.as_completed(future_to_skill):
@@ -1667,11 +1692,11 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     }
 
 
-def _run_skill_phase(skill_name, domain, target_url, eq, ctx=None):
+def _run_skill_phase(skill_name, domain, target_url, eq, ctx=None, *, scan_type: str = "full"):
     """Run a single skill and put start/done events into the queue."""
     eq.put({"event": "skill_start", "skill": skill_name})
     try:
-        out = run_skill(skill_name, domain, target_url, ctx)
+        out = run_skill(skill_name, domain, target_url, ctx, scan_type=scan_type)
         cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
         eq.put({"event": "skill_done", "skill": skill_name, "findings_count": cnt})
         return skill_name, out
@@ -1709,6 +1734,7 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
 
     domain = target.replace("https://", "").replace("http://", "").split("/")[0]
     target_url = target if target.startswith("http") else f"https://{target}"
+    skill_st = skill_scan_type_for_scope(scope)
 
     needs_crypto = scope in ("full", "crypto")
     site_classification = _get_crypto_detection(target_url) if needs_crypto else {"is_crypto": False, "confidence": 0.0, "signals": []}
@@ -1754,7 +1780,7 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
     # Phase 1: run all independent skills in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, max(len(skills_phase1), 1))) as pool:
         futures = {
-            pool.submit(_run_skill_phase, s, domain, target_url, eq): s
+            pool.submit(_run_skill_phase, s, domain, target_url, eq, None, scan_type=skill_st): s
             for s in skills_phase1
         }
         while futures:
@@ -1779,7 +1805,7 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
         }
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, max(len(skills_phase2), 1))) as pool:
             futures = {
-                pool.submit(_run_skill_phase, s, domain, target_url, eq, ctx): s
+                pool.submit(_run_skill_phase, s, domain, target_url, eq, ctx, scan_type=skill_st): s
                 for s in skills_phase2
             }
             while futures:
@@ -1854,6 +1880,7 @@ def run_direct(target: str, scope: str, report_type: str) -> None:
 
     domain = target.replace("https://", "").replace("http://", "").split("/")[0]
     target_url = target if target.startswith("http") else f"https://{target}"
+    skill_st = skill_scan_type_for_scope(scope)
 
     print(f"  Engagement mode: {infer_engagement_mode(target, scope)}")
     print(f"  Priority tracks: {', '.join(infer_priority_tracks(target, scope))}")
@@ -1861,7 +1888,7 @@ def run_direct(target: str, scope: str, report_type: str) -> None:
     results: dict[str, dict] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_to_run))) as pool:
         future_to_skill = {
-            pool.submit(run_skill, skill_name, domain, target_url): skill_name
+            pool.submit(run_skill, skill_name, domain, target_url, None, scan_type=skill_st): skill_name
             for skill_name in skills_to_run
         }
         for future in concurrent.futures.as_completed(future_to_skill):

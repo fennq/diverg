@@ -30,7 +30,7 @@ from stealth import get_session, randomize_order
 
 SESSION = get_session()
 TIMEOUT = 3
-SCAN_BUDGET = 25  # stay under bot 120s; return partial if over
+SCAN_BUDGET = 12  # aggressive cap; partial results are fine
 SIGNAL_STATUSES = {200, 206, 301, 302, 401, 403}
 
 
@@ -196,13 +196,15 @@ ATTACHMENT_TYPES = (
 )
 
 
-def _budget_expired(started_at: float) -> bool:
-    return (time.time() - started_at) > SCAN_BUDGET
+def _budget_expired(started_at: float, budget_sec: float) -> bool:
+    return (time.time() - started_at) > budget_sec
 
 
 def _select_categories(scan_type: str) -> list[str]:
     if scan_type == "full":
         return list(CATEGORY_PATHS.keys())
+    if scan_type == "quick":
+        return list(SCAN_GROUPS["operational"])
     if scan_type in SCAN_GROUPS:
         return SCAN_GROUPS[scan_type]
     if scan_type in CATEGORY_PATHS:
@@ -493,12 +495,13 @@ def _record_surface(
 def scan_company_exposure(target_url: str, scan_type: str = "full") -> CompanyExposureReport:
     report = CompanyExposureReport(target_url=target_url)
     started_at = time.time()
+    budget_sec = float(7 if scan_type == "quick" else SCAN_BUDGET)
 
     categories = _select_categories(scan_type)
     seen_urls: set[str] = set()
     for category in categories:
         for path, label in randomize_order(CATEGORY_PATHS[category]):
-            if _budget_expired(started_at):
+            if _budget_expired(started_at, budget_sec):
                 report.errors.append(f"Budget expired before completing category: {category}")
                 return report
 
@@ -516,7 +519,7 @@ def scan_company_exposure(target_url: str, scan_type: str = "full") -> CompanyEx
 
     if scan_type in {"full", "operational", "business", "staging", "support", "observability", "identity", "admin"}:
         for category, label, alt_url, host in _build_alternate_host_urls(target_url):
-            if _budget_expired(started_at):
+            if _budget_expired(started_at, budget_sec):
                 report.errors.append("Budget expired before completing alternate-host probing")
                 break
             resp = _probe(alt_url)

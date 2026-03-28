@@ -1105,7 +1105,10 @@ def query_wayback(domain: str, limit: int = 200) -> list[WaybackSnapshot]:
 # Entry point
 # ---------------------------------------------------------------------------
 
-RUN_BUDGET_SEC = 25  # finish before bot 120s timeout
+RUN_BUDGET_SEC = 15  # aggressive cap; partial results are acceptable
+RUN_BUDGET_QUICK_SEC = 10  # dashboard quick: subset of tasks
+
+_QUICK_OSINT_KEYS = ("whois", "dns", "subdomains", "tech")
 
 
 def run(target: str, scan_type: str = "full") -> str:
@@ -1126,13 +1129,25 @@ def run(target: str, scan_type: str = "full") -> str:
         "wayback":    ("wayback_snapshots", lambda: query_wayback(domain)),
     }
 
-    to_run = {k: v for k, v in tasks.items() if scan_type in ("full", k)}
-    per_task_timeout = max(5, RUN_BUDGET_SEC // 2)
+    if scan_type == "quick":
+        to_run = {k: tasks[k] for k in _QUICK_OSINT_KEYS if k in tasks}
+        budget_sec = RUN_BUDGET_QUICK_SEC
+    elif scan_type == "full":
+        to_run = dict(tasks)
+        budget_sec = RUN_BUDGET_SEC
+    else:
+        to_run = {k: v for k, v in tasks.items() if scan_type in ("full", k)}
+        budget_sec = RUN_BUDGET_SEC
+
+    per_task_timeout = max(4, budget_sec // 2)
+
+    if not to_run:
+        return json.dumps(asdict(report), indent=2)
 
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=min(6, len(to_run)))
     futures = {pool.submit(fn): (key, attr) for key, (attr, fn) in to_run.items()}
     try:
-        for future in concurrent.futures.as_completed(futures, timeout=RUN_BUDGET_SEC):
+        for future in concurrent.futures.as_completed(futures, timeout=budget_sec):
             key, attr = futures[future]
             try:
                 setattr(report, attr, future.result(timeout=per_task_timeout))
