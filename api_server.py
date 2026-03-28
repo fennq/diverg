@@ -140,7 +140,7 @@ register_limiter = RateLimiter(max_attempts=5, window_seconds=3600, lockout_seco
 
 # ── Database ────────────────────────────────────────────────────────────────
 
-DB_PATH = Path(os.environ.get("DIVERG_DB_PATH", str(ROOT / "data" / "dashboard.db")))
+DB_PATH = Path(os.environ.get("DIVERG_DB_PATH", str(ROOT / "data" / "dashboard.db")).strip().lstrip("="))
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 print(f"  DB path: {DB_PATH}  (exists: {DB_PATH.exists()})")
 
