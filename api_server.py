@@ -76,8 +76,15 @@ from poc_runner import run_poc_for_finding, run_idor_poc, run_unauth_poc
 JWT_SECRET = os.environ.get("DIVERG_JWT_SECRET", secrets.token_hex(32))
 JWT_EXPIRY_HOURS = 72
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
-ALLOWED_ORIGINS = os.environ.get("DIVERG_ALLOWED_ORIGINS", "http://127.0.0.1:5000,http://localhost:5000").split(",")
+ALLOWED_ORIGINS = [
+    o.strip() for o in
+    os.environ.get(
+        "DIVERG_ALLOWED_ORIGINS",
+        "https://dash.divergsec.com,https://divergsec.com,http://127.0.0.1:5000,http://localhost:5000"
+    ).split(",") if o.strip()
+]
 MAX_REQUEST_SIZE = 2 * 1024 * 1024  # 2 MB
+IS_PRODUCTION = os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("DIVERG_PRODUCTION")
 
 # ── Rate limiter ──────────────────────────────────────────────────────────
 
@@ -123,8 +130,8 @@ register_limiter = RateLimiter(max_attempts=5, window_seconds=3600, lockout_seco
 
 # ── Database ────────────────────────────────────────────────────────────────
 
-DB_PATH = ROOT / "data" / "dashboard.db"
-DB_PATH.parent.mkdir(exist_ok=True)
+DB_PATH = Path(os.environ.get("DIVERG_DB_PATH", str(ROOT / "data" / "dashboard.db")))
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -305,13 +312,16 @@ def _security_headers(resp):
     resp.headers["Cross-Origin-Resource-Policy"] = "same-site"
     resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
 
+    connect_src = "'self' https://mainnet.helius-rpc.com https://accounts.google.com https://www.googleapis.com"
+    if not IS_PRODUCTION:
+        connect_src += " http://127.0.0.1:*"
     csp = (
         "default-src 'self'; "
         "script-src 'self' https://accounts.google.com; "
         "style-src 'self' https://fonts.googleapis.com; "
         "font-src https://fonts.gstatic.com; "
         "img-src 'self' data: https:; "
-        "connect-src 'self' http://127.0.0.1:* https://mainnet.helius-rpc.com https://accounts.google.com https://www.googleapis.com; "
+        f"connect-src {connect_src}; "
         "frame-src https://accounts.google.com; "
         "frame-ancestors 'none'"
     )

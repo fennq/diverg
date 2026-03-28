@@ -1,6 +1,6 @@
 /* Diverg Console */
 
-const CFG = { apiUrl: localStorage.getItem('diverg_api') || 'http://127.0.0.1:5000' };
+const CFG = { apiUrl: localStorage.getItem('diverg_api') || window.location.origin };
 const api = p => CFG.apiUrl + p;
 
 const State = { scope: 'full', scanId: null, report: null, historyData: [], findings: [] };
