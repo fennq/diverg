@@ -532,14 +532,56 @@ async function loadAllAttackPaths() {
 }
 
 // ── INVESTIGATION ─────────────────────────────────────────────────────────────
-function runChainLookup() {
+async function runChainLookup() {
   const addr = document.getElementById('chainAddr').value.trim();
   if (!addr) { toast('Enter an address', 'error'); return; }
   const el = document.getElementById('chainResult');
   el.textContent = 'Looking up…';
-  post('/api/scan', { url: 'https://etherscan.io', goal: `Blockchain lookup: ${addr}`, scope: 'passive' })
-    .then(r => { el.textContent = `Address: ${addr}\n\nRisk: ${r.risk_verdict || '—'}\nFindings: ${(r.findings || []).length}\n\nNote: use diverg-auto with blockchain skills for deep analysis.`; })
-    .catch(e => { el.textContent = 'Error: ' + e.message; });
+
+  const heliusKey = localStorage.getItem('diverg_helius_key');
+
+  // If it's a Solana address and we have Helius key, use it directly
+  if (heliusKey && (addr.length === 32 || addr.length === 44 || addr.startsWith('sol:'))) {
+    try {
+      const r = await fetch(`https://mainnet.helius-rpc.com/?api-key=${heliusKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0', id: 1,
+          method: 'getAccountInfo',
+          params: [addr.replace('sol:', ''), { encoding: 'base58' }]
+        }),
+      });
+      const data = await r.json();
+      if (data.error) throw new Error(data.error.message);
+
+      const balance = await fetch(`https://mainnet.helius-rpc.com/?api-key=${heliusKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0', id: 1,
+          method: 'getBalance',
+          params: [addr.replace('sol:', '')]
+        }),
+      }).then(r => r.json());
+
+      el.textContent = `Solana Address: ${addr}\n\nBalance: ${(balance.result?.value / 1e9).toFixed(4)} SOL\nData Size: ${data.result?.value?.data ? data.result.value.data[0].length : 0} bytes\nExecutable: ${data.result?.value?.executable ? 'Yes' : 'No'}\nOwner: ${data.result?.value?.owner || 'Unknown'}\n\nVia Helius RPC`;
+      el.style.color = 'var(--text)';
+      return;
+    } catch (e) {
+      el.textContent = 'Helius lookup failed: ' + e.message + '\n\nFalling back to diverg-auto…';
+    }
+  }
+
+  // Fallback to diverg-auto
+  try {
+    const r = await post('/api/scan', { url: 'https://etherscan.io', goal: `Blockchain lookup: ${addr}`, scope: 'passive' });
+    el.textContent = `Address: ${addr}\n\nRisk: ${r.risk_verdict || '—'}\nFindings: ${(r.findings || []).length}\n\nNote: Add Helius API key in Settings for direct blockchain queries.`;
+    el.style.color = 'var(--text)';
+  } catch (e) {
+    el.textContent = 'Error: ' + e.message;
+    el.style.color = 'var(--red)';
+  }
 }
 
 function runOsint() {
@@ -592,7 +634,42 @@ async function runReputation() {
 }
 
 // ── SETTINGS ─────────────────────────────────────────────────────────────────
-function loadSettings() { document.getElementById('settingsApiUrl').value = CFG.apiUrl; }
+function loadSettings() {
+  document.getElementById('settingsApiUrl').value = CFG.apiUrl;
+  const heliusKey = localStorage.getItem('diverg_helius_key') || '';
+  document.getElementById('heliusApiKey').value = heliusKey;
+}
+
+async function saveHeliusKey() {
+  const key = document.getElementById('heliusApiKey').value.trim();
+  localStorage.setItem('diverg_helius_key', key);
+  toast('Helius API key saved', 'success');
+}
+
+async function testHeliusKey() {
+  const key = document.getElementById('heliusApiKey').value.trim();
+  const el = document.getElementById('heliusStatus');
+  if (!key) { el.textContent = 'Please enter an API key'; el.style.color = 'var(--red)'; return; }
+
+  el.textContent = 'Testing…'; el.style.color = 'var(--muted)';
+  try {
+    const r = await fetch(`https://mainnet.helius-rpc.com/?api-key=${key}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getHealth' }),
+    });
+    if (!r.ok) throw new Error('Invalid key');
+    const data = await r.json();
+    if (data.error) throw new Error(data.error.message);
+    el.textContent = 'Key valid — Helius RPC connected';
+    el.style.color = 'var(--green)';
+    toast('Helius API key valid', 'success');
+  } catch (e) {
+    el.textContent = 'Key invalid: ' + e.message;
+    el.style.color = 'var(--red)';
+    toast('Helius API key invalid', 'error');
+  }
+}
 
 function saveSettings() {
   const url = document.getElementById('settingsApiUrl').value.trim();

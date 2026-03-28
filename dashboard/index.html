@@ -476,6 +476,20 @@
           </div>
 
           <div class="settings-section">
+            <div class="settings-title">Blockchain APIs</div>
+            <div style="margin-bottom:1rem">
+              <label class="form-label">Helius API Key</label>
+              <input type="password" class="input input-mono" id="heliusApiKey" placeholder="Enter your Helius API key">
+              <div style="font-size:0.8125rem; color:var(--muted); margin-top:0.375rem">Required for Solana/EVM blockchain analysis</div>
+            </div>
+            <div style="display:flex; gap:0.5rem">
+              <button class="btn btn-secondary" onclick="testHeliusKey()">Test Key</button>
+              <button class="btn btn-primary" onclick="saveHeliusKey()">Save Key</button>
+            </div>
+            <div id="heliusStatus" style="margin-top:0.75rem; font-size:0.875rem; color:var(--muted)"></div>
+          </div>
+
+          <div class="settings-section">
             <div class="settings-title">Scan Defaults</div>
             <div>
               <label class="form-label">Default scope</label>
