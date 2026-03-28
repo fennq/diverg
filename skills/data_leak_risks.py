@@ -24,7 +24,7 @@ from stealth import get_session, randomize_order
 
 SESSION = get_session()
 TIMEOUT = 6
-RUN_BUDGET_SEC = 50
+RUN_BUDGET_SEC = 25
 
 # Patterns that indicate verbose error / internal disclosure (redact in evidence)
 ERROR_DISCLOSURE = [

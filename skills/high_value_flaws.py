@@ -23,7 +23,7 @@ from stealth import get_session, randomize_order
 
 SESSION = get_session()
 TIMEOUT = 6
-RUN_BUDGET_SEC = 50
+RUN_BUDGET_SEC = 25
 
 # Patterns that indicate sensitive/secret data in responses (redact in evidence)
 SECRET_PATTERNS = [

@@ -25,7 +25,7 @@ from stealth import get_session, randomize_order
 
 SESSION = get_session()
 TIMEOUT = 8
-RUN_BUDGET_SEC = 55
+RUN_BUDGET_SEC = 25
 
 # Paths that mean "money moves here" — we probe these first (includes crypto/trading)
 FINANCIAL_PATH_KEYWORDS = [

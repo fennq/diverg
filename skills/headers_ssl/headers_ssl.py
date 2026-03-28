@@ -12,7 +12,7 @@ import sys
 import time
 from dataclasses import dataclass, field, asdict
 
-RUN_BUDGET_SEC = 58  # finish before bot 120s timeout
+RUN_BUDGET_SEC = 25  # finish before bot 120s timeout
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional

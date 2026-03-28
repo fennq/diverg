@@ -27,7 +27,7 @@ from stealth import get_session, randomize_order
 
 SESSION = get_session()
 TIMEOUT = 8
-RUN_BUDGET_SEC = 52
+RUN_BUDGET_SEC = 25
 
 # JWT in cookies / headers / body
 JWT_RE = re.compile(

@@ -1100,7 +1100,7 @@ def query_wayback(domain: str, limit: int = 200) -> list[WaybackSnapshot]:
 # Entry point
 # ---------------------------------------------------------------------------
 
-RUN_BUDGET_SEC = 58  # finish before bot 120s timeout
+RUN_BUDGET_SEC = 25  # finish before bot 120s timeout
 
 
 def run(target: str, scan_type: str = "full") -> str:

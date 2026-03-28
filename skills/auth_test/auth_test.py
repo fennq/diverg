@@ -1554,7 +1554,7 @@ def test_rate_limiting(login_pages: list[str]) -> list[Finding]:
 # Entry point
 # ---------------------------------------------------------------------------
 
-RUN_BUDGET_SEC = 58  # finish before bot 120s timeout
+RUN_BUDGET_SEC = 25  # finish before bot 120s timeout
 
 
 def run(target_url: str, scan_type: str = "full") -> str:

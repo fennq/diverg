@@ -25,7 +25,7 @@ SESSION = get_session()
 
 TIMEOUT = 5
 TEST_TIME_BUDGET = 5   # max sec per test; 8 types * 5s = 40s + crawl keeps under 55s
-RUN_BUDGET_SEC = 55   # exit before bot 120s; return partial results
+RUN_BUDGET_SEC = 25   # exit before bot 120s; return partial results
 
 
 def _budget_expired(start: float) -> bool:

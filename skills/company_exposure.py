@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from stealth import get_session, randomize_order
 
 SESSION = get_session()
-TIMEOUT = 4
+TIMEOUT = 3
 SCAN_BUDGET = 25  # stay under bot 120s; return partial if over
 SIGNAL_STATUSES = {200, 206, 301, 302, 401, 403}
 

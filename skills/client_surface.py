@@ -29,7 +29,7 @@ from stealth import get_session, randomize_order
 
 SESSION = get_session()
 TIMEOUT = 8
-RUN_BUDGET_SEC = 50
+RUN_BUDGET_SEC = 25
 MAX_JS_FILES = 12
 MAX_JS_BYTES = 2 * 1024 * 1024  # 2MB per file cap
 

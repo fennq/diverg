@@ -31,7 +31,7 @@ TIMEOUT = 15
 MAX_ENTITIES = 4
 REPUTATION_QUERY_SUFFIX = " fraud OR lawsuit OR convicted OR fined OR data breach OR scandal OR backdoor OR FTC OR SEC OR regulatory"
 REPUTATION_QUERY_EXECUTIVE = " CEO OR founder OR arrested OR indicted OR sanction OR fined OR DOJ OR indictment"
-RUN_BUDGET_SEC = 55
+RUN_BUDGET_SEC = 25
 MAX_RESULTS_PER_ENTITY = 6
 YEAR_RE = __import__("re").compile(r"\b(19[89]\d|20[0-2]\d)\b")
 

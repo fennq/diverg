@@ -17,8 +17,8 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
 # Strict internal budget so we never hit bot SKILL_TIMEOUT (120s)
-RUN_BUDGET_SEC = 58
-PORT_SCAN_MAX_SEC = 10  # hard cap so total recon stays under RUN_BUDGET_SEC
+RUN_BUDGET_SEC = 25
+PORT_SCAN_MAX_SEC = 6  # hard cap so total recon stays under RUN_BUDGET_SEC
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import stealth
