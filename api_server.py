@@ -15,6 +15,11 @@ Scan endpoints:
   POST /api/scan/stream          Stream scan progress as NDJSON
   POST /api/poc/simulate         Run PoC for a finding
 
+Investigation (console):
+  POST /api/investigation/blockchain   Solana via Helius + EVM via public RPC
+  POST /api/investigation/domain       OSINT + recon + headers (full skill JSON)
+  POST /api/investigation/reputation   OSINT context + entity reputation
+
 Dashboard endpoints:
   GET  /api/history              List all past scans (paginated)
   GET  /api/history/<id>         Get single scan report
@@ -31,6 +36,7 @@ Dashboard static files:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -69,7 +75,7 @@ except ImportError:
     sys.exit(1)
 
 try:
-    from orchestrator import run_web_scan, run_web_scan_streaming
+    from orchestrator import run_web_scan, run_web_scan_streaming, run_skill, aggregate_findings
     from poc_runner import run_poc_for_finding, run_idor_poc, run_unauth_poc
     SCANNER_AVAILABLE = True
 except Exception as e:
@@ -77,9 +83,16 @@ except Exception as e:
     SCANNER_AVAILABLE = False
     run_web_scan = None
     run_web_scan_streaming = None
+    run_skill = None
+    aggregate_findings = None
     run_poc_for_finding = None
     run_idor_poc = None
     run_unauth_poc = None
+
+try:
+    import requests
+except ImportError:
+    requests = None
 
 # ── Config ────────────────────────────────────────────────────────────────
 
@@ -660,6 +673,8 @@ def poc_simulate():
     if not request.is_json:
         return jsonify({"error": "Content-Type must be application/json"}), 400
     data = request.get_json(silent=True) or {}
+    verbose = bool(data.get("verbose"))
+    pv_lim = 20000 if verbose else None
     if data.get("finding"):
         finding = data["finding"]
         if not isinstance(finding, dict):
@@ -670,6 +685,7 @@ def poc_simulate():
                 param_to_change=data.get("param_to_change"),
                 new_value=str(data.get("new_value") or "1").strip(),
                 cookies=data.get("cookies"),
+                max_body_preview=pv_lim,
             )
         except Exception as e:
             return jsonify({"success": False, "error": str(e), "conclusion": ""}), 200
@@ -684,10 +700,12 @@ def poc_simulate():
             result = run_idor_poc(url=url, method=data.get("method") or "GET",
                                   params=data.get("params"), data=data.get("data"),
                                   headers=data.get("headers"), param_to_change=data.get("param_to_change"),
-                                  new_value=str(data.get("new_value") or "1"), cookies=data.get("cookies"))
+                                  new_value=str(data.get("new_value") or "1"), cookies=data.get("cookies"),
+                                  max_body_preview=pv_lim)
         else:
             result = run_unauth_poc(url=url, method=data.get("method") or "GET",
-                                    headers=data.get("headers"), cookies=data.get("cookies"))
+                                    headers=data.get("headers"), cookies=data.get("cookies"),
+                                    max_body_preview=pv_lim)
 
     return jsonify({
         "success": result.success,
@@ -696,7 +714,241 @@ def poc_simulate():
         "conclusion": result.conclusion,
         "error": result.error or None,
         "poc_type": result.poc_type or None,
+        "verbose": verbose,
     })
+
+
+# ── Investigation tools (full skill / chain data for console) ─────────────────
+
+_ETH_ADDR_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
+
+
+def _helius_solana_rpc(network: str, api_key: str, method: str, params: list | dict) -> dict:
+    base = "https://devnet.helius-rpc.com" if network == "devnet" else "https://mainnet.helius-rpc.com"
+    url = f"{base}/?api-key={api_key}"
+    r = requests.post(
+        url,
+        json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+        timeout=25,
+        headers={"Content-Type": "application/json"},
+    )
+    return r.json()
+
+
+def _evm_public_rpc(method: str, params: list) -> dict:
+    r = requests.post(
+        "https://cloudflare-eth.com",
+        json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+        timeout=20,
+        headers={"Content-Type": "application/json"},
+    )
+    return r.json()
+
+
+def _summarize_chain_solana(raw: dict) -> dict:
+    s: dict = {}
+    bal = raw.get("getBalance") or {}
+    if isinstance(bal, dict) and "result" in bal:
+        v = bal["result"]
+        if isinstance(v, dict) and "value" in v:
+            lamports = v["value"]
+        else:
+            lamports = v
+        if isinstance(lamports, int):
+            s["lamports"] = lamports
+            s["sol_approx"] = round(lamports / 1e9, 9)
+    acct = raw.get("getAccountInfo") or {}
+    if isinstance(acct, dict) and acct.get("result") and isinstance(acct["result"], dict):
+        val = acct["result"].get("value")
+        if isinstance(val, dict):
+            s["owner"] = val.get("owner")
+            if val.get("data") and isinstance(val["data"], dict):
+                parsed = val["data"].get("parsed") or {}
+                s["parsed_type"] = parsed.get("type")
+    sigs = raw.get("getSignaturesForAddress") or {}
+    if isinstance(sigs, dict) and isinstance(sigs.get("result"), list):
+        s["recent_signatures_count"] = len(sigs["result"])
+        s["recent_signatures_sample"] = [x.get("signature") for x in sigs["result"][:5] if isinstance(x, dict)]
+    tok = raw.get("getTokenAccountsByOwner") or {}
+    if isinstance(tok, dict) and isinstance(tok.get("result"), dict):
+        ta = tok["result"].get("value")
+        if isinstance(ta, list):
+            s["token_accounts_count"] = len(ta)
+    for k, v in raw.items():
+        if isinstance(v, dict) and v.get("error"):
+            s.setdefault("rpc_errors", []).append({k: v.get("error")})
+    return s
+
+
+def _summarize_chain_evm(raw: dict) -> dict:
+    s = {}
+    bal = raw.get("eth_getBalance") or {}
+    if isinstance(bal, dict) and bal.get("result"):
+        wei_hex = bal["result"]
+        if isinstance(wei_hex, str) and wei_hex.startswith("0x"):
+            try:
+                wei = int(wei_hex, 16)
+                s["balance_wei"] = wei
+                s["eth_approx"] = round(wei / 1e18, 8)
+            except ValueError:
+                s["balance_raw"] = wei_hex
+    nonce = raw.get("eth_getTransactionCount") or {}
+    if isinstance(nonce, dict) and nonce.get("result") is not None:
+        s["transaction_count_hex"] = nonce["result"]
+    return s
+
+
+@app.route("/api/investigation/blockchain", methods=["OPTIONS"])
+def investigation_blockchain_options():
+    return "", 204
+
+
+@app.route("/api/investigation/blockchain", methods=["POST"])
+@require_auth
+def investigation_blockchain():
+    if not requests:
+        return jsonify({"error": "requests library unavailable"}), 503
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json(silent=True) or {}
+    addr = sanitize_text(data.get("address") or "", 128).strip()
+    if not addr:
+        return jsonify({"error": "Missing address"}), 400
+    network = sanitize_text(data.get("network") or "mainnet", 16).lower()
+    if network not in ("mainnet", "devnet"):
+        network = "mainnet"
+
+    env_key = (os.environ.get("HELIUS_API_KEY") or "").strip()
+    body_key = sanitize_text(data.get("helius_api_key") or "", 256).strip()
+    api_key = env_key or body_key
+
+    out: dict = {"address": addr, "network": network}
+
+    if _ETH_ADDR_RE.match(addr):
+        out["chain"] = "evm"
+        try:
+            raw = {
+                "eth_getBalance": _evm_public_rpc("eth_getBalance", [addr, "latest"]),
+                "eth_getTransactionCount": _evm_public_rpc("eth_getTransactionCount", [addr, "latest"]),
+            }
+            out["raw"] = raw
+            out["summary"] = _summarize_chain_evm(raw)
+        except Exception as e:
+            return jsonify({"error": str(e), "address": addr, "chain": "evm"}), 200
+        return jsonify(out)
+
+    # Solana-style (base58)
+    if not api_key:
+        return jsonify({
+            "error": "Helius API key required for Solana lookups. Add it in Settings or set HELIUS_API_KEY on the server.",
+            "address": addr,
+            "chain": "solana",
+        }), 400
+
+    out["chain"] = "solana"
+    raw: dict = {}
+    try:
+        raw["getBalance"] = _helius_solana_rpc(network, api_key, "getBalance", [addr])
+        raw["getAccountInfo"] = _helius_solana_rpc(
+            network, api_key, "getAccountInfo",
+            [addr, {"encoding": "jsonParsed", "commitment": "confirmed"}],
+        )
+        raw["getSignaturesForAddress"] = _helius_solana_rpc(
+            network, api_key, "getSignaturesForAddress", [addr, {"limit": 35}],
+        )
+    except Exception as e:
+        return jsonify({"error": str(e), "address": addr, "chain": "solana", "raw": raw}), 200
+    try:
+        raw["getTokenAccountsByOwner"] = _helius_solana_rpc(
+            network,
+            api_key,
+            "getTokenAccountsByOwner",
+            [
+                addr,
+                {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+                {"encoding": "jsonParsed"},
+            ],
+        )
+    except Exception as e:
+        raw["getTokenAccountsByOwner"] = {"error": str(e)}
+    out["raw"] = raw
+    out["summary"] = _summarize_chain_solana(raw)
+    return jsonify(out)
+
+
+@app.route("/api/investigation/domain", methods=["OPTIONS"])
+def investigation_domain_options():
+    return "", 204
+
+
+@app.route("/api/investigation/domain", methods=["POST"])
+@require_auth
+def investigation_domain():
+    if not SCANNER_AVAILABLE or not run_skill or not aggregate_findings:
+        return jsonify({"error": "Scanner engine not available"}), 503
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json(silent=True) or {}
+    domain = sanitize_text(data.get("domain") or "", 253).strip().lower()
+    if not domain:
+        return jsonify({"error": "Missing domain"}), 400
+    domain = domain.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+    target_url = "https://" + domain
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            f_os = pool.submit(run_skill, "osint", domain, target_url, None, scan_type="full")
+            f_rc = pool.submit(run_skill, "recon", domain, target_url, None, scan_type="full")
+            f_hd = pool.submit(run_skill, "headers_ssl", domain, target_url, None, scan_type="full")
+            osint = f_os.result(timeout=120)
+            recon = f_rc.result(timeout=120)
+            headers_ssl = f_hd.result(timeout=120)
+        combined = {"osint": osint, "recon": recon, "headers_ssl": headers_ssl}
+        findings = aggregate_findings(combined)
+        return jsonify({
+            "domain": domain,
+            "target_url": target_url,
+            "findings": findings,
+            "findings_count": len(findings),
+            "skills": combined,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "domain": domain}), 500
+
+
+@app.route("/api/investigation/reputation", methods=["OPTIONS"])
+def investigation_reputation_options():
+    return "", 204
+
+
+@app.route("/api/investigation/reputation", methods=["POST"])
+@require_auth
+def investigation_reputation():
+    if not SCANNER_AVAILABLE or not run_skill:
+        return jsonify({"error": "Scanner engine not available"}), 503
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json(silent=True) or {}
+    target = sanitize_text(data.get("target") or "", 512).strip()
+    if not target:
+        return jsonify({"error": "Missing target"}), 400
+    domain = target.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0].lower()
+    target_url = "https://" + domain
+
+    try:
+        osint = run_skill("osint", domain, target_url, None, scan_type="full")
+        ctx = {}
+        if isinstance(osint, dict) and "error" not in osint:
+            ctx["osint_json"] = json.dumps(osint)
+        rep = run_skill("entity_reputation", domain, target_url, ctx, scan_type="full")
+        return jsonify({
+            "domain": domain,
+            "target_url": target_url,
+            "osint": osint,
+            "entity_reputation": rep,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e), "domain": domain}), 500
 
 
 # ── History endpoints ─────────────────────────────────────────────────────────

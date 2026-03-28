@@ -34,7 +34,7 @@ class PoCResult:
     poc_type: str = ""
 
 
-def _preview(body: str | bytes) -> str:
+def _preview(body: str | bytes, max_len: int = MAX_BODY_PREVIEW) -> str:
     if body is None:
         return ""
     if isinstance(body, bytes):
@@ -43,8 +43,8 @@ def _preview(body: str | bytes) -> str:
         except Exception:
             return "(binary)"
     s = (body or "").strip()
-    if len(s) > MAX_BODY_PREVIEW:
-        s = s[:MAX_BODY_PREVIEW] + "..."
+    if len(s) > max_len:
+        s = s[:max_len] + "..."
     return s
 
 
@@ -64,6 +64,8 @@ def run_idor_poc(
     param_to_change: str | None = None,
     new_value: str = "1",
     cookies: dict | None = None,
+    *,
+    max_body_preview: int | None = None,
 ) -> PoCResult:
     """
     Send the same request twice: once with original param, once with new_value.
@@ -75,6 +77,8 @@ def run_idor_poc(
     url = _norm_url(url)
     if not url:
         return PoCResult(success=False, error="Missing url", poc_type="idor")
+
+    plim = max_body_preview if max_body_preview is not None else MAX_BODY_PREVIEW
 
     method = (method or "GET").upper()
     headers = dict(headers or {})
@@ -169,14 +173,14 @@ def run_idor_poc(
         return PoCResult(
             success=True,
             status_code=r1.status_code,
-            body_preview=_preview(r1.content),
+            body_preview=_preview(r1.content, plim),
             conclusion=f"First request succeeded ({r1.status_code}); second request failed: {e}. Manually try changing {param}.",
             poc_type="idor",
         )
 
-    body2 = _preview(r2.content)
+    body2 = _preview(r2.content, plim)
     if r2.status_code == 200 and len(body2) > 0:
-        if r2.status_code != r1.status_code or body2 != _preview(r1.content):
+        if r2.status_code != r1.status_code or body2 != _preview(r1.content, plim):
             conclusion = f"IDOR likely: request with {param}={new_value} returned {r2.status_code} with a different response. Verify manually that the data belongs to another user."
         else:
             conclusion = f"Same response as original request. Try a different value for {param} or confirm the endpoint is not IDOR."
@@ -199,6 +203,8 @@ def run_unauth_poc(
     method: str = "GET",
     headers: dict | None = None,
     cookies: dict | None = None,
+    *,
+    max_body_preview: int | None = None,
 ) -> PoCResult:
     """Send request without auth; if 200 with body, endpoint may be unauthenticated."""
     if not requests:
@@ -207,6 +213,8 @@ def run_unauth_poc(
     url = _norm_url(url)
     if not url:
         return PoCResult(success=False, error="Missing url", poc_type="unauthenticated")
+
+    plim = max_body_preview if max_body_preview is not None else MAX_BODY_PREVIEW
 
     method = (method or "GET").upper()
     headers = dict(headers or {})
@@ -228,7 +236,7 @@ def run_unauth_poc(
     except Exception as e:
         return PoCResult(success=False, error=str(e), poc_type="unauthenticated")
 
-    body = _preview(r.content)
+    body = _preview(r.content, plim)
     if r.status_code == 200 and len(body) > 50:
         conclusion = "Endpoint returned 200 with body without auth. Likely unauthenticated or accepting anonymous access. Verify whether the data is sensitive."
     elif r.status_code in (401, 403):
@@ -263,6 +271,8 @@ def run_poc_for_finding(
     param_to_change: str | None = None,
     new_value: str = "1",
     cookies: dict | None = None,
+    *,
+    max_body_preview: int | None = None,
 ) -> PoCResult:
     """
     Run the appropriate PoC based on finding content.
@@ -298,8 +308,9 @@ def run_poc_for_finding(
             param_to_change=param,
             new_value=new_value,
             cookies=cookies,
+            max_body_preview=max_body_preview,
         )
     if poc_type == "unauthenticated":
-        return run_unauth_poc(url=url, method="GET", headers=None, cookies=cookies)
+        return run_unauth_poc(url=url, method="GET", headers=None, cookies=cookies, max_body_preview=max_body_preview)
 
     return PoCResult(success=False, error=f"Unsupported poc_type: {poc_type}", poc_type=poc_type)

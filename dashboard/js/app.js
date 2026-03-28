@@ -79,22 +79,28 @@ function authHeaders(extra) {
 async function get(path) {
   const r = await fetch(api(path), { headers: authHeaders() });
   if (r.status === 401) { Auth.logout(); return; }
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+  let data = {};
+  try { data = await r.json(); } catch { /* non-json */ }
+  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+  return data;
 }
 async function post(path, body) {
   const r = await fetch(api(path), {
     method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body)
   });
   if (r.status === 401) { Auth.logout(); return; }
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+  let data = {};
+  try { data = await r.json(); } catch { /* non-json */ }
+  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+  return data;
 }
 async function del(path) {
   const r = await fetch(api(path), { method: 'DELETE', headers: authHeaders() });
   if (r.status === 401) { Auth.logout(); return; }
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+  let data = {};
+  try { data = await r.json(); } catch { /* non-json */ }
+  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+  return data;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -587,67 +593,134 @@ async function loadAttackPaths() {
 }
 
 // ── INVESTIGATION ──────────────────────────────────────────────────────────
+function _invSetOut(wrapId, sumId, rawId, emptyClass, summaryHtml, rawObj) {
+  const wrap = document.getElementById(wrapId);
+  const sum = document.getElementById(sumId);
+  const raw = document.getElementById(rawId);
+  if (wrap) wrap.classList.remove(emptyClass);
+  if (sum) sum.innerHTML = summaryHtml;
+  if (raw) raw.textContent = rawObj !== undefined && rawObj !== null ? JSON.stringify(rawObj, null, 2) : '';
+}
+
+function _invFindingsHtml(findings) {
+  const list = findings || [];
+  if (!list.length) {
+    return '<p class="inv-muted">No scanner-style findings for this pass. Open <strong>Full JSON</strong> for raw OSINT (WHOIS, DNS, subdomains, etc.), recon, and headers.</p>';
+  }
+  const rows = list.slice(0, 250).map(f => {
+    const sev = (f.severity || 'Info').toLowerCase();
+    const ev = f.evidence ? `<div class="inv-ev">${esc(String(f.evidence))}</div>` : '';
+    return `<div class="inv-finding"><span class="sev sev-${sevClass(f.severity).toLowerCase()}">${esc(f.severity || 'Info')}</span><strong>${esc(f.title || '')}</strong>${ev}</div>`;
+  });
+  return `<div class="inv-findings">${rows.join('')}</div>`;
+}
+
+function _invChainSummaryHtml(data) {
+  if (data.error && !data.raw) {
+    return `<p class="inv-err">${esc(data.error)}</p>`;
+  }
+  const s = data.summary || {};
+  const chain = data.chain || '—';
+  let h = `<p><strong>${esc(chain.toUpperCase())}</strong> · <span class="mono">${esc(data.address || '')}</span></p>`;
+  if (chain === 'solana') {
+    if (s.lamports != null) h += `<div class="inv-kv"><span>Balance</span> ${esc(String(s.lamports))} lamports (~${esc(String(s.sol_approx))} SOL)</div>`;
+    if (s.owner) h += `<div class="inv-kv"><span>Owner</span> ${esc(String(s.owner))}</div>`;
+    if (s.parsed_type) h += `<div class="inv-kv"><span>Account type</span> ${esc(String(s.parsed_type))}</div>`;
+    if (s.recent_signatures_count != null) h += `<div class="inv-kv"><span>Recent signatures</span> ${esc(String(s.recent_signatures_count))}</div>`;
+    if (s.token_accounts_count != null) h += `<div class="inv-kv"><span>Token accounts</span> ${esc(String(s.token_accounts_count))}</div>`;
+  } else if (chain === 'evm') {
+    if (s.eth_approx != null) h += `<div class="inv-kv"><span>Balance</span> ~${esc(String(s.eth_approx))} ETH</div>`;
+    if (s.transaction_count_hex) h += `<div class="inv-kv"><span>Nonce</span> ${esc(String(s.transaction_count_hex))}</div>`;
+  }
+  h += '<p class="inv-muted" style="margin-top:0.75rem">Expand <strong>Full JSON</strong> for complete RPC responses (signatures, account data, token accounts).</p>';
+  return h;
+}
+
 async function runChainLookup() {
   const addr = document.getElementById('chainAddr').value.trim();
   if (!addr) { toast('Enter an address', 'err'); return; }
-  const el = document.getElementById('chainResult');
-  el.textContent = 'Looking up…'; el.style.color = '';
+  _invSetOut('chainOut', 'chainSummary', 'chainRaw', 'inv-out-empty',
+    '<p class="inv-muted">Looking up…</p>', null);
   try {
-    const r = await post('/api/scan', { url: 'https://etherscan.io', goal: `Blockchain lookup: ${addr}`, scope: 'passive' });
-    const lines = [`Address: ${addr}`, `Risk: ${r.risk_verdict || '—'}`, `Score: ${r.risk_score ?? '—'}`, `Findings: ${(r.findings || []).length}`];
-    (r.findings || []).slice(0, 5).forEach(f => lines.push(`  [${f.severity}] ${f.title}`));
-    el.textContent = lines.join('\n');
-  } catch (e) { el.textContent = 'Error: ' + e.message; el.style.color = 'var(--red)'; }
+    const key = localStorage.getItem('diverg_helius_key') || '';
+    const net = localStorage.getItem('diverg_helius_network') || 'mainnet';
+    const r = await post('/api/investigation/blockchain', { address: addr, network: net, helius_api_key: key });
+    _invSetOut('chainOut', 'chainSummary', 'chainRaw', 'inv-out-empty', _invChainSummaryHtml(r), r);
+  } catch (e) {
+    _invSetOut('chainOut', 'chainSummary', 'chainRaw', 'inv-out-empty',
+      `<p class="inv-err">${esc(e.message)}</p>`, { error: e.message });
+  }
 }
 
 async function runOsint() {
   const d = document.getElementById('osintDomain').value.trim();
   if (!d) { toast('Enter a domain', 'err'); return; }
-  const el = document.getElementById('osintResult');
-  el.textContent = 'Investigating…'; el.style.color = '';
+  _invSetOut('osintOut', 'osintSummary', 'osintRaw', 'inv-out-empty',
+    '<p class="inv-muted">Running OSINT, recon, and headers (may take a minute)…</p>', null);
   try {
-    const url = d.startsWith('http') ? d : 'https://' + d;
-    const r = await post('/api/scan', { url, scope: 'recon' });
-    const lines = [`Domain: ${d}`, `Verdict: ${r.risk_verdict || '—'}`, `Score: ${r.risk_score ?? '—'}`, `Findings: ${(r.findings || []).length}`, ''];
-    (r.findings || []).slice(0, 8).forEach(f => {
-      lines.push(`[${f.severity}] ${f.title}`);
-      if (f.evidence) lines.push(`  ${String(f.evidence).substring(0, 80)}`);
-    });
-    el.textContent = lines.join('\n');
-  } catch (e) { el.textContent = 'Error: ' + e.message; el.style.color = 'var(--red)'; }
+    const domain = d.replace(/^https?:\/\//, '').split('/')[0];
+    const r = await post('/api/investigation/domain', { domain });
+    const head = `<p><strong>${esc(r.domain || domain)}</strong> · ${r.findings_count ?? (r.findings || []).length} aggregated findings from headers/recon paths</p>`;
+    const html = head + _invFindingsHtml(r.findings);
+    _invSetOut('osintOut', 'osintSummary', 'osintRaw', 'inv-out-empty', html, r);
+    toast('Domain investigation complete', 'ok');
+  } catch (e) {
+    _invSetOut('osintOut', 'osintSummary', 'osintRaw', 'inv-out-empty',
+      `<p class="inv-err">${esc(e.message)}</p>`, { error: e.message });
+    toast(e.message, 'err');
+  }
 }
 
 async function runPoc() {
   const type = document.getElementById('pocType').value;
   const url = document.getElementById('pocUrl').value.trim();
   if (!url) { toast('Enter a URL', 'err'); return; }
-  const el = document.getElementById('pocResult');
-  el.textContent = 'Running…'; el.style.color = '';
+  _invSetOut('pocOut', 'pocSummary', 'pocRaw', 'inv-out-empty', '<p class="inv-muted">Running PoC…</p>', null);
   try {
-    const body = { type, url };
+    const body = { type, url, verbose: true };
     if (type === 'idor') {
       body.param_to_change = document.getElementById('pocParam')?.value.trim() || 'id';
       body.new_value = document.getElementById('pocValue')?.value.trim() || '2';
     }
     const r = await post('/api/poc/simulate', body);
-    el.textContent = `Result: ${r.conclusion}\nSuccess: ${r.success}\nStatus: ${r.status_code || '—'}${r.body_preview ? '\n\n' + r.body_preview.substring(0, 300) : ''}`;
-    el.style.color = r.success ? 'var(--green)' : 'var(--red)';
-  } catch (e) { el.textContent = 'Error: ' + e.message; el.style.color = 'var(--red)'; }
+    const prev = r.body_preview ? `<pre class="inv-body-preview">${esc(r.body_preview)}</pre>` : '';
+    const err = r.error ? `<p class="inv-err">${esc(r.error)}</p>` : '';
+    const sum = `<p><strong>${esc(r.conclusion || '')}</strong></p><p class="inv-muted">HTTP ${esc(String(r.status_code ?? '—'))} · executed: ${r.success ? 'yes' : 'no'} · type: ${esc(r.poc_type || type)}</p>${err}${prev}`;
+    _invSetOut('pocOut', 'pocSummary', 'pocRaw', 'inv-out-empty', sum, r);
+  } catch (e) {
+    _invSetOut('pocOut', 'pocSummary', 'pocRaw', 'inv-out-empty',
+      `<p class="inv-err">${esc(e.message)}</p>`, { error: e.message });
+  }
 }
 
 async function runReputation() {
   const t = document.getElementById('reputationTarget').value.trim();
-  if (!t) { toast('Enter a target', 'err'); return; }
-  const el = document.getElementById('reputationResult');
-  el.textContent = 'Checking…'; el.style.color = '';
+  if (!t) { toast('Enter a domain', 'err'); return; }
+  _invSetOut('reputationOut', 'reputationSummary', 'reputationRaw', 'inv-out-empty',
+    '<p class="inv-muted">Running OSINT + entity reputation…</p>', null);
   try {
-    const url = t.startsWith('http') ? t : 'https://' + t;
-    const r = await post('/api/scan', { url, scope: 'passive', goal: `Entity reputation: ${t}` });
-    const lines = [`Target: ${t}`, `Verdict: ${r.risk_verdict || '—'}`, `Score: ${r.risk_score ?? '—'}`, ''];
-    (r.findings || []).slice(0, 8).forEach(f => lines.push(`[${f.severity}] ${f.title}`));
-    if (!(r.findings || []).length) lines.push('No significant findings.');
-    el.textContent = lines.join('\n');
-  } catch (e) { el.textContent = 'Error: ' + e.message; el.style.color = 'var(--red)'; }
+    const r = await post('/api/investigation/reputation', { target: t });
+    const rep = r.entity_reputation || {};
+    const hits = rep.findings || [];
+    const head = `<p><strong>${esc(r.domain || t)}</strong></p><p class="inv-muted">${esc(rep.summary || '')}</p><p class="inv-muted">Entities searched: ${esc((rep.entities_searched || []).join(', ') || '—')}</p>`;
+    const findingsHtml = hits.length
+      ? _invFindingsHtml(hits.map(x => ({
+          severity: x.severity || 'Medium',
+          title: x.title || x.entity || 'Hit',
+          evidence: [x.snippet, x.url].filter(Boolean).join(' — ')
+        })))
+      : '<p class="inv-muted">No reputation hits. Use recommended queries from JSON for manual search.</p>';
+    const rec = (rep.recommended_queries || []).length
+      ? `<div class="inv-ev" style="margin-top:0.75rem"><strong>Suggested queries</strong><br>${(rep.recommended_queries || []).slice(0, 12).map(q => esc(q)).join('<br>')}</div>`
+      : '';
+    _invSetOut('reputationOut', 'reputationSummary', 'reputationRaw', 'inv-out-empty',
+      head + findingsHtml + rec, r);
+    toast('Reputation check complete', 'ok');
+  } catch (e) {
+    _invSetOut('reputationOut', 'reputationSummary', 'reputationRaw', 'inv-out-empty',
+      `<p class="inv-err">${esc(e.message)}</p>`, { error: e.message });
+    toast(e.message, 'err');
+  }
 }
 
 // ── SETTINGS ────────────────────────────────────────────────────────────────
