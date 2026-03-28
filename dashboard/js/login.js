@@ -10,6 +10,11 @@
     return;
   }
 
+  try {
+    var refParam = new URL(window.location.href).searchParams.get('ref');
+    if (refParam && refParam.trim()) sessionStorage.setItem('diverg_ref', refParam.trim().toUpperCase().slice(0, 16));
+  } catch (e) { /* ignore */ }
+
   function showError(msg) {
     document.getElementById('authErrorText').textContent = msg;
     document.getElementById('authError').classList.add('show');
@@ -63,6 +68,10 @@
 
     var endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
     var body = isRegister ? { email: email, password: password, name: name } : { email: email, password: password };
+    if (isRegister) {
+      var storedRef = sessionStorage.getItem('diverg_ref');
+      if (storedRef) body.referral_code = storedRef;
+    }
 
     try {
       var r = await fetch(API + endpoint, {
@@ -81,6 +90,7 @@
 
       localStorage.setItem('diverg_token', data.token);
       localStorage.setItem('diverg_user', JSON.stringify(data.user));
+      sessionStorage.removeItem('diverg_ref');
       window.location.href = '/dashboard/';
     } catch (err) {
       showError('Connection failed — is the server running?');

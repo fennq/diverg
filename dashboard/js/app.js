@@ -3,7 +3,7 @@
 const CFG = { apiUrl: localStorage.getItem('diverg_api') || window.location.origin };
 const api = p => CFG.apiUrl + p;
 
-const State = { scope: 'full', scanId: null, report: null, historyData: [], findings: [] };
+const State = { scope: 'full', scanId: null, report: null, historyData: [], findings: [], rewardsLbWindow: 'all' };
 
 // ── Auth ──────────────────────────────────────────────────────────────────
 const Auth = {
@@ -30,7 +30,7 @@ function navigate(page, data) {
   const titles = {
     home: 'Home', scanner: 'Scanner', analytics: 'Analytics', history: 'History',
     findings: 'Findings', results: 'Results', 'attack-paths': 'Attack Paths',
-    investigation: 'Investigation', settings: 'Settings',
+    investigation: 'Investigation', rewards: 'Rewards', settings: 'Settings',
   };
   document.getElementById('pageTitle').textContent = titles[page] || page;
 
@@ -39,6 +39,7 @@ function navigate(page, data) {
   if (page === 'history') loadHistory();
   if (page === 'findings') loadFindings();
   if (page === 'attack-paths') loadAttackPaths();
+  if (page === 'rewards') loadRewards();
   if (page === 'settings') loadSettings();
   if (page === 'results' && data) showResults(data);
 
@@ -808,6 +809,77 @@ async function runReputation() {
       `<p class="inv-err">${esc(e.message)}</p>`, { error: e.message });
     toast(e.message, 'err');
   }
+}
+
+// ── REWARDS ────────────────────────────────────────────────────────────────
+function setRewardsLeaderboardWindow(el) {
+  document.querySelectorAll('#page-rewards .pill[data-lb]').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  State.rewardsLbWindow = el.dataset.lb || 'all';
+  loadRewardsLeaderboardOnly();
+}
+
+async function loadRewardsLeaderboardOnly() {
+  const tb = document.getElementById('rewardsLeaderboardBody');
+  if (!tb) return;
+  try {
+    const w = State.rewardsLbWindow || 'all';
+    const lb = await get('/api/rewards/leaderboard?window=' + encodeURIComponent(w));
+    const rows = lb.leaderboard || [];
+    if (!rows.length) {
+      tb.innerHTML = '<tr><td colspan="3" style="padding:0.75rem; color:var(--dim)">No activity in this window yet.</td></tr>';
+      return;
+    }
+    tb.innerHTML = rows.map(r => `
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:0.5rem 0.25rem">${esc(String(r.rank))}</td>
+        <td style="padding:0.5rem 0.25rem">${esc(r.display_name || 'User')}</td>
+        <td style="padding:0.5rem 0.25rem; text-align:right; font-family:var(--mono)">${esc(String(r.points))}</td>
+      </tr>`).join('');
+  } catch (e) {
+    tb.innerHTML = '<tr><td colspan="3" style="padding:0.75rem; color:var(--red)">' + esc(e.message) + '</td></tr>';
+    toast(e.message, 'err');
+  }
+}
+
+async function loadRewards() {
+  document.querySelectorAll('#page-rewards .pill[data-lb]').forEach(p => {
+    p.classList.toggle('active', p.dataset.lb === (State.rewardsLbWindow || 'all'));
+  });
+  try {
+    const me = await get('/api/rewards/me');
+    document.getElementById('rewardsBalance').textContent = me.balance != null ? String(me.balance) : '0';
+    const code = me.referral_code || '';
+    document.getElementById('rewardsReferralCode').textContent = code || '—';
+    const link = code ? `${window.location.origin}/login?ref=${encodeURIComponent(code)}` : '';
+    const hint = document.getElementById('rewardsReferralHint');
+    if (hint) hint.textContent = link ? `Share: ${link}` : '';
+    const refNote = document.getElementById('rewardsReferredNote');
+    if (refNote) refNote.style.display = me.referred_by ? 'block' : 'none';
+
+    const leg = document.getElementById('rewardsLedgerBody');
+    const entries = me.recent_ledger || [];
+    if (!entries.length) {
+      leg.innerHTML = '<tr><td colspan="3" style="padding:0.75rem; color:var(--dim)">No point events yet.</td></tr>';
+    } else {
+      leg.innerHTML = entries.map(l => `
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:0.5rem 0.25rem; white-space:nowrap; color:var(--dim)">${esc((l.created_at || '').replace('T', ' ').slice(0, 19))}</td>
+          <td style="padding:0.5rem 0.25rem">${esc(l.reason || '')}</td>
+          <td style="padding:0.5rem 0.25rem; text-align:right; font-family:var(--mono)">${l.delta > 0 ? '+' : ''}${esc(String(l.delta))}</td>
+        </tr>`).join('');
+    }
+    await loadRewardsLeaderboardOnly();
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+}
+
+function copyRewardsLink() {
+  const code = document.getElementById('rewardsReferralCode').textContent.trim();
+  if (!code || code === '—') { toast('No referral code yet', 'err'); return; }
+  const link = `${window.location.origin}/login?ref=${encodeURIComponent(code)}`;
+  navigator.clipboard.writeText(link).then(() => toast('Link copied', 'ok')).catch(() => toast('Copy failed', 'err'));
 }
 
 // ── SETTINGS ────────────────────────────────────────────────────────────────

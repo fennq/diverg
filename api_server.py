@@ -21,6 +21,10 @@ Investigation (console):
   POST /api/investigation/domain       OSINT + recon + headers (full skill JSON)
   POST /api/investigation/reputation   OSINT context + entity reputation
 
+Rewards:
+  GET  /api/rewards/me           Points balance, referral code, recent ledger
+  GET  /api/rewards/leaderboard  Top users by points (window=all|30d|7d)
+
 Dashboard endpoints:
   GET  /api/history              List all past scans (paginated)
   GET  /api/history/<id>         Get single scan report
@@ -188,6 +192,31 @@ CREATE TABLE IF NOT EXISTS scans (
     report_json  TEXT,
     created_at   TEXT
 );
+
+CREATE TABLE IF NOT EXISTS user_points (
+    user_id       TEXT PRIMARY KEY,
+    balance       INTEGER NOT NULL DEFAULT 0,
+    referral_code TEXT UNIQUE,
+    referred_by   TEXT,
+    updated_at    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS points_ledger (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT NOT NULL,
+    delta      INTEGER NOT NULL,
+    reason     TEXT NOT NULL,
+    ref_type   TEXT,
+    ref_id     TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS referral_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    referrer_id TEXT NOT NULL,
+    referee_id  TEXT NOT NULL UNIQUE,
+    credited_at TEXT NOT NULL
+);
 """
 
 
@@ -195,6 +224,7 @@ def _db():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
@@ -204,6 +234,11 @@ def init_db():
         cols = [row[1] for row in conn.execute("PRAGMA table_info(scans)").fetchall()]
         if "user_id" not in cols:
             conn.execute("ALTER TABLE scans ADD COLUMN user_id TEXT DEFAULT ''")
+        conn.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_points_ledger_idem
+               ON points_ledger (user_id, reason, IFNULL(ref_type,''), ref_id)
+               WHERE ref_id IS NOT NULL"""
+        )
 
 
 def _count_severity(findings: list, level: str) -> int:
@@ -234,6 +269,39 @@ def save_scan(scan_id: str, result: dict, scope: str, user_id: str = ""):
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
+        if user_id:
+            try:
+                from dashboard_points import award_scan_points
+
+                award_scan_points(conn, user_id, scan_id, scope)
+            except Exception:
+                pass
+
+
+def _reward_investigation(user_id: str, slug: str) -> None:
+    if not user_id:
+        return
+    try:
+        from dashboard_points import investigation_delta, try_award_investigation_or_poc
+
+        delta = investigation_delta(slug)
+        with _db() as conn:
+            try_award_investigation_or_poc(conn, user_id, f"investigation_{slug}", delta)
+    except Exception:
+        pass
+
+
+def _reward_poc(user_id: str) -> None:
+    if not user_id:
+        return
+    try:
+        from dashboard_points import investigation_delta, try_award_investigation_or_poc
+
+        delta = investigation_delta("poc")
+        with _db() as conn:
+            try_award_investigation_or_poc(conn, user_id, "poc_simulate", delta)
+    except Exception:
+        pass
 
 
 # ── Auth helpers ────────────────────────────────────────────────────────────
@@ -374,6 +442,8 @@ def auth_register():
     email = sanitize_text(data.get("email") or "", 254).lower()
     password = (data.get("password") or "")
     name = sanitize_text(data.get("name") or "", 100)
+    referral_raw = data.get("referral_code") or data.get("ref") or ""
+    referral_raw = referral_raw.strip() if isinstance(referral_raw, str) else ""
 
     if not validate_email(email):
         return jsonify({"error": "Valid email required"}), 400
@@ -397,6 +467,10 @@ def auth_register():
             (user_id, email, name or email.split("@")[0], hash_password(password), "email",
              datetime.now(timezone.utc).isoformat()),
         )
+        from dashboard_points import apply_referral_on_register, ensure_user_points_row
+
+        ensure_user_points_row(conn, user_id)
+        apply_referral_on_register(conn, user_id, referral_raw)
 
     token = create_token(user_id, email)
     return jsonify({
@@ -450,6 +524,10 @@ def auth_login():
         return jsonify({"error": "Invalid credentials"}), 401
 
     auth_limiter.clear(ip)
+    with _db() as conn:
+        from dashboard_points import ensure_user_points_row
+
+        ensure_user_points_row(conn, user["id"])
     token = create_token(user["id"], user["email"])
     return jsonify({
         "token": token,
@@ -500,18 +578,26 @@ def auth_google():
     if not email:
         return jsonify({"error": "Could not get email from Google"}), 401
 
+    referral_raw = data.get("referral_code") or data.get("ref") or ""
+    referral_raw = referral_raw.strip() if isinstance(referral_raw, str) else ""
+
     with _db() as conn:
         existing = conn.execute("SELECT id, email, name, provider, avatar_url FROM users WHERE email = ?",
                                 (email,)).fetchone()
+        from dashboard_points import apply_referral_on_register, ensure_user_points_row
+
         if existing:
             user = dict(existing)
             conn.execute("UPDATE users SET avatar_url = ? WHERE id = ?", (avatar, user["id"]))
+            ensure_user_points_row(conn, user["id"])
         else:
             user_id = str(uuid.uuid4())
             conn.execute(
                 "INSERT INTO users (id, email, name, password, provider, avatar_url, created_at) VALUES (?,?,?,?,?,?,?)",
                 (user_id, email, name, None, "google", avatar, datetime.now(timezone.utc).isoformat()),
             )
+            ensure_user_points_row(conn, user_id)
+            apply_referral_on_register(conn, user_id, referral_raw)
             user = {"id": user_id, "email": email, "name": name, "provider": "google", "avatar_url": avatar}
 
     auth_limiter.clear(ip)
@@ -708,6 +794,8 @@ def poc_simulate():
                                     headers=data.get("headers"), cookies=data.get("cookies"),
                                     max_body_preview=pv_lim)
 
+    if result.success:
+        _reward_poc(request.user["id"])
     return jsonify({
         "success": result.success,
         "status_code": result.status_code,
@@ -838,6 +926,7 @@ def investigation_blockchain():
             out["summary"] = _summarize_chain_evm(raw)
         except Exception as e:
             return jsonify({"error": str(e), "address": addr, "chain": "evm"}), 200
+        _reward_investigation(request.user["id"], "blockchain")
         return jsonify(out)
 
     # Solana-style (base58)
@@ -876,6 +965,7 @@ def investigation_blockchain():
         raw["getTokenAccountsByOwner"] = {"error": str(e)}
     out["raw"] = raw
     out["summary"] = _summarize_chain_solana(raw)
+    _reward_investigation(request.user["id"], "blockchain")
     return jsonify(out)
 
 
@@ -908,6 +998,7 @@ def investigation_domain():
             headers_ssl = f_hd.result(timeout=120)
         combined = {"osint": osint, "recon": recon, "headers_ssl": headers_ssl}
         findings = aggregate_findings(combined)
+        _reward_investigation(request.user["id"], "domain")
         return jsonify({
             "domain": domain,
             "target_url": target_url,
@@ -944,6 +1035,7 @@ def investigation_reputation():
         if isinstance(osint, dict) and "error" not in osint:
             ctx["osint_json"] = json.dumps(osint)
         rep = run_skill("entity_reputation", domain, target_url, ctx, scan_type="full")
+        _reward_investigation(request.user["id"], "reputation")
         return jsonify({
             "domain": domain,
             "target_url": target_url,
@@ -1053,6 +1145,8 @@ def investigation_solana_bundle():
     if isinstance(out, dict) and out.get("ok"):
         out = _enrich_solana_bundle_payload(out)
     payload = out if isinstance(out, dict) else {"ok": False, "error": "Unexpected response"}
+    if isinstance(payload, dict) and payload.get("ok"):
+        _reward_investigation(request.user["id"], "solana_bundle")
     try:
         return jsonify(payload)
     except TypeError:
@@ -1062,7 +1156,7 @@ def investigation_solana_bundle():
         )
 
 
-# ── History endpoints ─────────────────────────────────────────────────────────
+# ── Shared API helpers (history, rewards) ───────────────────────────────────
 
 def _safe_int(val, default: int, minimum: int = 0, maximum: int = 999999) -> int:
     try:
@@ -1071,6 +1165,89 @@ def _safe_int(val, default: int, minimum: int = 0, maximum: int = 999999) -> int
     except (TypeError, ValueError):
         return default
 
+
+# ── Rewards ───────────────────────────────────────────────────────────────────
+
+
+@app.route("/api/rewards/me", methods=["GET", "OPTIONS"])
+def rewards_me():
+    if request.method == "OPTIONS":
+        return "", 204
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Authentication required"}), 401
+    uid = user["id"]
+    from dashboard_points import ensure_user_points_row
+
+    with _db() as conn:
+        ensure_user_points_row(conn, uid)
+        row = conn.execute(
+            "SELECT balance, referral_code, referred_by FROM user_points WHERE user_id = ?",
+            (uid,),
+        ).fetchone()
+        ledger_rows = conn.execute(
+            """SELECT delta, reason, ref_type, ref_id, created_at FROM points_ledger
+               WHERE user_id = ? ORDER BY id DESC LIMIT 20""",
+            (uid,),
+        ).fetchall()
+    recent = [dict(r) for r in ledger_rows]
+    return jsonify({
+        "balance": int(row["balance"]) if row else 0,
+        "referral_code": row["referral_code"] if row else None,
+        "referred_by": row["referred_by"] if row else None,
+        "recent_ledger": recent,
+    })
+
+
+@app.route("/api/rewards/leaderboard", methods=["GET", "OPTIONS"])
+def rewards_leaderboard():
+    if request.method == "OPTIONS":
+        return "", 204
+    if not get_current_user():
+        return jsonify({"error": "Authentication required"}), 401
+    window = (request.args.get("window") or "all").lower()
+    if window not in ("all", "30d", "7d"):
+        window = "all"
+    limit = _safe_int(request.args.get("limit"), 50, 1, 100)
+    from dashboard_points import leaderboard_since_iso, privacy_display_name
+
+    since = leaderboard_since_iso(window)
+    with _db() as conn:
+        if since:
+            rows = conn.execute(
+                """SELECT u.id AS user_id, u.name, u.email, SUM(pl.delta) AS pts
+                   FROM points_ledger pl
+                   JOIN users u ON u.id = pl.user_id
+                   WHERE pl.created_at >= ?
+                   GROUP BY u.id
+                   HAVING SUM(pl.delta) > 0
+                   ORDER BY SUM(pl.delta) DESC
+                   LIMIT ?""",
+                (since, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT u.id AS user_id, u.name, u.email, SUM(pl.delta) AS pts
+                   FROM points_ledger pl
+                   JOIN users u ON u.id = pl.user_id
+                   GROUP BY u.id
+                   HAVING SUM(pl.delta) > 0
+                   ORDER BY SUM(pl.delta) DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+    board = []
+    for i, r in enumerate(rows, start=1):
+        board.append({
+            "rank": i,
+            "user_id": r["user_id"],
+            "display_name": privacy_display_name(r["name"], r["email"]),
+            "points": int(r["pts"]),
+        })
+    return jsonify({"window": window, "leaderboard": board})
+
+
+# ── History endpoints ─────────────────────────────────────────────────────────
 
 @app.route("/api/history", methods=["GET"])
 @require_auth
