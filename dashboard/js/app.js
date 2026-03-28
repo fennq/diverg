@@ -637,13 +637,19 @@ async function runReputation() {
 function loadSettings() {
   document.getElementById('settingsApiUrl').value = CFG.apiUrl;
   const heliusKey = localStorage.getItem('diverg_helius_key') || '';
+  const heliusNetwork = localStorage.getItem('diverg_helius_network') || 'mainnet';
   document.getElementById('heliusApiKey').value = heliusKey;
+  const networkSelect = document.getElementById('heliusNetwork');
+  if (networkSelect) networkSelect.value = heliusNetwork;
 }
 
 async function saveHeliusKey() {
   const key = document.getElementById('heliusApiKey').value.trim();
+  const network = document.getElementById('heliusNetwork')?.value || 'mainnet';
+  if (!key) { toast('Enter a Helius API key', 'error'); return; }
   localStorage.setItem('diverg_helius_key', key);
-  toast('Helius API key saved', 'success');
+  localStorage.setItem('diverg_helius_network', network);
+  toast('Helius settings saved', 'success');
 }
 
 async function testHeliusKey() {
