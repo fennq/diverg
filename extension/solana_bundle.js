@@ -189,7 +189,7 @@
       '/v1/wallet/' +
       encodeURIComponent(address) +
       '/transfers?limit=' +
-      encodeURIComponent(String(limit || 80)) +
+      encodeURIComponent(String(Math.min(100, Math.max(1, limit || 80)))) +
       '&api-key=' +
       encodeURIComponent(apiKey);
     return fetch(url, { headers: { 'X-Api-Key': apiKey } })
@@ -272,14 +272,30 @@
   }
 
   function iterTransferRows(raw) {
-    if (!raw || typeof raw !== 'object') return [];
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw.filter(function (x) {
+      return x && typeof x === 'object';
+    });
+    if (typeof raw !== 'object') return [];
     var keys = ['transfers', 'data', 'items', 'results'];
     for (var i = 0; i < keys.length; i++) {
       var v = raw[keys[i]];
-      if (Array.isArray(v)) return v.filter(function (x) {
-        return x && typeof x === 'object';
-      });
+      if (Array.isArray(v) && v.length && typeof v[0] === 'object') {
+        return v.filter(function (x) {
+          return x && typeof x === 'object';
+        });
+      }
     }
+    var merged = [];
+    ['nativeTransfers', 'tokenTransfers'].forEach(function (k) {
+      var arr = raw[k];
+      if (Array.isArray(arr)) {
+        for (var j = 0; j < arr.length; j++) {
+          if (arr[j] && typeof arr[j] === 'object') merged.push(arr[j]);
+        }
+      }
+    });
+    if (merged.length) return merged;
     return [];
   }
 
@@ -335,10 +351,22 @@
         tu = Math.floor(ts);
         if (tu > 1e12) tu = Math.floor(tu / 1000);
       }
-      var lam = safeInt(t.lamports != null ? t.lamports : t.amountLamports != null ? t.amountLamports : t.amount);
+      var lam = safeInt(t.lamports != null ? t.lamports : t.amountLamports != null ? t.amountLamports : null);
+      if (lam == null && t.amountRaw != null) {
+        try {
+          lam = parseInt(String(t.amountRaw).split('.')[0], 10);
+          if (isNaN(lam)) lam = null;
+        } catch (e) {
+          lam = null;
+        }
+      }
       if (lam == null) {
         var amt = safeFloat(t.amount != null ? t.amount : t.uiAmount != null ? t.uiAmount : t.tokenAmount);
-        if (amt != null) lam = Math.round(amt * 1e9);
+        var dec = safeInt(t.decimals);
+        if (amt != null) {
+          if (dec != null && dec >= 0) lam = Math.round(amt * Math.pow(10, Math.min(dec, 18)));
+          else lam = Math.round(amt * 1e9);
+        }
       }
       var sig = t.signature || t.tx || t.transactionSignature;
       var fromA =
@@ -348,7 +376,8 @@
         t.fromUser ||
         t.sender ||
         t.source ||
-        t.sourceAccount;
+        t.sourceAccount ||
+        t.counterparty;
       if (fromA && typeof fromA === 'object') fromA = fromA.address || fromA.pubkey;
       if (lam == null || tu == null) continue;
       if (typeof fromA !== 'string' || !ADDR_RE.test(fromA)) continue;
@@ -539,7 +568,15 @@
         var t = rows[i];
         var direction = String(t.direction || t.type || t.transferType || '').toLowerCase();
         if (direction !== 'out' && direction !== 'outgoing' && direction !== 'sent' && direction !== 'send' && direction !== 'withdraw') continue;
-        var toA = t.to || t.toUserAccount || t.toAddress || t.toUser || t.recipient || t.destination || t.destinationAccount;
+        var toA =
+          t.to ||
+          t.toUserAccount ||
+          t.toAddress ||
+          t.toUser ||
+          t.recipient ||
+          t.destination ||
+          t.destinationAccount ||
+          t.counterparty;
         if (toA && typeof toA === 'object') toA = toA.address || toA.pubkey;
         if (typeof toA !== 'string' || !ADDR_RE.test(toA)) continue;
         if (toA === w || seenForWallet[toA]) continue;

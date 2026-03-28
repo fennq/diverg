@@ -8,6 +8,7 @@ with HELIUS_API_KEY in the environment.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import re
 import time
@@ -157,7 +158,8 @@ def run_bundle_snapshot(
     )
     mh = max(5, min(mh, 200))
     mf = max(5, min(mf, 200))
-    tr_limit = int(os.environ.get("SOLANA_BUNDLE_FUNDER_TRANSFERS_LIMIT", "200"))
+    # Helius Wallet API allows max 100 transfers per request (larger values error or fail open).
+    tr_limit = max(1, min(int(os.environ.get("SOLANA_BUNDLE_FUNDER_TRANSFERS_LIMIT", "100")), 100))
 
     supply_raw, err = helius_json_rpc_ex("getTokenSupply", [mint])
     if err:
@@ -267,13 +269,39 @@ def run_bundle_snapshot(
     lookup_order = lookup_order[:mf]
 
     funded_by: dict[str, Optional[dict]] = {}
-    transfers_by: dict[str, Optional[dict]] = {}
-    for w in lookup_order:
+    transfers_by: dict[str, Any] = {}
+
+    def _fetch_intel(w: str) -> tuple[str, Optional[dict], Any]:
         fb = helius_wallet_funded_by(w)
-        funded_by[w] = fb if isinstance(fb, dict) else None
         tr = helius_transfers(w, limit=tr_limit)
-        transfers_by[w] = tr if isinstance(tr, dict) else None
-        time.sleep(funded_by_delay_sec)
+        fb_d = fb if isinstance(fb, dict) else None
+        if isinstance(tr, dict):
+            tr_o: Any = tr
+        elif isinstance(tr, list):
+            tr_o = tr
+        else:
+            tr_o = None
+        return w, fb_d, tr_o
+
+    n_w = len(lookup_order)
+    if n_w == 1:
+        w0 = lookup_order[0]
+        ww, fb_d, tr_o = _fetch_intel(w0)
+        funded_by[ww] = fb_d
+        transfers_by[ww] = tr_o
+    elif n_w > 1:
+        workers = min(14, max(4, n_w))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            futs = {pool.submit(_fetch_intel, w): w for w in lookup_order}
+            for fut in concurrent.futures.as_completed(futs, timeout=300):
+                w0 = futs[fut]
+                try:
+                    ww, fb_d, tr_o = fut.result(timeout=120)
+                    funded_by[ww] = fb_d
+                    transfers_by[ww] = tr_o
+                except Exception:
+                    funded_by[w0] = None
+                    transfers_by[w0] = None
 
     # Build clusters (shared funder: prefer first inbound SOL from /transfers, else funded-by)
     cluster_members: dict[str, set[str]] = defaultdict(set)

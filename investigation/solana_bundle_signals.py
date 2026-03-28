@@ -89,13 +89,25 @@ def parse_funded_by_row(fb: Optional[dict]) -> dict[str, Any]:
     return out
 
 
-def _iter_transfer_rows(raw: Optional[dict]) -> list[dict]:
-    if not raw or not isinstance(raw, dict):
+def _iter_transfer_rows(raw: Any) -> list[dict]:
+    """Normalize Helius /transfers payloads (array root, data[], or native+token arrays)."""
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    if not isinstance(raw, dict):
         return []
     for key in ("transfers", "data", "items", "results"):
         v = raw.get(key)
-        if isinstance(v, list):
+        if isinstance(v, list) and v and isinstance(v[0], dict):
             return [x for x in v if isinstance(x, dict)]
+    merged: list[dict] = []
+    for key in ("nativeTransfers", "tokenTransfers"):
+        v = raw.get(key)
+        if isinstance(v, list):
+            merged.extend(x for x in v if isinstance(x, dict))
+    if merged:
+        return merged
     return []
 
 
@@ -164,12 +176,23 @@ def extract_first_inbound_sol_from_transfers(raw: Optional[dict]) -> Optional[di
             tu = int(ts)
             if tu > 1e12:
                 tu = int(tu / 1000)
-        lam = _safe_int(t.get("lamports") or t.get("amountLamports") or t.get("amount"))
+        lam = _safe_int(t.get("lamports") or t.get("amountLamports"))
+        if lam is None and t.get("amountRaw") is not None:
+            try:
+                raw_s = str(t.get("amountRaw")).strip()
+                lam = int(raw_s.split(".", 1)[0])
+            except (TypeError, ValueError):
+                lam = None
         if lam is None:
             amt = _safe_float(t.get("amount") or t.get("uiAmount") or t.get("tokenAmount"))
+            dec = _safe_int(t.get("decimals"))
             if amt is not None:
-                lam = int(round(amt * 1_000_000_000))
+                if dec is not None and dec >= 0:
+                    lam = int(round(amt * (10 ** min(dec, 18))))
+                else:
+                    lam = int(round(amt * 1_000_000_000))
         sig = t.get("signature") or t.get("tx") or t.get("transactionSignature")
+        # Helius Wallet API v1: counterparty = sender when direction is "in", recipient when "out"
         from_a = (
             t.get("from")
             or t.get("fromUserAccount")
@@ -178,6 +201,7 @@ def extract_first_inbound_sol_from_transfers(raw: Optional[dict]) -> Optional[di
             or t.get("sender")
             or t.get("source")
             or t.get("sourceAccount")
+            or t.get("counterparty")
         )
         if isinstance(from_a, dict):
             from_a = from_a.get("address") or from_a.get("pubkey")
@@ -395,6 +419,7 @@ def shared_outbound_receivers(
                 or t.get("recipient")
                 or t.get("destination")
                 or t.get("destinationAccount")
+                or t.get("counterparty")
             )
             if isinstance(to_a, dict):
                 to_a = to_a.get("address") or to_a.get("pubkey")

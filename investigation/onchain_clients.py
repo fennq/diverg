@@ -141,8 +141,9 @@ def helius_wallet_history(address: str, limit: int = 25) -> Optional[dict]:
 
 
 def helius_transfers(address: str, limit: int = 50) -> Optional[dict]:
-    """Token and SOL transfers. Requires HELIUS_API_KEY."""
-    return _helius_get(f"/v1/wallet/{address}/transfers", {"limit": limit})
+    """Token and SOL transfers. Requires HELIUS_API_KEY. Helius caps limit at 100."""
+    lim = max(1, min(int(limit), 100))
+    return _helius_get(f"/v1/wallet/{address}/transfers", {"limit": lim})
 
 
 def helius_wallet_identity(address: str) -> Optional[dict]:

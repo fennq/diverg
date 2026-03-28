@@ -1037,7 +1037,14 @@ def investigation_solana_bundle():
 
     if isinstance(out, dict) and out.get("ok"):
         out = _enrich_solana_bundle_payload(out)
-    return jsonify(out if isinstance(out, dict) else {"ok": False, "error": "Unexpected response"})
+    payload = out if isinstance(out, dict) else {"ok": False, "error": "Unexpected response"}
+    try:
+        return jsonify(payload)
+    except TypeError:
+        return Response(
+            json.dumps(payload, default=str),
+            mimetype="application/json",
+        )
 
 
 # ── History endpoints ─────────────────────────────────────────────────────────
