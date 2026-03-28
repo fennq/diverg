@@ -1104,66 +1104,33 @@ RUN_BUDGET_SEC = 25  # finish before bot 120s timeout
 
 
 def run(target: str, scan_type: str = "full") -> str:
+    import concurrent.futures
+
     domain = target.replace("https://", "").replace("http://", "").split("/")[0]
     report = OSINTReport(target=domain)
-    run_start = time.time()
 
-    def _over_budget() -> bool:
-        return (time.time() - run_start) > RUN_BUDGET_SEC
+    tasks = {
+        "whois":      ("whois_info",       lambda: lookup_whois(domain)),
+        "dns":        ("dns_records",       lambda: enumerate_dns(domain)),
+        "subdomains": ("subdomains",        lambda: harvest_subdomains_crtsh(domain)),
+        "emails":     ("email_patterns",    lambda: discover_emails(domain)),
+        "dorks":      ("google_dorks",      lambda: generate_google_dorks(domain)),
+        "tech":       ("tech_infra",        lambda: tech_infrastructure_osint(domain)),
+        "social":     ("social_media",      lambda: discover_social_media(domain)),
+        "breaches":   ("breach_info",       lambda: check_data_breaches(domain)),
+        "wayback":    ("wayback_snapshots", lambda: query_wayback(domain)),
+    }
 
-    if scan_type in ("full", "whois") and not _over_budget():
-        try:
-            report.whois_info = lookup_whois(domain)
-        except Exception as exc:
-            report.errors.append(f"WHOIS error: {exc}")
+    to_run = {k: v for k, v in tasks.items() if scan_type in ("full", k)}
 
-    if scan_type in ("full", "dns") and not _over_budget():
-        try:
-            report.dns_records = enumerate_dns(domain)
-        except Exception as exc:
-            report.errors.append(f"DNS enum error: {exc}")
-
-    if scan_type in ("full", "subdomains") and not _over_budget():
-        try:
-            report.subdomains = harvest_subdomains_crtsh(domain)
-        except Exception as exc:
-            report.errors.append(f"Subdomain harvest error: {exc}")
-
-    if scan_type in ("full", "emails") and not _over_budget():
-        try:
-            report.email_patterns = discover_emails(domain)
-        except Exception as exc:
-            report.errors.append(f"Email discovery error: {exc}")
-
-    if scan_type in ("full", "dorks") and not _over_budget():
-        try:
-            report.google_dorks = generate_google_dorks(domain)
-        except Exception as exc:
-            report.errors.append(f"Google dork generation error: {exc}")
-
-    if scan_type in ("full", "tech") and not _over_budget():
-        try:
-            report.tech_infra = tech_infrastructure_osint(domain)
-        except Exception as exc:
-            report.errors.append(f"Tech infrastructure error: {exc}")
-
-    if scan_type in ("full", "social") and not _over_budget():
-        try:
-            report.social_media = discover_social_media(domain)
-        except Exception as exc:
-            report.errors.append(f"Social media discovery error: {exc}")
-
-    if scan_type in ("full", "breaches") and not _over_budget():
-        try:
-            report.breach_info = check_data_breaches(domain)
-        except Exception as exc:
-            report.errors.append(f"Breach check error: {exc}")
-
-    if scan_type in ("full", "wayback") and not _over_budget():
-        try:
-            report.wayback_snapshots = query_wayback(domain)
-        except Exception as exc:
-            report.errors.append(f"Wayback Machine error: {exc}")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(6, len(to_run))) as pool:
+        futures = {pool.submit(fn): (key, attr) for key, (attr, fn) in to_run.items()}
+        for future in concurrent.futures.as_completed(futures, timeout=RUN_BUDGET_SEC):
+            key, attr = futures[future]
+            try:
+                setattr(report, attr, future.result(timeout=2))
+            except Exception as exc:
+                report.errors.append(f"{key} error: {exc}")
 
     return json.dumps(asdict(report), indent=2)
 
