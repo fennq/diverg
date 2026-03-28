@@ -31,17 +31,19 @@ Dashboard static files:
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
 import secrets
 import sqlite3
 import sys
+import time
 import uuid
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 from pathlib import Path
+from threading import Lock
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
@@ -74,6 +76,50 @@ from poc_runner import run_poc_for_finding, run_idor_poc, run_unauth_poc
 JWT_SECRET = os.environ.get("DIVERG_JWT_SECRET", secrets.token_hex(32))
 JWT_EXPIRY_HOURS = 72
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+ALLOWED_ORIGINS = os.environ.get("DIVERG_ALLOWED_ORIGINS", "http://127.0.0.1:5000,http://localhost:5000").split(",")
+MAX_REQUEST_SIZE = 2 * 1024 * 1024  # 2 MB
+
+# ── Rate limiter ──────────────────────────────────────────────────────────
+
+class RateLimiter:
+    def __init__(self, max_attempts: int, window_seconds: int, lockout_seconds: int):
+        self._max = max_attempts
+        self._window = window_seconds
+        self._lockout = lockout_seconds
+        self._attempts: dict[str, list[float]] = defaultdict(list)
+        self._locked: dict[str, float] = {}
+        self._lock = Lock()
+
+    def check(self, key: str) -> tuple[bool, int]:
+        """Returns (allowed, retry_after_seconds). If not allowed, retry_after > 0."""
+        now = time.time()
+        with self._lock:
+            if key in self._locked:
+                unlock_at = self._locked[key]
+                if now < unlock_at:
+                    return False, int(unlock_at - now) + 1
+                del self._locked[key]
+                self._attempts[key] = []
+
+            self._attempts[key] = [t for t in self._attempts[key] if now - t < self._window]
+            if len(self._attempts[key]) >= self._max:
+                self._locked[key] = now + self._lockout
+                return False, self._lockout
+            return True, 0
+
+    def record(self, key: str):
+        now = time.time()
+        with self._lock:
+            self._attempts[key].append(now)
+
+    def clear(self, key: str):
+        with self._lock:
+            self._attempts.pop(key, None)
+            self._locked.pop(key, None)
+
+
+auth_limiter = RateLimiter(max_attempts=10, window_seconds=300, lockout_seconds=600)
+register_limiter = RateLimiter(max_attempts=5, window_seconds=3600, lockout_seconds=1800)
 
 # ── Database ────────────────────────────────────────────────────────────────
 
@@ -161,11 +207,14 @@ def save_scan(scan_id: str, result: dict, scope: str, user_id: str = ""):
 # ── Auth helpers ────────────────────────────────────────────────────────────
 
 def hash_password(pw: str) -> str:
-    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(pw.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 
 def check_password(pw: str, hashed: str) -> bool:
-    return bcrypt.checkpw(pw.encode(), hashed.encode())
+    try:
+        return bcrypt.checkpw(pw.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
 
 
 def create_token(user_id: str, email: str) -> str:
@@ -174,6 +223,7 @@ def create_token(user_id: str, email: str) -> str:
         "email": email,
         "iat": datetime.now(timezone.utc),
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+        "jti": secrets.token_hex(8),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
@@ -185,13 +235,17 @@ def decode_token(token: str) -> dict | None:
         return None
 
 
+def _get_client_ip() -> str:
+    return request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
+
+
 def get_current_user():
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
     else:
-        token = request.cookies.get("diverg_token", "")
-    if not token:
+        return None
+    if not token or len(token) > 4096:
         return None
     payload = decode_token(token)
     if not payload:
@@ -214,13 +268,20 @@ def require_auth(f):
 
 
 def validate_email(email: str) -> bool:
+    if not email or len(email) > 254:
+        return False
     return bool(re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email))
+
+
+def sanitize_text(text: str, max_len: int = 100) -> str:
+    return text.strip()[:max_len]
 
 
 # ── Flask app ────────────────────────────────────────────────────────────────
 
 app = Flask(__name__, static_folder=None)
 app.config["JSON_SORT_KEYS"] = False
+app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_SIZE
 
 VALID_SCOPES = ("full", "quick", "crypto", "recon", "web", "api", "passive", "attack")
 
@@ -229,7 +290,9 @@ init_db()
 
 @app.after_request
 def _security_headers(resp):
-    resp.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+    origin = request.headers.get("Origin", "")
+    if origin in ALLOWED_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     resp.headers["Access-Control-Allow-Credentials"] = "true"
@@ -241,17 +304,21 @@ def _security_headers(resp):
     resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     resp.headers["Cross-Origin-Resource-Policy"] = "same-site"
     resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
-    if request.path.startswith("/dashboard"):
-        resp.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self'; "
-            "style-src 'self' https://fonts.googleapis.com; "
-            "font-src https://fonts.gstatic.com; "
-            "img-src 'self' data: https:; "
-            "connect-src 'self' http://127.0.0.1:* https://mainnet.helius-rpc.com https://accounts.google.com https://www.googleapis.com; "
-            "frame-src https://accounts.google.com; "
-            "frame-ancestors 'none'"
-        )
+
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self' https://accounts.google.com; "
+        "style-src 'self' https://fonts.googleapis.com; "
+        "font-src https://fonts.gstatic.com; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' http://127.0.0.1:* https://mainnet.helius-rpc.com https://accounts.google.com https://www.googleapis.com; "
+        "frame-src https://accounts.google.com; "
+        "frame-ancestors 'none'"
+    )
+    if request.path.startswith("/dashboard") or request.path.startswith("/login"):
+        resp.headers["Content-Security-Policy"] = csp
+
+    resp.headers["Cache-Control"] = "no-store" if request.path.startswith("/api/auth") else "private, no-cache"
     return resp
 
 
@@ -261,22 +328,34 @@ def _security_headers(resp):
 def auth_register():
     if request.method == "OPTIONS":
         return "", 204
+
+    ip = _get_client_ip()
+    allowed, retry = register_limiter.check(ip)
+    if not allowed:
+        return jsonify({"error": "Too many attempts. Try again later."}), 429
+
     if not request.is_json:
         return jsonify({"error": "JSON required"}), 400
-    data = request.get_json() or {}
-    email = (data.get("email") or "").strip().lower()
-    password = (data.get("password") or "").strip()
-    name = (data.get("name") or "").strip()
+    data = request.get_json(silent=True) or {}
+    email = sanitize_text(data.get("email") or "", 254).lower()
+    password = (data.get("password") or "")
+    name = sanitize_text(data.get("name") or "", 100)
 
-    if not email or not validate_email(email):
+    if not validate_email(email):
         return jsonify({"error": "Valid email required"}), 400
-    if not password or len(password) < 8:
+    if len(password) < 8:
         return jsonify({"error": "Password must be at least 8 characters"}), 400
+    if len(password) > 128:
+        return jsonify({"error": "Password too long"}), 400
+
+    register_limiter.record(ip)
 
     with _db() as conn:
         existing = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
         if existing:
-            return jsonify({"error": "Email already registered"}), 409
+            # Identical response to prevent email enumeration
+            time.sleep(0.1)
+            return jsonify({"error": "Registration failed"}), 400
 
         user_id = str(uuid.uuid4())
         conn.execute(
@@ -296,26 +375,47 @@ def auth_register():
 def auth_login():
     if request.method == "OPTIONS":
         return "", 204
+
+    ip = _get_client_ip()
+    allowed, retry = auth_limiter.check(ip)
+    if not allowed:
+        resp = jsonify({"error": "Too many login attempts. Try again later."})
+        resp.headers["Retry-After"] = str(retry)
+        return resp, 429
+
     if not request.is_json:
         return jsonify({"error": "JSON required"}), 400
-    data = request.get_json() or {}
-    email = (data.get("email") or "").strip().lower()
-    password = (data.get("password") or "").strip()
+    data = request.get_json(silent=True) or {}
+    email = sanitize_text(data.get("email") or "", 254).lower()
+    password = (data.get("password") or "")
 
     if not email or not password:
         return jsonify({"error": "Email and password required"}), 400
+    if len(password) > 128:
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    auth_limiter.record(ip)
 
     with _db() as conn:
         row = conn.execute("SELECT id, email, name, password, provider, avatar_url FROM users WHERE email = ?",
                            (email,)).fetchone()
+
     if not row:
+        # Burn CPU to prevent timing-based user enumeration
+        bcrypt.hashpw(b"dummy_timing_pad", bcrypt.gensalt(rounds=12))
         return jsonify({"error": "Invalid credentials"}), 401
+
     user = dict(row)
+
     if not user.get("password"):
-        return jsonify({"error": "This account uses Google sign-in"}), 401
+        # Don't reveal auth method — same generic error
+        bcrypt.hashpw(b"dummy_timing_pad", bcrypt.gensalt(rounds=12))
+        return jsonify({"error": "Invalid credentials"}), 401
+
     if not check_password(password, user["password"]):
         return jsonify({"error": "Invalid credentials"}), 401
 
+    auth_limiter.clear(ip)
     token = create_token(user["id"], user["email"])
     return jsonify({
         "token": token,
@@ -328,26 +428,40 @@ def auth_login():
 def auth_google():
     if request.method == "OPTIONS":
         return "", 204
+
+    ip = _get_client_ip()
+    allowed, _ = auth_limiter.check(ip)
+    if not allowed:
+        return jsonify({"error": "Too many attempts. Try again later."}), 429
+
     if not request.is_json:
         return jsonify({"error": "JSON required"}), 400
-    data = request.get_json() or {}
-    credential = data.get("credential", "")
+    data = request.get_json(silent=True) or {}
+    credential = (data.get("credential") or "").strip()
 
-    if not credential:
+    if not credential or len(credential) > 4096:
         return jsonify({"error": "Missing Google credential"}), 400
+
+    auth_limiter.record(ip)
 
     try:
         import urllib.request
-        url = f"https://www.googleapis.com/oauth2/v3/tokeninfo?id_token={credential}"
-        with urllib.request.urlopen(url, timeout=10) as resp:
+        verify_url = f"https://www.googleapis.com/oauth2/v3/userinfo"
+        req = urllib.request.Request(verify_url, headers={"Authorization": f"Bearer {credential}"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
             info = json.loads(resp.read().decode())
-    except Exception as e:
-        return jsonify({"error": f"Google verification failed: {e}"}), 401
+    except Exception:
+        return jsonify({"error": "Google verification failed"}), 401
 
-    email = info.get("email", "").lower()
-    name = info.get("name", "")
-    avatar = info.get("picture", "")
-    google_sub = info.get("sub", "")
+    if not info.get("email_verified", False):
+        return jsonify({"error": "Google email not verified"}), 401
+
+    if GOOGLE_CLIENT_ID and info.get("aud") != GOOGLE_CLIENT_ID:
+        return jsonify({"error": "Invalid Google credentials"}), 401
+
+    email = sanitize_text(info.get("email", ""), 254).lower()
+    name = sanitize_text(info.get("name", ""), 100)
+    avatar = sanitize_text(info.get("picture", ""), 500)
 
     if not email:
         return jsonify({"error": "Could not get email from Google"}), 401
@@ -357,9 +471,7 @@ def auth_google():
                                 (email,)).fetchone()
         if existing:
             user = dict(existing)
-            if user["provider"] != "google":
-                conn.execute("UPDATE users SET provider = 'google', avatar_url = ? WHERE id = ?",
-                             (avatar, user["id"]))
+            conn.execute("UPDATE users SET avatar_url = ? WHERE id = ?", (avatar, user["id"]))
         else:
             user_id = str(uuid.uuid4())
             conn.execute(
@@ -368,6 +480,7 @@ def auth_google():
             )
             user = {"id": user_id, "email": email, "name": name, "provider": "google", "avatar_url": avatar}
 
+    auth_limiter.clear(ip)
     token = create_token(user["id"], email)
     return jsonify({
         "token": token,
@@ -409,14 +522,14 @@ def login_page():
 def _parse_scan_body():
     if not request.is_json:
         return None, None, None, (jsonify({"error": "Content-Type must be application/json"}), 400)
-    data = request.get_json() or {}
-    url = (data.get("url") or "").strip()
+    data = request.get_json(silent=True) or {}
+    url = sanitize_text(data.get("url") or "", 2048)
     if not url:
         return None, None, None, (jsonify({"error": "Missing 'url' in body"}), 400)
     if not url.startswith("http://") and not url.startswith("https://"):
         url = "https://" + url
-    goal = (data.get("goal") or "").strip() or None
-    scope = (data.get("scope") or "full").strip().lower()
+    goal = sanitize_text(data.get("goal") or "", 500) or None
+    scope = sanitize_text(data.get("scope") or "full", 20).lower()
     if scope not in VALID_SCOPES:
         scope = "full"
     return url, goal, scope, None
@@ -516,7 +629,7 @@ def poc_simulate_options():
 def poc_simulate():
     if not request.is_json:
         return jsonify({"error": "Content-Type must be application/json"}), 400
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     if data.get("finding"):
         finding = data["finding"]
         if not isinstance(finding, dict):
@@ -531,8 +644,8 @@ def poc_simulate():
         except Exception as e:
             return jsonify({"success": False, "error": str(e), "conclusion": ""}), 200
     else:
-        poc_type = (data.get("type") or "").strip().lower()
-        url = (data.get("url") or "").strip()
+        poc_type = sanitize_text(data.get("type") or "", 20).lower()
+        url = sanitize_text(data.get("url") or "", 2048)
         if not url:
             return jsonify({"error": "Missing url (or provide finding)"}), 400
         if poc_type not in ("idor", "unauthenticated"):
@@ -558,11 +671,19 @@ def poc_simulate():
 
 # ── History endpoints ─────────────────────────────────────────────────────────
 
+def _safe_int(val, default: int, minimum: int = 0, maximum: int = 999999) -> int:
+    try:
+        n = int(val)
+        return max(minimum, min(n, maximum))
+    except (TypeError, ValueError):
+        return default
+
+
 @app.route("/api/history", methods=["GET"])
 @require_auth
 def history_list():
-    limit = min(int(request.args.get("limit", 50)), 200)
-    offset = int(request.args.get("offset", 0))
+    limit = _safe_int(request.args.get("limit"), 50, 1, 200)
+    offset = _safe_int(request.args.get("offset"), 0, 0, 999999)
     user_id = request.user["id"]
 
     with _db() as conn:
@@ -587,6 +708,8 @@ def history_list():
 @app.route("/api/history/<scan_id>", methods=["GET"])
 @require_auth
 def history_get(scan_id):
+    if len(scan_id) > 50:
+        return jsonify({"error": "Invalid scan ID"}), 400
     with _db() as conn:
         row = conn.execute("SELECT * FROM scans WHERE id = ? AND user_id = ?",
                            (scan_id, request.user["id"])).fetchone()
@@ -597,6 +720,7 @@ def history_get(scan_id):
         data["report"] = json.loads(data.pop("report_json"))
     else:
         data.pop("report_json", None)
+    data.pop("user_id", None)
     return jsonify(data)
 
 
@@ -607,6 +731,8 @@ def history_delete(scan_id):
     user = get_current_user()
     if not user:
         return jsonify({"error": "Authentication required"}), 401
+    if len(scan_id) > 50:
+        return jsonify({"error": "Invalid scan ID"}), 400
     with _db() as conn:
         conn.execute("DELETE FROM scans WHERE id = ? AND user_id = ?", (scan_id, user["id"]))
     return jsonify({"deleted": scan_id})
@@ -615,8 +741,10 @@ def history_delete(scan_id):
 @app.route("/api/history/<scan_id>", methods=["PATCH"])
 @require_auth
 def history_patch(scan_id):
-    data = (request.get_json() or {}) if request.is_json else {}
-    label = data.get("label", "")
+    if len(scan_id) > 50:
+        return jsonify({"error": "Invalid scan ID"}), 400
+    data = (request.get_json(silent=True) or {}) if request.is_json else {}
+    label = sanitize_text(data.get("label", ""), 200)
     with _db() as conn:
         conn.execute("UPDATE scans SET label = ? WHERE id = ? AND user_id = ?",
                      (label, scan_id, request.user["id"]))
@@ -671,7 +799,7 @@ def stats():
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "service": "diverg-console", "version": "2.1"})
+    return jsonify({"status": "ok", "service": "diverg-console", "version": "2.2"})
 
 
 # ── Catch-all redirect to login ──────────────────────────────────────────────
