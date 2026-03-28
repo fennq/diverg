@@ -1,19 +1,19 @@
 /* Diverg Console — Intentional, minimal aesthetic */
 
 :root {
-  --bg:        #09090b;
-  --elevated:  #0c0c0e;
-  --surface:   #121214;
-  --border:    rgba(255,255,255,0.04);
-  --border-hi: rgba(255,255,255,0.08);
-  --text:      #fafafa;
-  --muted:     #a1a1aa;
-  --dim:       #71717a;
-  --accent:    #3b82f6;
-  --accent-dim:rgba(59,130,246,0.1);
+  --bg:        #050508;
+  --elevated:  #0a0a0f;
+  --surface:   #0d0d14;
+  --border:    rgba(255,255,255,0.06);
+  --border-hi: rgba(255,255,255,0.10);
+  --text:      #ffffff;
+  --muted:     #a0a0a8;
+  --dim:       #4a4a56;
+  --accent:    #3b6ff5;
+  --accent-dim:rgba(59,111,245,0.12);
   --red:       #ef4444;
   --orange:    #f97316;
-  --yellow:    #eab308;
+  --yellow:    #f59e0b;
   --green:     #22c55e;
   --font:      'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --mono:      'JetBrains Mono', 'SF Mono', monospace;
