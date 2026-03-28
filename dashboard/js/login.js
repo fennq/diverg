@@ -89,35 +89,7 @@
     }
   }
 
-  async function googleSignIn() {
-    try {
-      var tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: '',
-        scope: 'openid email profile',
-        callback: async function (response) {
-          if (response.error) { showError('Google sign-in cancelled'); return; }
-          try {
-            var r = await fetch(API + '/api/auth/google', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ credential: response.access_token }),
-            });
-            var data = await r.json();
-            if (!r.ok) { showError(data.error || 'Google sign-in failed'); return; }
-            localStorage.setItem('diverg_token', data.token);
-            localStorage.setItem('diverg_user', JSON.stringify(data.user));
-            window.location.href = '/dashboard/';
-          } catch (err) { showError('Google sign-in failed'); }
-        },
-      });
-      tokenClient.requestAccessToken();
-    } catch (err) {
-      showError('Google sign-in not configured yet — use email');
-    }
-  }
-
   document.getElementById('toggleLink').addEventListener('click', toggleMode);
   document.getElementById('pwToggle').addEventListener('click', togglePw);
   document.getElementById('authForm').addEventListener('submit', handleAuth);
-  document.getElementById('googleBtn').addEventListener('click', googleSignIn);
 })();
