@@ -41,12 +41,12 @@ SCAN_PROFILES = {
     "full": [
         "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "company_exposure",
         "web_vulns", "auth_test", "api_test", "high_value_flaws", "workflow_probe", "race_condition",
-        "payment_financial", "client_surface", "dependency_audit", "logic_abuse", "entity_reputation",
+        "payment_financial", "client_surface", "dependency_audit", "logic_abuse", "entity_reputation", "domain_age",
     ],
     "crypto": [
         "osint", "recon", "headers_ssl", "crypto_security", "data_leak_risks", "company_exposure",
         "web_vulns", "auth_test", "api_test", "high_value_flaws", "workflow_probe", "race_condition",
-        "payment_financial", "client_surface", "chain_validation_abuse", "dependency_audit", "logic_abuse", "entity_reputation",
+        "payment_financial", "client_surface", "chain_validation_abuse", "dependency_audit", "logic_abuse", "entity_reputation", "domain_age",
     ],
     "quick": ["headers_ssl", "recon", "osint", "company_exposure"],
     "recon": ["osint", "recon"],
@@ -1500,6 +1500,11 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     timestamp = datetime.now(timezone.utc).isoformat()
     evidence_summary = build_evidence_summary(findings)
 
+    domain_trust = None
+    da_result = results.get("domain_age")
+    if isinstance(da_result, dict) and "domain_trust" in da_result:
+        domain_trust = da_result["domain_trust"]
+
     return {
         "target_url": target_url,
         "findings": findings,
@@ -1511,6 +1516,7 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
             "chain_validation_abuse_ran": "chain_validation_abuse" in results,
             "chain_validation_abuse_reason": chain_validation_abuse_reason,
         },
+        "domain_trust": domain_trust,
         "summary": {
             "total_findings": len(findings),
             "critical": sum(1 for f in findings if f.get("severity") == "Critical"),
@@ -1623,6 +1629,12 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
     company_surfaces = aggregate_company_surfaces(results)
     timestamp = datetime.now(timezone.utc).isoformat()
     evidence_summary = build_evidence_summary(findings)
+
+    domain_trust_stream = None
+    da_stream = results.get("domain_age")
+    if isinstance(da_stream, dict) and "domain_trust" in da_stream:
+        domain_trust_stream = da_stream["domain_trust"]
+
     report = {
         "target_url": target_url,
         "findings": findings,
@@ -1634,6 +1646,7 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
             "chain_validation_abuse_ran": "chain_validation_abuse" in results,
             "chain_validation_abuse_reason": chain_validation_abuse_reason,
         },
+        "domain_trust": domain_trust_stream,
         "summary": {
             "total_findings": len(findings),
             "critical": sum(1 for f in findings if f.get("severity") == "Critical"),

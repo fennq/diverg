@@ -84,6 +84,7 @@ def api_scan():
             "summary": result.get("summary"),
             "skills_run": result.get("skills_run"),
             "site_classification": result.get("site_classification"),
+            "domain_trust": result.get("domain_trust"),
             "evidence_summary": result.get("evidence_summary"),
         })
     except Exception as e:
