@@ -68,8 +68,18 @@ except ImportError:
     print("Install PyJWT: pip install pyjwt")
     sys.exit(1)
 
-from orchestrator import run_web_scan, run_web_scan_streaming
-from poc_runner import run_poc_for_finding, run_idor_poc, run_unauth_poc
+try:
+    from orchestrator import run_web_scan, run_web_scan_streaming
+    from poc_runner import run_poc_for_finding, run_idor_poc, run_unauth_poc
+    SCANNER_AVAILABLE = True
+except Exception as e:
+    print(f"Warning: Scanner modules not fully available: {e}")
+    SCANNER_AVAILABLE = False
+    run_web_scan = None
+    run_web_scan_streaming = None
+    run_poc_for_finding = None
+    run_idor_poc = None
+    run_unauth_poc = None
 
 # ── Config ────────────────────────────────────────────────────────────────
 

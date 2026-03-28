@@ -1,9 +1,2 @@
 [phases.setup]
-nixPkgs = ["nmap"]
-aptPkgs = ["nmap"]
-
-[phases.install]
-cmds = ["pip install -r requirements.txt"]
-
-[start]
-cmd = "gunicorn api_server:app --bind 0.0.0.0:${PORT:-8080} --workers 2 --threads 4 --timeout 300"
+nixPkgs = ["...", "nmap"]
