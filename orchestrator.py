@@ -55,8 +55,8 @@ SCAN_PROFILES = {
     "passive": ["osint", "headers_ssl", "company_exposure"],
 }
 
-SKILL_TIMEOUT_SECONDS = 90  # skills exit in ~58s; buffer to avoid timeouts
-MAX_DIRECT_WORKERS = 4
+SKILL_TIMEOUT_SECONDS = 45
+MAX_DIRECT_WORKERS = 6
 OPENCLAW_AGENT_RETRIES = 2
 OPENCLAW_AGENT_TIMEOUTS = {
     "surface_mapper": 120,
@@ -1666,11 +1666,46 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     }
 
 
+def _run_skill_phase(skill_name, domain, target_url, eq, ctx=None):
+    """Run a single skill and put start/done events into the queue."""
+    eq.put({"event": "skill_start", "skill": skill_name})
+    try:
+        out = run_skill(skill_name, domain, target_url, ctx)
+        cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
+        eq.put({"event": "skill_done", "skill": skill_name, "findings_count": cnt})
+        return skill_name, out
+    except Exception as exc:
+        eq.put({"event": "skill_done", "skill": skill_name, "findings_count": 0, "error": str(exc)})
+        return skill_name, {"error": str(exc), "skill": skill_name}
+
+
+def _run_variant_phase(skill_name, stype, wl, domain, target_url, eq, ctx=None):
+    """Run a skill variant and put start/done events into the queue."""
+    label = f"{skill_name}:{stype}"
+    eq.put({"event": "skill_start", "skill": label})
+    try:
+        out = run_skill_variant(
+            skill_name, domain, target_url,
+            scan_type=stype, wordlist=wl,
+            crawl_depth=3 if (skill_name == "web_vulns" and stype == "full") else 2,
+            context=ctx,
+        )
+        cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
+        eq.put({"event": "skill_done", "skill": label, "findings_count": cnt})
+        return f"{skill_name}:{stype}:{wl}", out
+    except Exception as exc:
+        eq.put({"event": "skill_done", "skill": label, "findings_count": 0, "error": str(exc)})
+        return f"{skill_name}:{stype}:{wl}", {"error": str(exc), "skill": skill_name}
+
+
 def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = None):
     """
     Generator that runs the same scan as run_web_scan but yields progress events (NDJSON).
-    Yields: skill_start, skill_done per skill, then done with full report (including site_classification).
+    Skills within each phase run in PARALLEL for speed.
+    Yields: skill_start, skill_done per skill, then done with full report.
     """
+    import queue as _queue
+
     domain = target.replace("https://", "").replace("http://", "").split("/")[0]
     target_url = target if target.startswith("http") else f"https://{target}"
 
@@ -1705,18 +1740,34 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
             chain_validation_abuse_reason = "auto_crypto"
 
     results: dict[str, dict] = {}
+    eq = _queue.Queue()
 
-    for skill_name in skills_phase1:
-        yield {"event": "skill_start", "skill": skill_name}
-        try:
-            out = run_skill(skill_name, domain, target_url)
-            results[skill_name] = out
-            cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
-            yield {"event": "skill_done", "skill": skill_name, "findings_count": cnt}
-        except Exception as exc:
-            results[skill_name] = {"error": str(exc), "skill": skill_name}
-            yield {"event": "skill_done", "skill": skill_name, "findings_count": 0, "error": str(exc)}
+    def _drain_queue():
+        while not eq.empty():
+            try:
+                yield eq.get_nowait()
+            except _queue.Empty:
+                break
 
+    # Phase 1: run all independent skills in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, max(len(skills_phase1), 1))) as pool:
+        futures = {
+            pool.submit(_run_skill_phase, s, domain, target_url, eq): s
+            for s in skills_phase1
+        }
+        while futures:
+            done, _ = concurrent.futures.wait(futures, timeout=0.3, return_when=concurrent.futures.FIRST_COMPLETED)
+            yield from _drain_queue()
+            for f in done:
+                skill_name = futures.pop(f)
+                try:
+                    name, out = f.result(timeout=SKILL_TIMEOUT_SECONDS)
+                    results[name] = out
+                except (concurrent.futures.TimeoutError, Exception):
+                    pass
+        yield from _drain_queue()
+
+    # Phase 2: context-dependent skills (also parallel)
     if skills_phase2:
         ctx = {
             "client_surface_json": json.dumps(results["client_surface"]) if results.get("client_surface") and "error" not in results.get("client_surface", {}) else None,
@@ -1724,17 +1775,24 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
             "osint_json": json.dumps(results["osint"]) if results.get("osint") and "error" not in results.get("osint", {}) else None,
             "api_results_json": json.dumps(results["api_test"]) if results.get("api_test") and "error" not in results.get("api_test", {}) else None,
         }
-        for skill_name in skills_phase2:
-            yield {"event": "skill_start", "skill": skill_name}
-            try:
-                out = run_skill(skill_name, domain, target_url, ctx)
-                results[skill_name] = out
-                cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
-                yield {"event": "skill_done", "skill": skill_name, "findings_count": cnt}
-            except Exception as exc:
-                results[skill_name] = {"error": str(exc), "skill": skill_name}
-                yield {"event": "skill_done", "skill": skill_name, "findings_count": 0, "error": str(exc)}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, max(len(skills_phase2), 1))) as pool:
+            futures = {
+                pool.submit(_run_skill_phase, s, domain, target_url, eq, ctx): s
+                for s in skills_phase2
+            }
+            while futures:
+                done, _ = concurrent.futures.wait(futures, timeout=0.3, return_when=concurrent.futures.FIRST_COMPLETED)
+                yield from _drain_queue()
+                for f in done:
+                    skill_name = futures.pop(f)
+                    try:
+                        name, out = f.result(timeout=SKILL_TIMEOUT_SECONDS)
+                        results[name] = out
+                    except (concurrent.futures.TimeoutError, Exception):
+                        pass
+            yield from _drain_queue()
 
+    # Phase 3: variant probes (also parallel)
     if skills_phase3:
         ctx3 = {
             "client_surface_json": json.dumps(results["client_surface"]) if results.get("client_surface") and "error" not in results.get("client_surface", {}) else None,
@@ -1742,25 +1800,22 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
             "osint_json": json.dumps(results["osint"]) if results.get("osint") and "error" not in results.get("osint", {}) else None,
             "api_results_json": json.dumps(results["api_test"]) if results.get("api_test") and "error" not in results.get("api_test", {}) else None,
         }
-        for skill_name, stype, wl in skills_phase3:
-            label = f"{skill_name}:{stype}"
-            yield {"event": "skill_start", "skill": label}
-            try:
-                out = run_skill_variant(
-                    skill_name,
-                    domain,
-                    target_url,
-                    scan_type=stype,
-                    wordlist=wl,
-                    crawl_depth=3 if (skill_name == "web_vulns" and stype == "full") else 2,
-                    context=ctx3,
-                )
-                results[f"{skill_name}:{stype}:{wl}"] = out
-                cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
-                yield {"event": "skill_done", "skill": label, "findings_count": cnt}
-            except Exception as exc:
-                results[f"{skill_name}:{stype}:{wl}"] = {"error": str(exc), "skill": skill_name}
-                yield {"event": "skill_done", "skill": label, "findings_count": 0, "error": str(exc)}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, max(len(skills_phase3), 1))) as pool:
+            futures = {
+                pool.submit(_run_variant_phase, skill, stype, wl, domain, target_url, eq, ctx3): f"{skill}:{stype}:{wl}"
+                for (skill, stype, wl) in skills_phase3
+            }
+            while futures:
+                done, _ = concurrent.futures.wait(futures, timeout=0.3, return_when=concurrent.futures.FIRST_COMPLETED)
+                yield from _drain_queue()
+                for f in done:
+                    key = futures.pop(f)
+                    try:
+                        name, out = f.result(timeout=SKILL_TIMEOUT_SECONDS)
+                        results[name] = out
+                    except (concurrent.futures.TimeoutError, Exception):
+                        pass
+            yield from _drain_queue()
 
     findings = aggregate_findings(results)
     company_surfaces = aggregate_company_surfaces(results)
