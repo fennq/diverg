@@ -810,6 +810,9 @@ async function runTokenBundle() {
   try {
     const body = { mint, helius_api_key: key };
     if (wallet) body.wallet = wallet;
+    const skipX = document.getElementById('tokenBundleSkipX');
+    if (skipX && skipX.checked) body.include_x_intel = false;
+
     const r = await post('/api/investigation/solana-bundle', body);
     const html = _invTokenBundleSummaryHtml(r);
     _invSetOut('tokenBundleOut', 'tokenBundleSummary', 'tokenBundleRaw', 'inv-out-empty', html, r);

@@ -4,10 +4,13 @@ Multi-signal bundle / coordination heuristics for Solana wallets (Helius).
 Signals (all optional; best-effort from available API fields):
 1) Funding time sync — wallets whose first inbound SOL lands in the same time bucket (seconds).
 2) Same funding amount — first inbound SOL lamports match (exact keys, plus fuzzy merge within rel_tol).
-3) CEX-tagged funder — funder has exchange-like identity + optional time alignment.
-4) Shared inbound counterparties — same non-wallet sender appears as source for multiple wallets.
-5) Mint co-movement — token activity for the target mint in the same slot (sampled txs).
-6) Program overlap — Jaccard-like overlap of program IDs from parsed transactions.
+3) CEX-tagged funder — funder has exchange-like identity (tags/name/category).
+4) Parallel CEX cluster — two or more sampled wallets share the same CEX-tagged first funder.
+5) Privacy/mixer-tagged funder — Helius labels suggest mixer or privacy service.
+6) Privacy/mixer shared funder — multiple sampled wallets share that funder path.
+7) Shared inbound counterparties — same sender appears as source for multiple wallets.
+8) Mint co-movement — token activity for the target mint in the same slot (sampled txs).
+9) Program overlap — Jaccard-like overlap of program IDs from parsed transactions.
 
 Not financial advice; all scores are heuristics.
 """

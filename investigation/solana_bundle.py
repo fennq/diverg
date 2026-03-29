@@ -2,9 +2,13 @@
 Solana token bundle snapshot: top holders + shared-funder clustering (Helius), plus
 multi-signal coordination heuristics (solana_bundle_signals.compute_coordination_bundle).
 
+Also surfaces parallel CEX-funder clusters and privacy/mixer-tagged shared funders, optional
+X (Twitter) mention search per holder when X_API_BEARER_TOKEN or NITTER_BASE_URL is set
+(see x_bundle_intel.py; omitted when there are no hits).
+
 The Chrome extension runs the same logic client-side (extension/solana_bundle.js) with a
-user-supplied Helius key. This module remains for Python callers (scripts, investigations)
-with HELIUS_API_KEY in the environment.
+user-supplied Helius key (no X from the extension). This module is for Python callers and
+the dashboard API with HELIUS_API_KEY in the environment.
 """
 from __future__ import annotations
 

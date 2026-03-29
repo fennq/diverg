@@ -370,7 +370,11 @@
               <input type="text" id="tokenMint" placeholder="Token mint (SPL)" class="input" style="font-family:var(--mono)">
               <input type="text" id="tokenSeedWallet" placeholder="Optional: wallet to focus cluster / % supply" class="input" style="font-family:var(--mono); margin-top:0.5rem">
             </div>
-            <p class="inv-hint">Same engine as the Chrome extension: risk / coordination score, cluster size &amp; % of supply (shared funder), top holders, Helius identities.</p>
+            <label class="inv-check" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;font-size:0.85rem;color:var(--muted)">
+              <input type="checkbox" id="tokenBundleSkipX">
+              Skip X mention search (faster; otherwise server uses X API / Nitter when configured)
+            </label>
+            <p class="inv-hint">Risk / coordination score, shared-funder cluster, parallel CEX and privacy-mixer funder patterns, Helius labels, optional X posts that mention a holder address.</p>
             <button class="btn btn-secondary" onclick="runTokenBundle()">Analyze token bundle</button>
             <div id="tokenBundleOut" class="inv-out inv-out-empty">
               <div class="inv-summary" id="tokenBundleSummary">Run an analysis to see risk score, cluster %, and wallets.</div>
