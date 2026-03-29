@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="380" viewBox="0 0 900 380">
+  <defs>
+    <marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#6e7681"/>
+    </marker>
+  </defs>
+  <rect width="900" height="380" fill="#0d1117"/>
+
+  <text x="450" y="28" text-anchor="middle" fill="#e6edf3" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="bold">Scan diff - Diverg</text>
+  <text x="450" y="46" text-anchor="middle" fill="#8b949e" font-family="Arial, Helvetica, sans-serif" font-size="10">Same finding shape as console + orchestrator JSON</text>
+
+  <rect x="40" y="72" width="200" height="64" rx="8" fill="#161b22" stroke="#58a6ff" stroke-width="2"/>
+  <text x="140" y="98" text-anchor="middle" fill="#e6edf3" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="bold">Console DB</text>
+  <text x="140" y="116" text-anchor="middle" fill="#8b949e" font-family="Arial, Helvetica, sans-serif" font-size="10">scans.report_json</text>
+  <text x="140" y="130" text-anchor="middle" fill="#8b949e" font-family="Arial, Helvetica, sans-serif" font-size="10">findings[]</text>
+
+  <rect x="40" y="168" width="200" height="56" rx="8" fill="#161b22" stroke="#30363d" stroke-width="2"/>
+  <text x="140" y="194" text-anchor="middle" fill="#e6edf3" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="bold">reports/*.json</text>
+  <text x="140" y="212" text-anchor="middle" fill="#8b949e" font-family="Arial, Helvetica, sans-serif" font-size="10">CLI orchestrator saves</text>
+
+  <rect x="320" y="108" width="240" height="88" rx="10" fill="#161b22" stroke="#3fb950" stroke-width="2"/>
+  <text x="440" y="138" text-anchor="middle" fill="#e6edf3" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="bold">scripts/scan_diff.py</text>
+  <text x="440" y="156" text-anchor="middle" fill="#8b949e" font-family="Arial, Helvetica, sans-serif" font-size="10">Pick latest 2 by target</text>
+  <text x="440" y="172" text-anchor="middle" fill="#8b949e" font-family="Arial, Helvetica, sans-serif" font-size="10">diff_findings()</text>
+  <text x="440" y="188" text-anchor="middle" fill="#8b949e" font-family="Arial, Helvetica, sans-serif" font-size="10">title + url + category</text>
+
+  <rect x="640" y="72" width="220" height="152" rx="8" fill="#161b22" stroke="#a371f7" stroke-width="2"/>
+  <text x="750" y="98" text-anchor="middle" fill="#e6edf3" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="bold">Output</text>
+  <text x="750" y="118" text-anchor="middle" fill="#8b949e" font-family="Arial, Helvetica, sans-serif" font-size="10">new</text>
+  <text x="750" y="134" text-anchor="middle" fill="#8b949e" font-family="Arial, Helvetica, sans-serif" font-size="10">fixed</text>
+  <text x="750" y="150" text-anchor="middle" fill="#8b949e" font-family="Arial, Helvetica, sans-serif" font-size="10">changed severity</text>
+  <text x="750" y="166" text-anchor="middle" fill="#8b949e" font-family="Arial, Helvetica, sans-serif" font-size="10">unchanged</text>
+  <text x="750" y="190" text-anchor="middle" fill="#8b949e" font-family="Arial, Helvetica, sans-serif" font-size="10">terminal or -o .md</text>
+
+  <text x="450" y="300" text-anchor="middle" fill="#6e7681" font-family="Arial, Helvetica, sans-serif" font-size="9">python3 scripts/scan_diff.py --target example.com</text>
+
+  <g stroke="#6e7681" stroke-width="1.5" fill="none" marker-end="url(#a)">
+    <line x1="240" y1="104" x2="318" y2="138"/>
+    <line x1="240" y1="196" x2="318" y2="166"/>
+    <line x1="558" y1="152" x2="638" y2="148"/>
+  </g>
+</svg>
