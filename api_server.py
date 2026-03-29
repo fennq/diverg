@@ -1086,6 +1086,11 @@ def _enrich_solana_bundle_payload(raw: dict) -> dict:
     raw["cluster_wallet_count"] = len(raw.get("focus_cluster_wallets") or [])
     reasons = bs.get("coordination_reasons") or []
     raw["risk_signals"] = reasons if isinstance(reasons, list) else []
+    fc = bs.get("funding_cluster_bridge_mixer") or {}
+    fc_lines = fc.get("risk_lines") if isinstance(fc, dict) else None
+    if isinstance(fc_lines, list) and fc_lines:
+        extra = [str(x) for x in fc_lines[:6] if x]
+        raw["risk_signals"] = list(raw["risk_signals"]) + [f"bridge_mixer: {x}" for x in extra]
     if coord_f >= 50 or cp >= 35:
         verdict = "Elevated"
     elif coord_f >= 28 or cp >= 18:

@@ -19,10 +19,12 @@ Not financial advice; all scores are heuristics.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, Optional
 
 from bundle_intel_overrides import load_bundle_intel_overrides
@@ -896,6 +898,102 @@ def _programs_from_enhanced(tx: dict) -> set[str]:
                 _from_instruction_list(block.get("instructions"))
     return progs
 
+_BRIDGE_JSON = Path(__file__).resolve().parent / "bridge_programs_solana.json"
+_bridge_pid_to_label: dict[str, str] = {}
+
+
+def load_bridge_program_allowlist() -> dict[str, str]:
+    global _bridge_pid_to_label
+    if _bridge_pid_to_label:
+        return dict(_bridge_pid_to_label)
+    m: dict[str, str] = {}
+    try:
+        if _BRIDGE_JSON.exists():
+            raw = json.loads(_BRIDGE_JSON.read_text(encoding="utf-8"))
+            if isinstance(raw, list):
+                for row in raw:
+                    if not isinstance(row, dict):
+                        continue
+                    pid = row.get("id")
+                    lbl = row.get("label") or row.get("category") or "bridge"
+                    if isinstance(pid, str) and pid:
+                        m[pid] = str(lbl)[:120]
+    except Exception:
+        pass
+    _bridge_pid_to_label = m
+    return dict(m)
+
+
+def build_funding_cluster_bridge_mixer(
+    *,
+    program_sets: dict[str, set[str]],
+    lookup_wallets: list[str],
+    privacy_mixer_funding_strict: list[dict[str, Any]],
+    funder_mixer_flags: dict[str, bool],
+) -> dict[str, Any]:
+    allow = load_bridge_program_allowlist()
+    risk_lines: list[str] = []
+    wallet_hits: list[dict[str, Any]] = []
+    bridge_touch_wallets: list[str] = []
+    for w in lookup_wallets:
+        progs = program_sets.get(w) or set()
+        hits = []
+        for pid in progs:
+            if pid in allow:
+                hits.append({"program_id": pid, "label": allow[pid]})
+        if hits:
+            bridge_touch_wallets.append(w)
+            wallet_hits.append({
+                "wallet": w,
+                "bridge_program_hits": hits[:8],
+                "note": "Bridge-related program observed in sampled Helius enhanced txs (not proof of cross-chain wash).",
+            })
+    if bridge_touch_wallets:
+        risk_lines.append(
+            f"{len(bridge_touch_wallets)} sampled wallet(s) touched known bridge-program IDs in recent tx sample."
+        )
+    mixer_wallet_count = 0
+    for grp in privacy_mixer_funding_strict or []:
+        try:
+            mixer_wallet_count = max(mixer_wallet_count, int(grp.get("wallet_count") or 0))
+        except (TypeError, ValueError):
+            continue
+    if mixer_wallet_count >= 2:
+        risk_lines.append(
+            "Privacy/mixer-tagged shared funder cluster (strict): multiple wallets share tagged funder path."
+        )
+    elif any(funder_mixer_flags.values()):
+        risk_lines.append("At least one sampled funder has mixer/privacy-style tags (Helius identity).")
+    if bridge_touch_wallets and (mixer_wallet_count >= 2 or any(funder_mixer_flags.values())):
+        risk_lines.append(
+            "Bridge-touched wallets and mixer-tagged funding paths both appear in sample — manual trace recommended."
+        )
+    by_prog: dict[str, list[str]] = defaultdict(list)
+    for w in bridge_touch_wallets:
+        for pid in (program_sets.get(w) or set()):
+            if pid in allow:
+                by_prog[pid].append(w)
+    shared_program_hits = [
+        {
+            "program_id": pid,
+            "label": allow.get(pid, ""),
+            "wallet_count": len(set(ws)),
+            "wallets_sample": sorted(set(ws))[:12],
+        }
+        for pid, ws in by_prog.items()
+        if len(set(ws)) >= 2
+    ]
+    return {
+        "bridge_adjacent_wallet_count": len(set(bridge_touch_wallets)),
+        "bridge_adjacent_wallets": sorted(set(bridge_touch_wallets))[:40],
+        "wallet_bridge_hits": wallet_hits[:30],
+        "shared_bridge_programs_multi_wallet": shared_program_hits[:15],
+        "strict_mixer_cluster_max_wallets": mixer_wallet_count,
+        "any_mixer_tagged_funder": any(funder_mixer_flags.values()),
+        "risk_lines": risk_lines,
+    }
+
+
 
 def _enhanced_tx_type_str(tx: dict) -> Optional[str]:
     for k in ("type", "transactionType", "source", "txType"):
@@ -1199,6 +1297,20 @@ def compute_coordination_bundle(
         score += min(15, 5 + p_overlap[0]["program_jaccard"] * 40)
         reasons.append("program_fingerprint_overlap")
 
+
+    funding_cluster_bridge_mixer = build_funding_cluster_bridge_mixer(
+        program_sets=program_sets,
+        lookup_wallets=list(lookup_wallets),
+        privacy_mixer_funding_strict=privacy_mixer_funding[:12],
+        funder_mixer_flags=funder_mixer_flags,
+    )
+    if funding_cluster_bridge_mixer.get("shared_bridge_programs_multi_wallet"):
+        score += min(8.0, 3.0 + 2.0 * len(funding_cluster_bridge_mixer["shared_bridge_programs_multi_wallet"]))
+        reasons.append("bridge_program_multi_wallet_sample")
+    elif funding_cluster_bridge_mixer.get("bridge_adjacent_wallet_count", 0) >= 2:
+        score += min(5.0, 2.0 + 0.5 * funding_cluster_bridge_mixer["bridge_adjacent_wallet_count"])
+        reasons.append("bridge_program_touched_multiple_holders")
+
     score = round(min(100.0, score), 2)
 
     archetype_hints: list[str] = []
@@ -1229,6 +1341,9 @@ def compute_coordination_bundle(
         archetype_hints.append(
             "Enhanced tx types: sampled mint-touch transactions show similar Helius type labels across wallets."
         )
+    if funding_cluster_bridge_mixer.get("risk_lines"):
+        for line in funding_cluster_bridge_mixer["risk_lines"][:4]:
+            archetype_hints.append(line)
 
     tier_export_keys = sorted(sample_addrs | set(funders) | set(root_addrs))
 
@@ -1252,6 +1367,7 @@ def compute_coordination_bundle(
         "mint_co_movement": {"same_slot_groups": co_move_pairs[:15], "enhanced": enhanced_sample},
         "enhanced_tx_type_overlap_pairs": type_overlap[:20],
         "program_overlap_pairs": p_overlap[:20],
+        "funding_cluster_bridge_mixer": funding_cluster_bridge_mixer,
         "coordination_score": score,
         "coordination_reasons": reasons,
         "params": {

@@ -30,12 +30,14 @@ import sys
 import time
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
+from typing import Any
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "investigation"))
 from stealth import get_session
 
 SESSION = get_session()
@@ -44,7 +46,91 @@ RUN_BUDGET_SEC = 55
 SOLSCAN_BASE = "https://pro-api.solscan.io/v2.0"
 ARKHAM_BASE = "https://api.arkhamintelligence.com"
 ARKHAM_INTEL_BASE = "https://api.arkm.com"  # Intel API: batch labels, counterparties, flow
-ETHERSCAN_BASE = "https://api.etherscan.io/api"
+
+# EVM explorer: prefer Etherscan API v2 multichain (single ETHERSCAN_API_KEY). Fallback BscScan for BSC.
+EVM_CHAIN_META: dict[str, tuple[int, str]] = {
+    "ethereum": (1, "https://etherscan.io"),
+    "bsc": (56, "https://bscscan.com"),
+    "polygon": (137, "https://polygonscan.com"),
+    "base": (8453, "https://basescan.org"),
+    "arbitrum": (42161, "https://arbiscan.io"),
+    "optimism": (10, "https://optimistic.etherscan.io"),
+    "avalanche": (43114, "https://snowtrace.io"),
+}
+ETHERSCAN_V2_API = "https://api.etherscan.io/v2/api"
+ETHERSCAN_BASE = "https://api.etherscan.io/api"  # legacy v1
+
+def _normalize_evm_chain_slug(chain: str) -> str:
+    c = (chain or "solana").strip().lower()
+    aliases = {"bnb": "bsc", "matic": "polygon", "arb": "arbitrum", "op": "optimism", "avax": "avalanche", "eth": "ethereum"}
+    return aliases.get(c, c)
+
+
+def _is_evm_chain(chain: str) -> bool:
+    return _normalize_evm_chain_slug(chain) in EVM_CHAIN_META
+
+
+def _evm_v2_get(session: requests.Session, chain_slug: str, params: dict, api_key: str) -> dict | None:
+    slug = _normalize_evm_chain_slug(chain_slug)
+    if slug not in EVM_CHAIN_META:
+        return None
+    chain_id, _ = EVM_CHAIN_META[slug]
+    q = {"chainid": chain_id, "apikey": api_key, **params}
+    try:
+        r = session.get(ETHERSCAN_V2_API, params=q, timeout=TIMEOUT)
+        if r.ok:
+            j = r.json()
+            if j.get("status") == "1" and "result" in j:
+                return j
+    except Exception:
+        pass
+    if slug == "bsc":
+        bkey = (os.environ.get("BSCSCAN_API_KEY") or "").strip()
+        if bkey:
+            try:
+                q2 = {**params, "apikey": bkey}
+                r2 = session.get("https://api.bscscan.com/api", params=q2, timeout=TIMEOUT)
+                if r2.ok:
+                    j2 = r2.json()
+                    if j2.get("status") == "1" and "result" in j2:
+                        return j2
+            except Exception:
+                pass
+    return None
+
+
+def _evm_token_transfers(session: requests.Session, token_contract: str, chain_slug: str, api_key: str, limit: int = 20) -> list:
+    j = _evm_v2_get(
+        session,
+        chain_slug,
+        {"module": "account", "action": "tokentx", "contractaddress": token_contract, "page": 1, "offset": limit, "sort": "asc"},
+        api_key,
+    )
+    if not j or "result" not in j:
+        return []
+    res = j["result"]
+    return res if isinstance(res, list) else []
+
+
+def _evm_account_txlist(session: requests.Session, address: str, chain_slug: str, api_key: str, page_size: int = 30) -> list:
+    j = _evm_v2_get(
+        session,
+        chain_slug,
+        {"module": "account", "action": "txlist", "address": address, "page": 1, "offset": page_size, "sort": "desc"},
+        api_key,
+    )
+    if not j or "result" not in j:
+        return []
+    res = j["result"]
+    return res if isinstance(res, list) else []
+
+
+def _explorer_host_for_chain(chain_slug: str) -> str:
+    slug = _normalize_evm_chain_slug(chain_slug)
+    if slug in EVM_CHAIN_META:
+        return EVM_CHAIN_META[slug][1]
+    return "https://etherscan.io"
+
 
 # Platform identifiers for launchpad / token-creation sites
 LAUNCHPAD_DOMAINS = (
@@ -113,6 +199,7 @@ class BlockchainInvestigationReport:
     deployer_address: str | None = None  # set in run() for crime report
     # Flow graph for Diverg report diagram: nodes (id, label, type), edges (from, to, amount, unit, date_str, count)
     flow_graph: dict | None = None  # {"nodes": [...], "edges": [...]}
+    cross_chain: dict | None = None  # registry + CoinGecko hints
 
 
 def _over_budget(start: float) -> bool:
@@ -658,8 +745,10 @@ def _explorer_url_address(address: str, chain: str = "solana") -> str:
     if not (address or "").strip():
         return ""
     addr = address.strip()
-    if (chain or "solana").lower() in ("eth", "ethereum"):
-        return f"https://etherscan.io/address/{addr}"
+    ch = (chain or "solana").lower()
+    if _is_evm_chain(ch):
+        host = _explorer_host_for_chain(ch)
+        return f"{host}/address/{addr}"
     return f"https://solscan.io/account/{addr}"
 
 
@@ -668,8 +757,10 @@ def _explorer_url_tx(tx_hash: str, chain: str = "solana") -> str:
     if not (tx_hash or "").strip():
         return ""
     h = tx_hash.strip()
-    if (chain or "solana").lower() in ("eth", "ethereum"):
-        return f"https://etherscan.io/tx/{h}"
+    ch = (chain or "solana").lower()
+    if _is_evm_chain(ch):
+        host = _explorer_host_for_chain(ch)
+        return f"{host}/tx/{h}"
     return f"https://solscan.io/tx/{h}"
 
 
@@ -970,10 +1061,15 @@ def run(
         platform_type = "launchpad"
     if (crypto_relation or "").strip() in ("launchpad", "exchange"):
         platform_type = (crypto_relation or "").strip()
+    _chain_raw = (chain or "solana").lower().strip()
+    if _is_evm_chain(_chain_raw):
+        _chain_store = _normalize_evm_chain_slug(_chain_raw)
+    else:
+        _chain_store = _chain_raw[:12]
     report = BlockchainInvestigationReport(
         target_url=target_url,
         platform_type=platform_type,
-        chain=(chain or "solana").lower()[:10],
+        chain=_chain_store,
         crypto_relation=(crypto_relation or "").strip() or None,
     )
     report.deployer_address = deployer_address
@@ -1041,20 +1137,20 @@ def run(
     etherscan_key = (os.environ.get("ETHERSCAN_API_KEY") or "").strip()
     arkham_key = (os.environ.get("ARKHAM_API_KEY") or "").strip()
 
-    if report.chain == "ethereum" and etherscan_key and not _over_budget(run_start):
+    if _is_evm_chain(report.chain) and etherscan_key and not _over_budget(run_start):
         report.on_chain_used = True
-        # Sniper across launches: early token transfers per token, aggregate by "to"
         transfers_by_token = {}
+        ch_slug = report.chain
         for token in (report.tokens_discovered or [])[:5]:
             if _over_budget(run_start):
                 break
             if not token.startswith("0x") or len(token) != 42:
                 continue
-            txs = _etherscan_token_transfers(SESSION, token, etherscan_key, limit=20)
+            txs = _evm_token_transfers(SESSION, token, ch_slug, etherscan_key, limit=20)
             if txs:
                 transfers_by_token[token] = [{"to": t.get("to"), "from": t.get("from"), "value": t.get("value"), "timeStamp": t.get("timeStamp")} for t in txs]
-                for t in txs:
-                    edge = _normalize_transfer_to_edge(t, token_symbol="ETH", chain="ethereum")
+                for txrow in txs:
+                    edge = _normalize_transfer_to_edge(txrow, token_symbol="TOKEN", chain=ch_slug)
                     if edge:
                         flow_edges.append(edge)
         if transfers_by_token:
@@ -1389,7 +1485,48 @@ def run(
         except Exception:
             report.flow_graph = None
 
+    try:
+        from cross_chain_hints import lookup_evm_token, lookup_solana_mint
+        xc_sources: list[dict[str, Any]] = []
+        for tok in (report.tokens_discovered or [])[:5]:
+            if not tok:
+                continue
+            if tok.startswith("0x") and len(tok) == 42 and _is_evm_chain(report.chain):
+                r = lookup_evm_token(report.chain, tok)
+                if r.get("candidates"):
+                    xc_sources.append(r)
+            elif len(tok) >= 32 and report.chain == "solana":
+                r = lookup_solana_mint(tok)
+                if r.get("candidates"):
+                    xc_sources.append(r)
+        if xc_sources:
+            report.cross_chain = {"lookups": xc_sources, "note": "Investigative hints only; verify on explorers."}
+            titles = []
+            for block in xc_sources:
+                for c in (block.get("candidates") or [])[:4]:
+                    fc = c.get("foreign_chain", "?")
+                    fa = (c.get("foreign_address") or "")[:18]
+                    titles.append(f"{fc} {fa}… ({c.get('confidence', '')})")
+            if titles:
+                report.findings.append(Finding(
+                    title="Cross-chain asset hints [REVIEW]",
+                    severity="Info",
+                    url=target_url,
+                    category="Blockchain / Cross-chain",
+                    evidence="; ".join(titles[:6]),
+                    impact="Token may have bridged or wrapped counterparts elsewhere; confirms nothing about misconduct.",
+                    remediation="Verify mappings on official bridge registries and destination-chain explorers.",
+                    confidence="medium",
+                    source="cross_chain_hints",
+                    proof="; ".join(titles[:3]),
+                    verified=False,
+                ))
+    except Exception as _xce:
+        report.cross_chain = {"error": str(_xce)}
+
     report.crime_report = _build_crime_report(report)
+    if report.cross_chain and isinstance(report.crime_report, dict):
+        report.crime_report["cross_chain"] = report.cross_chain
 
     return json.dumps(asdict(report), indent=2)
 

@@ -1,0 +1,8 @@
+[
+  {"id": "worm2kegkjF12nFMY5H8j1NYbfV52Q3AARVjVzsJUJ3", "label": "Wormhole Core Bridge", "category": "wormhole"},
+  {"id": "wormDTUJ6BPNq26feREzEhE3dxARYxkSG6AQUvU4C", "label": "Wormhole Token Bridge", "category": "wormhole"},
+  {"id": "CCTPiPYPc6AsJuwueEnWgSgucKXD2Ud33HKyB3YEWg", "label": "Wormhole / Circle CCTP", "category": "cctp"},
+  {"id": "DE1bukY7eBU6HpLCk21cEYg2fHS3EFaHQaEPxfXGvko", "label": "deBridge DLN (verify on explorers)", "category": "debridge"},
+  {"id": "QNJeeG4rFi3P39jqGPaGWdCN9qe8Eq1ptx2YD3k6von", "label": "Allbridge (verify deployment)", "category": "allbridge"},
+  {"id": "MayanMi45tVFCqFC5p8TMYmEkL8ti1UX8Gs2LMFKGDF", "label": "Mayan cross-chain facilitator", "category": "mayan"}
+]

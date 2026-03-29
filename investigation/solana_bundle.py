@@ -696,6 +696,21 @@ def run_bundle_snapshot(
             "error": str(e),
         }
 
+
+    cross_chain: Optional[dict[str, Any]] = None
+    try:
+        from cross_chain_hints import lookup_solana_mint
+
+        _sym = (token_metadata or {}).get("symbol") if isinstance(token_metadata, dict) else None
+        _nm = (token_metadata or {}).get("name") if isinstance(token_metadata, dict) else None
+        cross_chain = lookup_solana_mint(
+            mint, token_symbol=_sym if isinstance(_sym, str) else None,
+            token_name=_nm if isinstance(_nm, str) else None,
+        )
+    except Exception as _xc_err:
+        cross_chain = {"mint": mint, "candidates": [], "sources": [], "error": str(_xc_err)}
+
+
     return {
         "ok": True,
         "mint": mint,
@@ -729,5 +744,6 @@ def run_bundle_snapshot(
         },
         "disclaimer": disclaimer,
         "pnl_note": "PnL not computed here; use an explorer or portfolio tool for full buy/sell history.",
+        "cross_chain": cross_chain,
         "bundle_signals": bundle_signals,
     }
