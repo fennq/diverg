@@ -50,18 +50,27 @@ document.querySelectorAll('.nav-item[data-page]').forEach(el =>
   el.addEventListener('click', () => navigate(el.dataset.page)));
 
 // ── Scope handling ─────────────────────────────────────────────────────────
-document.querySelectorAll('.scope-opt').forEach(opt =>
-  opt.addEventListener('click', () => {
-    State.scope = opt.dataset.scope;
-    document.querySelectorAll('.scope-opt').forEach(o => o.classList.remove('active'));
-    opt.classList.add('active');
-  }));
+function applyScope(scope) {
+  const next = (scope || '').toLowerCase();
+  if (!next) return;
+  State.scope = next;
+  document.querySelectorAll('.scope-opt').forEach(o => {
+    o.classList.toggle('active', (o.dataset.scope || '').toLowerCase() === next);
+  });
+  document.querySelectorAll('.pill[data-scope]').forEach(p => {
+    p.classList.toggle('active', (p.dataset.scope || '').toLowerCase() === next);
+  });
+}
 
 function setQuickScope(el) {
-  State.scope = el.dataset.scope;
-  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
-  el.classList.add('active');
+  applyScope(el?.dataset?.scope || '');
 }
+
+document.querySelectorAll('.scope-opt').forEach(opt =>
+  opt.addEventListener('click', () => applyScope(opt.dataset.scope || '')));
+
+document.querySelectorAll('.pill[data-scope]').forEach(p =>
+  p.addEventListener('click', () => applyScope(p.dataset.scope || '')));
 
 // ── Toast ─────────────────────────────────────────────────────────────────
 function toast(msg, type = 'ok') {
@@ -149,6 +158,22 @@ function shortUrl(u) {
   } catch { return u; }
 }
 
+function fmtTs(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleString(); } catch { return String(iso); }
+}
+
+function provChip(meta) {
+  const host = shortUrl(meta?.target_url || 'target');
+  const when = ago(meta?.scanned_at);
+  const sid = String(meta?.scan_id || '').slice(0, 8);
+  return `<div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-top:0.35rem">
+    <span class="badge unknown" style="font-size:0.65rem">${esc(host)}</span>
+    <span class="badge unknown" style="font-size:0.65rem">${esc(when)}</span>
+    ${sid ? `<span class="badge unknown" style="font-size:0.65rem" title="${esc(String(meta.scan_id))}">scan ${esc(sid)}</span>` : ''}
+  </div>`;
+}
+
 function scanRow(s) {
   const cls = riskClass(s.risk_verdict);
   return `
@@ -176,7 +201,10 @@ async function loadHome() {
     } else {
       recent.innerHTML = `<div class="scan-list">${s.recent_scans.map(scanRow).join('')}</div>`;
     }
-  } catch { document.getElementById('statScans').textContent = '—'; }
+  } catch (e) {
+    document.getElementById('statScans').textContent = '—';
+    toast('Failed to load home stats: ' + (e?.message || 'unknown error'), 'err');
+  }
 }
 
 // ── QUICK LAUNCH (Home) ────────────────────────────────────────────────────
@@ -238,6 +266,10 @@ async function quickLaunch() {
             }
           }
           if (e.event === 'done') lastReport = e.report;
+          if (e.event === 'error') {
+            pText.textContent = 'Scan error: ' + (e.error || 'unknown');
+            toast('Scan error: ' + (e.error || 'unknown'), 'err');
+          }
         } catch {}
       }
     }
@@ -247,9 +279,11 @@ async function quickLaunch() {
       State.scanId = lastReport.id;
       pText.textContent = 'Complete — ' + (lastReport.findings?.length || 0) + ' findings';
       toast('Scan complete', 'ok');
+      const shouldAutoNav = document.getElementById('toggleAutoNav')?.checked;
       setTimeout(() => {
         box.classList.remove('show');
-        navigate('results', lastReport);
+        if (shouldAutoNav) navigate('results', lastReport);
+        else loadHome();
       }, 600);
     } else {
       pText.textContent = 'Finished';
@@ -326,6 +360,10 @@ async function launchScan() {
             lastReport = e.report;
             (lastReport.findings || []).forEach(f => addLiveFinding(f));
           }
+          if (e.event === 'error') {
+            document.getElementById('progressText').textContent = 'Scan error: ' + (e.error || 'unknown');
+            toast('Scan error: ' + (e.error || 'unknown'), 'err');
+          }
         } catch {}
       }
     }
@@ -371,18 +409,12 @@ function addLiveFinding(f) {
 // ── ANALYTICS ──────────────────────────────────────────────────────────────
 async function loadAnalytics() {
   try {
-    const s = await get('/api/stats');
-    const history = await get('/api/history?limit=100');
-    const scans = history.scans || [];
-
-    // Use counts from the list data (not findings array)
-    let critical = 0, high = 0, medium = 0, low = 0;
-    scans.forEach(scan => {
-      critical += scan.critical || 0;
-      high += scan.high || 0;
-      medium += scan.medium || 0;
-      low += scan.low || 0;
-    });
+    const summary = await get('/api/analytics/summary?limit=120');
+    const sev = summary.severity || {};
+    const critical = sev.critical || 0;
+    const high = sev.high || 0;
+    const medium = sev.medium || 0;
+    const low = sev.low || 0;
     const max = Math.max(critical, high, medium, low, 1);
     document.getElementById('valCritical').textContent = critical;
     document.getElementById('barCritical').style.width = (critical / max * 100) + '%';
@@ -394,7 +426,7 @@ async function loadAnalytics() {
     document.getElementById('barLow').style.width = (low / max * 100) + '%';
 
     // Donut chart
-    const avgRisk = s.avg_risk_score || 0;
+    const avgRisk = summary.avg_risk_score || 0;
     document.getElementById('donutValue').textContent = avgRisk > 0 ? avgRisk : '—';
     const donut = document.getElementById('riskDonut');
     if (avgRisk > 0) {
@@ -402,21 +434,12 @@ async function loadAnalytics() {
       donut.style.background = `conic-gradient(var(--red) 0% ${pct}%, var(--elevated) ${pct}% 100%)`;
     }
 
-    // Trend chart (last 30 days)
-    const days = 30;
-    const counts = new Array(days).fill(0);
-    const labels = [];
-    const today = new Date();
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      labels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-    }
-    scans.forEach(scan => {
-      if (!scan.created_at) return;
-      const d = new Date(scan.created_at);
-      const daysAgo = Math.floor((today - d) / (1000 * 60 * 60 * 24));
-      if (daysAgo >= 0 && daysAgo < days) counts[days - 1 - daysAgo]++;
+    // Trend chart (last 30 days) from scanned_at-backed API buckets
+    const act = Array.isArray(summary.activity_30d) ? summary.activity_30d : [];
+    const counts = act.map(x => Number(x.count || 0));
+    const labels = act.map(x => {
+      try { return new Date(x.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); }
+      catch { return String(x.date || ''); }
     });
     const maxCount = Math.max(...counts, 1);
     document.getElementById('trendBars').innerHTML = counts.map(c =>
@@ -424,24 +447,11 @@ async function loadAnalytics() {
     ).join('');
     document.getElementById('trendLabels').innerHTML = `
       <span>${labels[0]}</span>
-      <span>${labels[Math.floor(days / 2)]}</span>
-      <span>${labels[days - 1]}</span>
+      <span>${labels[Math.floor(labels.length / 2)] || ''}</span>
+      <span>${labels[labels.length - 1] || ''}</span>
     `;
 
-    // Top categories — fetch full reports for scans with findings
-    const cats = {};
-    for (const scan of scans) {
-      if ((scan.total || 0) > 0) {
-        try {
-          const full = await get(`/api/history/${scan.id}`);
-          (full.report?.findings || []).forEach(f => {
-            const cat = f.category || 'Other';
-            cats[cat] = (cats[cat] || 0) + 1;
-          });
-        } catch {}
-      }
-    }
-    const sorted = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    const sorted = (summary.top_categories || []).slice(0, 5).map(x => [x.category, x.count]);
     const topMax = sorted[0]?.[1] || 1;
     const catsEl = document.getElementById('topCategories');
     if (!sorted.length) {
@@ -456,7 +466,7 @@ async function loadAnalytics() {
       `).join('');
     }
   } catch (e) {
-    console.error('Analytics load failed:', e);
+    toast('Analytics load failed: ' + (e?.message || 'unknown error'), 'err');
   }
 }
 
@@ -501,27 +511,19 @@ async function deleteScan(id) {
 // ── FINDINGS ────────────────────────────────────────────────────────────────
 async function loadFindings() {
   try {
-    const data = await get('/api/history?limit=100');
-    const all = [];
-    for (const s of data.scans || []) {
-      if ((s.total || 0) > 0) {
-        try {
-          const full = await get(`/api/history/${s.id}`);
-          (full.report?.findings || []).forEach(f => all.push(f));
-        } catch {}
-      }
-    }
-    State.findings = all;
+    const data = await get('/api/findings?scan_limit=120&finding_limit=2000');
+    const all = Array.isArray(data.findings) ? data.findings : [];
+    State.findings = all.map(x => x.finding || {}).filter(Boolean);
     const el = document.getElementById('findingsList');
     if (!all.length) {
       el.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">No findings</div><div class="empty-d">Run a scan to see vulnerability findings</div></div>`;
     } else {
-      el.innerHTML = all.map(findingRow).join('');
+      el.innerHTML = all.map(x => findingRow(x.finding || {}, x)).join('');
     }
-  } catch { toast('Failed to load findings', 'err'); }
+  } catch (e) { toast('Failed to load findings: ' + (e?.message || 'unknown error'), 'err'); }
 }
 
-function findingRow(f) {
+function findingRow(f, meta) {
   const s = sevClass(f.severity);
   return `
     <div class="finding">
@@ -535,6 +537,7 @@ function findingRow(f) {
         ${f.impact ? `<p style="margin-bottom:0.5rem; color:var(--muted); font-size:0.8125rem"><strong style="color:var(--text)">Impact:</strong> ${esc(f.impact)}</p>` : ''}
         ${f.evidence ? `<pre style="margin-top:0.5rem; padding:0.75rem; background:var(--elevated); border-radius:4px; font-size:0.75rem; overflow-x:auto; white-space:pre-wrap; word-break:break-all">${esc(String(f.evidence).substring(0, 500))}</pre>` : ''}
         ${f.remediation ? `<p style="margin-top:0.5rem; color:var(--muted); font-size:0.8125rem"><strong style="color:var(--text)">Fix:</strong> ${esc(f.remediation)}</p>` : ''}
+        ${meta ? provChip(meta) : ''}
       </div>
     </div>`;
 }
@@ -575,28 +578,24 @@ function showResults(report) {
 // ── ATTACK PATHS ───────────────────────────────────────────────────────────
 async function loadAttackPaths() {
   try {
-    const data = await get('/api/history?limit=100');
-    const paths = [];
-    for (const s of data.scans || []) {
-      try {
-        const full = await get(`/api/history/${s.id}`);
-        (full.report?.attack_paths || []).forEach(p => paths.push(p));
-      } catch {}
-    }
+    const data = await get('/api/attack-paths?scan_limit=120&path_limit=1200');
+    const paths = Array.isArray(data.attack_paths) ? data.attack_paths : [];
     const el = document.getElementById('attackPathsList');
     if (!paths.length) {
       el.innerHTML = `<div class="empty"><div class="empty-t">No attack paths discovered</div><div class="empty-d">Run a full scan to find chained vulnerabilities</div></div>`;
     } else {
       el.innerHTML = `<div class="scan-list">${paths.map(p => {
-        const steps = Array.isArray(p.steps) ? p.steps : (p.chain || p.path || []);
+        const ap = p.attack_path || {};
+        const steps = Array.isArray(ap.steps) ? ap.steps : (ap.chain || ap.path || []);
         return `<div style="padding:1rem 1.25rem; border-bottom:1px solid var(--border)">
-          <div style="font-weight:500; margin-bottom:0.375rem">${esc(p.title || p.name || 'Attack Path')}</div>
+          <div style="font-weight:500; margin-bottom:0.375rem">${esc(ap.title || ap.name || 'Attack Path')}</div>
           <div style="font-size:0.75rem; color:var(--dim); font-family:var(--mono)">${steps.map(s => esc(String(s))).join(' → ')}</div>
-          ${p.impact ? `<div style="font-size:0.75rem; color:var(--muted); margin-top:0.25rem">${esc(p.impact)}</div>` : ''}
+          ${ap.impact ? `<div style="font-size:0.75rem; color:var(--muted); margin-top:0.25rem">${esc(ap.impact)}</div>` : ''}
+          ${provChip(p)}
         </div>`;
       }).join('')}</div>`;
     }
-  } catch { toast('Failed to load attack paths', 'err'); }
+  } catch (e) { toast('Failed to load attack paths: ' + (e?.message || 'unknown error'), 'err'); }
 }
 
 // ── INVESTIGATION ──────────────────────────────────────────────────────────
@@ -706,6 +705,7 @@ function _invTokenBundleSummaryHtml(d) {
   if (bs.error) {
     coordLine += `<p class="inv-err" style="margin-top:0.35rem">${esc(String(bs.error))}</p>`;
   }
+  coordLine += '<p class="inv-muted" style="margin-top:0.35rem"><strong>Heuristic signal</strong>: sampled-holder intelligence only; use as triage context, not standalone proof.</p>';
   const arch = Array.isArray(bs.bundle_archetype_hints) ? bs.bundle_archetype_hints : [];
   if (arch.length) {
     coordLine += `<ul class="inv-bundle-archetype">${arch.map((t) => `<li class="inv-muted">${esc(t)}</li>`).join('')}</ul>`;
@@ -1035,10 +1035,10 @@ async function exportHistory() {
 async function clearHistory() {
   if (!confirm('Clear all scans? This cannot be undone.')) return;
   try {
-    const d = await get('/api/history?limit=200');
-    for (const s of d.scans || []) await del(`/api/history/${s.id}`);
-    toast('Cleared', 'ok'); loadHistory();
-  } catch { toast('Failed', 'err'); }
+    const d = await del('/api/history');
+    toast(`Cleared ${d.deleted_count || 0} scans`, 'ok');
+    loadHistory();
+  } catch (e) { toast('Failed: ' + (e?.message || 'unknown error'), 'err'); }
 }
 
 function exportReport() {

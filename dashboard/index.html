@@ -101,10 +101,10 @@
         </div>
 
         <div class="pills">
-          <span class="pill" data-scope="quick" onclick="setQuickScope(this)">Quick</span>
-          <span class="pill active" data-scope="full" onclick="setQuickScope(this)">Full</span>
-          <span class="pill" data-scope="web" onclick="setQuickScope(this)">Web</span>
-          <span class="pill" data-scope="crypto" onclick="setQuickScope(this)">Crypto</span>
+          <span class="pill" data-scope="quick">Quick</span>
+          <span class="pill active" data-scope="full">Full</span>
+          <span class="pill" data-scope="web">Web</span>
+          <span class="pill" data-scope="crypto">Crypto</span>
         </div>
 
         <div class="progress-box" id="quickProgressBox">
@@ -123,7 +123,7 @@
           </div>
           <div class="stat">
             <div class="stat-value red" id="statCritical">—</div>
-            <div class="stat-label">Critical</div>
+            <div class="stat-label">Critical findings</div>
           </div>
           <div class="stat">
             <div class="stat-value blue" id="statTargets">—</div>
@@ -164,35 +164,35 @@
             </div>
 
             <div class="scope-grid">
-              <div class="scope-opt active" data-scope="full" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+              <div class="scope-opt active" data-scope="full">
                 <div class="scope-opt-title">Full</div>
                 <div class="scope-opt-desc">Complete assessment</div>
               </div>
-              <div class="scope-opt" data-scope="quick" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+              <div class="scope-opt" data-scope="quick">
                 <div class="scope-opt-title">Quick</div>
                 <div class="scope-opt-desc">Headers & basics</div>
               </div>
-              <div class="scope-opt" data-scope="web" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+              <div class="scope-opt" data-scope="web">
                 <div class="scope-opt-title">Web</div>
                 <div class="scope-opt-desc">XSS, SQLi, CSRF</div>
               </div>
-              <div class="scope-opt" data-scope="api" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+              <div class="scope-opt" data-scope="api">
                 <div class="scope-opt-title">API</div>
                 <div class="scope-opt-desc">REST & endpoints</div>
               </div>
-              <div class="scope-opt" data-scope="crypto" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+              <div class="scope-opt" data-scope="crypto">
                 <div class="scope-opt-title">Crypto</div>
                 <div class="scope-opt-desc">Web3 & wallets</div>
               </div>
-              <div class="scope-opt" data-scope="recon" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+              <div class="scope-opt" data-scope="recon">
                 <div class="scope-opt-title">Recon</div>
                 <div class="scope-opt-desc">OSINT & mapping</div>
               </div>
-              <div class="scope-opt" data-scope="passive" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+              <div class="scope-opt" data-scope="passive">
                 <div class="scope-opt-title">Passive</div>
                 <div class="scope-opt-desc">Non-intrusive</div>
               </div>
-              <div class="scope-opt" data-scope="attack" onclick="document.querySelectorAll('.scope-opt').forEach(o=>o.classList.remove('active'));this.classList.add('active');State.scope=this.dataset.scope">
+              <div class="scope-opt" data-scope="attack">
                 <div class="scope-opt-title">Attack</div>
                 <div class="scope-opt-desc">Aggressive testing</div>
               </div>
@@ -248,7 +248,7 @@
           </div>
 
           <div class="card" style="max-width:none">
-            <div class="card-h"><h3>Risk Distribution</h3></div>
+            <div class="card-h"><h3>Average Risk Score</h3></div>
             <div class="card-b" style="display:flex; align-items:center; justify-content:center; min-height:200px">
               <div class="donut-chart" id="riskDonut">
                 <div class="donut-center">

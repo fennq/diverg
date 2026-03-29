@@ -1302,6 +1302,175 @@ def history_list():
     })
 
 
+@app.route("/api/history", methods=["DELETE", "OPTIONS"])
+def history_bulk_delete():
+    if request.method == "OPTIONS":
+        return "", 204
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Authentication required"}), 401
+    with _db() as conn:
+        rows = conn.execute("SELECT id FROM scans WHERE user_id = ?", (user["id"],)).fetchall()
+        deleted_ids = [r["id"] for r in rows]
+        conn.execute("DELETE FROM scans WHERE user_id = ?", (user["id"],))
+    return jsonify({"deleted_count": len(deleted_ids), "deleted_ids": deleted_ids[:500]})
+
+
+def _safe_report_json(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+@app.route("/api/analytics/summary", methods=["GET"])
+@require_auth
+def analytics_summary():
+    user_id = request.user["id"]
+    limit = _safe_int(request.args.get("limit"), 100, 1, 400)
+    with _db() as conn:
+        rows = conn.execute(
+            """SELECT id, target_url, scanned_at, created_at, risk_score, risk_verdict, total,
+                      critical, high, medium, low, info, report_json
+               FROM scans
+               WHERE user_id = ?
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            (user_id, limit),
+        ).fetchall()
+    scans = [dict(r) for r in rows]
+    severity = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    verdict_breakdown: dict[str, int] = defaultdict(int)
+    categories: dict[str, int] = defaultdict(int)
+    total_risk = 0.0
+    risk_n = 0
+
+    now = datetime.now(timezone.utc)
+    day_counts: dict[str, int] = {}
+    for i in range(29, -1, -1):
+        day = (now - timedelta(days=i)).date().isoformat()
+        day_counts[day] = 0
+
+    for s in scans:
+        severity["critical"] += int(s.get("critical") or 0)
+        severity["high"] += int(s.get("high") or 0)
+        severity["medium"] += int(s.get("medium") or 0)
+        severity["low"] += int(s.get("low") or 0)
+        rv = str(s.get("risk_verdict") or "").strip()
+        if rv:
+            verdict_breakdown[rv] += 1
+        rs = s.get("risk_score")
+        try:
+            if rs is not None:
+                total_risk += float(rs)
+                risk_n += 1
+        except (TypeError, ValueError):
+            pass
+
+        ts_raw = s.get("scanned_at") or s.get("created_at")
+        if isinstance(ts_raw, str) and ts_raw:
+            try:
+                dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                key = dt.date().isoformat()
+                if key in day_counts:
+                    day_counts[key] += 1
+            except Exception:
+                pass
+
+        rep = _safe_report_json(s.get("report_json"))
+        findings = rep.get("findings") if isinstance(rep.get("findings"), list) else []
+        for f in findings:
+            if not isinstance(f, dict):
+                continue
+            cat = str(f.get("category") or "Other").strip() or "Other"
+            categories[cat] += 1
+
+    top_categories = sorted(categories.items(), key=lambda kv: kv[1], reverse=True)[:8]
+    return jsonify({
+        "scans_considered": len(scans),
+        "severity": severity,
+        "avg_risk_score": round(total_risk / risk_n, 1) if risk_n else 0.0,
+        "verdict_breakdown": dict(verdict_breakdown),
+        "activity_30d": [{"date": d, "count": c} for d, c in day_counts.items()],
+        "top_categories": [{"category": k, "count": v} for k, v in top_categories],
+    })
+
+
+@app.route("/api/findings", methods=["GET"])
+@require_auth
+def findings_list():
+    user_id = request.user["id"]
+    scan_limit = _safe_int(request.args.get("scan_limit"), 120, 1, 400)
+    finding_limit = _safe_int(request.args.get("finding_limit"), 2000, 1, 10000)
+    with _db() as conn:
+        rows = conn.execute(
+            """SELECT id, target_url, scanned_at, created_at, report_json
+               FROM scans WHERE user_id = ?
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            (user_id, scan_limit),
+        ).fetchall()
+    out: list[dict] = []
+    for row in rows:
+        s = dict(row)
+        rep = _safe_report_json(s.get("report_json"))
+        findings = rep.get("findings") if isinstance(rep.get("findings"), list) else []
+        for f in findings:
+            if not isinstance(f, dict):
+                continue
+            out.append({
+                "scan_id": s["id"],
+                "target_url": s.get("target_url"),
+                "scanned_at": s.get("scanned_at") or s.get("created_at"),
+                "finding": f,
+            })
+            if len(out) >= finding_limit:
+                break
+        if len(out) >= finding_limit:
+            break
+    return jsonify({"total": len(out), "findings": out})
+
+
+@app.route("/api/attack-paths", methods=["GET"])
+@require_auth
+def attack_paths_list():
+    user_id = request.user["id"]
+    scan_limit = _safe_int(request.args.get("scan_limit"), 120, 1, 400)
+    path_limit = _safe_int(request.args.get("path_limit"), 1000, 1, 5000)
+    with _db() as conn:
+        rows = conn.execute(
+            """SELECT id, target_url, scanned_at, created_at, report_json
+               FROM scans WHERE user_id = ?
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            (user_id, scan_limit),
+        ).fetchall()
+    out: list[dict] = []
+    for row in rows:
+        s = dict(row)
+        rep = _safe_report_json(s.get("report_json"))
+        paths = rep.get("attack_paths") if isinstance(rep.get("attack_paths"), list) else []
+        for p in paths:
+            if not isinstance(p, dict):
+                continue
+            out.append({
+                "scan_id": s["id"],
+                "target_url": s.get("target_url"),
+                "scanned_at": s.get("scanned_at") or s.get("created_at"),
+                "attack_path": p,
+            })
+            if len(out) >= path_limit:
+                break
+        if len(out) >= path_limit:
+            break
+    return jsonify({"total": len(out), "attack_paths": out})
+
+
 @app.route("/api/history/<scan_id>", methods=["GET"])
 @require_auth
 def history_get(scan_id):
