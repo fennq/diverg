@@ -82,6 +82,16 @@ python orchestrator.py --target https://example.com --scope crypto   # adds chai
 
 Optional: `--report detailed`; `--use-openclaw` if using the OpenClaw backend.
 
+**Scan diff (CLI)** — compare two reports for the same target (new / fixed / changed severity). Uses the same `findings` shape as the console and orchestrator JSON:
+
+```bash
+python scripts/scan_diff.py --target example.com
+python scripts/scan_diff.py --target example.com --source db   # console DB only
+python scripts/scan_diff.py --old reports/a.json --new reports/b.json
+```
+
+Set `DIVERG_DB_PATH` if your dashboard DB is not `data/dashboard.db`.
+
 ### HTTP API & console
 
 ```bash
@@ -132,6 +142,7 @@ Auth: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/google`
 | `config.json` | LLM and skill configuration |
 | `skills/` | Scan modules |
 | `investigation/` | On-chain clients, Solana bundle script, optional Bags API integration |
+| `scripts/scan_diff.py` | Diff two scans (DB + `reports/*.json`); same finding schema as `api_server` / orchestrator |
 | `extension/` | Extension worker mirror—sync with [**diverg-extension**](https://github.com/fennq/diverg-extension) |
 | `rag/` | Citations index (local content; not always shipped) |
 | `.env.example` | Environment template |
