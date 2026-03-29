@@ -1,79 +1,129 @@
-# Investigation toolkit
+# Investigation tooling
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../LICENSE)
+[![Solana](https://img.shields.io/badge/Solana-Helius%20%2B%20RPC-9945FF?logo=solana&logoColor=white)](https://www.helius.dev/)
 
-Python modules and scripts for **on-chain research** alongside Diverg web scans: Solana RPC, **Helius** (Wallet API, DAS, enhanced transactions), optional **Arkham**, **FrontrunPro**, **Bags**, and a unified **`blockchain_fetch`** pipeline. The **Chrome extension** and **`POST /api/investigation/solana-bundle`** reuse the same bundle methodology as **`solana_bundle.py`** here.
+Optional **on-chain and API research** utilities used with Diverg investigations. This folder often contains **case-specific** or **gitignored** outputs (e.g. working PDFs, fetched JSON). **Do not commit** secrets, API keys, or private client data.
 
-> **Note:** This folder may contain **case-specific** markdown/JSON/PDF outputs. Add large or sensitive artifacts to `.gitignore` if they should not ship in git. The sections below include an **example** workflow (Synq); the **generic** pipeline applies to any wallet list or token.
+| Topic | Jump |
+|--------|------|
+| Product overview & Solana console API | [Root README](../README.md) |
+| Chrome bundle UX | [diverg-extension](https://github.com/fennq/diverg-extension) |
+| Generic wallet/token pipeline | [below](#generic-pipeline-any-investigation-not-just-synq) |
+| Key Python modules | [below](#key-files) |
 
 ---
 
-## Generic pipeline (any case)
+## Synq case workspace *(example / internal)*
 
-Core entrypoint: **`blockchain_fetch.py`** → `run_blockchain_research(...)`, also used by thin wrappers like `run_blockchain_research.py`.
+> **Note:** The Synq materials described below are for a concrete investigation. Your tree may differ if this directory is used for other cases.
+
+This folder may hold a working investigation file and fetched data (often gitignored).
+
+### Finished artifacts *(when present)*
+
+- **`SYNQ_Investigation_Report.pdf`** — Full report: executive summary, case summary, Diverg scan summary, on-chain wallet/token data, wallet register (Solscan / Arkham / Bubblemaps links), token of interest, breakdown, and assessment.
+- **`SYNQ_Investigation_Report.md`** — Master markdown (source for the PDF).
+- **`content/SYNQ_Security_Scan_Report.pdf`** — Diverg security scan of `app.synq.xyz` (referenced in the investigation).
+
+Together, the investigation PDF + security scan PDF form the complete package for referral or further write-up.
+
+### Running the tech
+
+1. **Fetch on-chain data (wallets + token)**  
+   From repo root:
+   ```bash
+   ./venv/bin/python scripts/run_synq_research.py
+   ```
+   - Uses public Solana RPC (`getBalance`, `getSignaturesForAddress`) — no key.
+   - Uses Solscan for token holder total and metadata (when API allows).
+   - **Helius (optional):** With `HELIUS_API_KEY` set, the pipeline fetches:
+     - **Wallet API:** identity (known labels: exchange, protocol, KOL, scammer, etc.), funded-by (first SOL funder), balances (tokens + USD for top 10k).
+     - **History & transfers:** parsed transaction history and token/SOL transfers.
+     - **Enhanced Transactions:** parsed tx list with type/source (SWAP, TRANSFER, NFT_SALE, etc.).
+     - **DAS:** `getAssetsByOwner` (wallet portfolio) and, for the token mint, `getAsset` (metadata).
+     Set the key in the environment or in a `.env` file in the project root (do not commit `.env`):
+     ```bash
+     export HELIUS_API_KEY=your_helius_key
+     # or add HELIUS_API_KEY=... to .env
+     ./venv/bin/python scripts/run_synq_research.py
+     ```
+   - **Arkham (optional):** address intelligence (labels, entities). Request API access at [Arkham Intel API](https://intel.arkm.com/api), then set `ARKHAM_API_KEY` in the environment or `.env`:
+     ```bash
+     export ARKHAM_API_KEY=your_arkham_key
+     ./venv/bin/python scripts/run_synq_research.py
+     ```
+   - **FrontrunPro (optional, no cost):** Without the paid API, use the public [Address Finder](https://www.frontrun.pro/address-finder) to resolve a Twitter @handle or wallet fragment to a full Solana address. From code: `from frontrunpro_client import address_finder_url; url = address_finder_url("@handle")` — open the URL in a browser or pass it to your pipeline. No API key needed.
+   - **FrontrunPro (optional, paid):** Linked wallets, KOL follow list, CA history. $200+/month; contact [t.me/frontrunintern](https://t.me/frontrunintern) for key and `FRONTRUNPRO_BASE_URL`. Set both in `.env` to enable API enrichment.
+   - **Bags (optional):** Token intelligence when `BAGS_API_KEY` is set:
+    - **Section 1:** `GET /token-launch/creator/v3`, `GET /token-launch/lifetime-fees`, `GET /fee-share/token/claim-events`.
+    - **Section 2:** `GET /solana/bags/pools/token-mint` (Meteora DBC + DAMM v2 pool keys for the token).
+    - **Section 3:** `GET /token-launch/claim-stats` (per-fee-claimer totals, top1/top3/top5, Herfindahl index, distribution label, creator vs non-creator split); reconciliation vs sampled claim-events; optional `GET /fee-share/admin/list` for creator fee-share scope; optional `GET /solana/bags/pools` when `BAGS_FETCH_POOLS_LIST=true` (set `BAGS_POOLS_ONLY_MIGRATED=true` to filter); response includes whether the requested mint appears in that list.
+    - Output includes both `*_raw` API payloads and normalized summaries:
+      - `creators` (count, wallets, handles),
+      - `lifetime_fees` (lamports + SOL),
+      - `pool` + `pool_raw` (DBC config/pool keys, optional DAMM v2 pool; `liquidity_stage`, `pool_addresses_for_tracing`, Solscan `explorer_links`, `consistency_check` vs requested mint),
+      - `claim_events` (events count, unique wallets, total claimed, creator-claim totals),
+      - `claim_wallet_cex_connections` (claim wallets tagged as CEX identities and/or exchange-funded via Helius),
+      - `claim_events_windows` (same summary metrics for `7d` and `30d` windows via time mode),
+      - `claim_events_window_trend` (7d vs 30d ratios + `trend`: `accelerating`, `stable`, or `cooling`).
+    Set key in `.env`:
+    ```bash
+    export BAGS_API_KEY=your_bags_key
+    ./venv/bin/python scripts/run_synq_research.py
+    ```
+   - Writes `investigation/synq_data.json`.
+
+2. **Update the investigation report with fetched data**  
+   ```bash
+   ./venv/bin/python scripts/update_investigation_report_from_data.py
+   ```
+   - Merges balances and token evidence from `synq_data.json` into `SYNQ_Investigation_Report.md`.
+
+3. **Generate PDF**  
+   ```bash
+   ./venv/bin/python scripts/generate_synq_investigation_pdf.py
+   ```
+   - Output: `investigation/SYNQ_Investigation_Report.pdf`.
+
+## Generic pipeline (any investigation, not just Synq)
+
+The same on-chain fetch (RPC, Helius, Arkham, FrontrunPro, Bags when keys set, Solscan) is available for **any** case. Use the generic script with your own wallet list and optional token:
 
 ```bash
 # Wallets only
 ./venv/bin/python scripts/run_blockchain_research.py --wallets ADDR1 ADDR2 ADDR3 --out investigation/my_case_data.json
 
-# Wallets + token mint
+# Wallets + token
 ./venv/bin/python scripts/run_blockchain_research.py --wallets ADDR1 ADDR2 --token TOKEN_MINT --out investigation/my_case_data.json
 
-# From JSON config
+# From a config file (e.g. investigation/cases/next_case.json)
 ./venv/bin/python scripts/run_blockchain_research.py --config investigation/cases/next_case.json
 ```
 
-Config format: `{"wallets": ["..."], "token": "optional_mint", "output": "optional/path.json"}`.
+Config JSON format: `{"wallets": ["addr1", "addr2"], "token": "optional_mint", "output": "optional/path.json"}`.  
+The core logic lives in `investigation/blockchain_fetch.py`; `run_synq_research.py` is a thin wrapper that passes the Synq wallets and token and writes to `synq_data.json`.
 
-### Key modules
+## Manual research
 
-| File | Role |
-|------|------|
-| `blockchain_fetch.py` | Orchestrates RPC + optional Helius, Arkham, FrontrunPro, Bags |
-| `onchain_clients.py` | Solana RPC + Helius helpers |
-| `solana_bundle.py` | SPL bundle snapshot (holders, clusters, coordination score)—**parity with extension + API** |
-| `solscan_client.py` | Solscan API v2 (holders, metadata) |
-| `arkham_client.py` | Arkham Intel API (`ARKHAM_API_KEY`) |
-| `frontrunpro_client.py` | Address finder URL helper; optional paid API |
-| `bags_client.py` | Bags API (`BAGS_API_KEY`) — creators, fees, pools, claim stats |
+- **Solscan / Arkham / Bubblemaps:** Open the links in Section 3 and 4 of `SYNQ_Investigation_Report.md` in a browser to inspect CEX labels, fund flows, clusters, and top holders.
+- **Twitter / social:** Search each address + "synq" or "synq.xyz" and paste findings into the report tables.
 
-Set keys via **environment** or **`.env`** in the project root (never commit secrets).
+## Key files
 
----
-
-## Example: Synq case workflow
-
-*(Illustrative only—paths refer to files that may be gitignored locally.)*
-
-1. **Fetch on-chain data** — from repo root:
-   ```bash
-   ./venv/bin/python scripts/run_synq_research.py
-   ```
-   - Public Solana RPC by default; **Helius** enriches identity, funded-by, history, DAS, etc. when `HELIUS_API_KEY` is set.
-   - Optional: `ARKHAM_API_KEY`, FrontrunPro, **`BAGS_API_KEY`** (see Bags sections in `bags_client.py` / `docs/INTEGRATIONS.md`).
-   - Writes e.g. `investigation/synq_data.json`.
-
-2. **Merge into report** — `scripts/update_investigation_report_from_data.py`
-
-3. **PDF** — `scripts/generate_synq_investigation_pdf.py`
-
-**Deliverables** (when present): investigation PDF/MD, Diverg scan PDF cross-reference, wallet register links (Solscan / Arkham / Bubblemaps as applicable).
-
----
-
-## Manual research tips
-
-- Use explorer links from your report for CEX labels, flows, and holder clusters.
-- Cross-check social mentions for addresses and project names; record sources in the case file.
-
----
-
-## Bags API (optional)
-
-When `BAGS_API_KEY` is set, the pipeline can include creators, lifetime fees, Dexscreener order availability, pool / Meteora DBC resolution, claim stats, launch feed matching, and related summaries. See **`docs/INTEGRATIONS.md`** and **`bags_client.py`** for endpoints and env flags (`BAGS_FETCH_LAUNCH_FEED`, `BAGS_FEE_CLAIMER_VAULTS`, etc.).
+- `SYNQ_Investigation_Report.md` — Master investigation doc (police-style).
+- `synq_data.json` — On-chain fetch output (balances, signatures, token holder count).
+- `SYNQ_Investigation_Report.pdf` — Generated PDF.
+- `solscan_client.py` — Solscan api-v2 client (token holders, metadata).
+- `onchain_clients.py` — Solana RPC + Helius (Wallet API: identity, funded-by, balances; history, transfers; Enhanced Transactions; DAS getAssetsByOwner/getAsset).
+- `arkham_client.py` — Arkham Intel API (address intelligence); requires `ARKHAM_API_KEY`.
+- `frontrunpro_client.py` — FrontrunPro: **no-cost** `address_finder_url(query)` (Twitter @ or wallet fragment → Address Finder URL; no key). Optional paid API: set `FRONTRUNPRO_API_KEY` + `FRONTRUNPRO_BASE_URL` for linked wallets, KOL list, CA history.
+- `bags_client.py` — Bags API client (Section 1): creators, lifetime fees, claim events for token intelligence. Requires `BAGS_API_KEY`.
+- `blockchain_fetch.py` — Generic fetch: `run_blockchain_research(wallet_addresses, token_mint=..., output_path=...)`. Used by `run_synq_research.py` and `run_blockchain_research.py`.
+- `solana_bundle.py` — Holder/cluster bundle snapshot logic (shared with **`POST /api/investigation/solana-bundle`** and the Chrome extension).
 
 ---
 
 ## License
 
-MIT — see [`LICENSE`](../LICENSE) in the repository root.
+Project code is under the [MIT License](../LICENSE). Generated investigation artifacts (PDFs, JSON, client notes) are yours to manage; keep confidential material out of git.

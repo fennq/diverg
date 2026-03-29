@@ -1,10 +1,10 @@
 # Diverg
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Chrome extension](https://img.shields.io/badge/Chrome-Extension-4285F4?logo=googlechrome&logoColor=white)](https://github.com/fennq/diverg-extension)
+[![Python](https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Flask](https://img.shields.io/badge/API-Flask-000000?logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
 
-**Diverg** is an AI-assisted security testing platform for web applications and APIs. It runs coordinated **skills** (specialized scan modules) across transport, exposure, application logic, authentication, API behavior, and high-impact flaw patterns—deliverable via **CLI**, **HTTP API**, **web console**, or **Chrome extension**—with structured findings, evidence, and remediation guidance.
+**Diverg** is an AI-assisted security testing platform for web applications and APIs. It runs coordinated **skills** (specialized scan modules)—transport, recon, application logic, auth, APIs, high-value flaw patterns—and returns structured findings with evidence and remediation guidance. Deliver through the **CLI**, **HTTP API** + **web console**, or the **Chrome extension**.
 
 ---
 
@@ -12,70 +12,48 @@
 
 | Area | What you get |
 |------|----------------|
-| **Web & API** | OSINT, recon, headers/TLS, web vulns, auth, API discovery, client JS surface, dependency/CVE signals, entity reputation |
-| **Solana & on-chain** | SPL **token bundle** analysis (holders, shared-funder clusters, coordination score)—**[Chrome extension](https://github.com/fennq/diverg-extension)** + matching **`/api/investigation/solana-bundle`** in the console API; **Helius**-backed Solana account queries and **EVM** address summaries via **`/api/investigation/blockchain`** |
-| **Console** | Authenticated **dashboard** (`/dashboard/`), scan history, investigation tools, **points / referrals / leaderboard** (server-issued rewards) |
-| **Extension** | Quick scans, full scans against local API, **Solana bundle** UI, PoC simulate—see **`extension/`** (mirror) and **[diverg-extension](https://github.com/fennq/diverg-extension)** for the canonical UX |
+| **Web & API security** | Multi-vector assessments, goal-based scopes, streaming scans, PoC simulation |
+| **Solana & on-chain** | Token **bundle analysis** (holders, cluster %, coordination score), address lookups via **Helius** + EVM via public RPC—in **console API** and **extension** |
+| **Investigations** | Domain OSINT, entity reputation, optional **Bags** / **Helius** pipelines in `investigation/` |
+| **Console** | Authenticated dashboard, history, stats, **points & referrals**, leaderboard |
 
 ---
 
-## What Diverg does
+## Web & API surface (skills)
 
-Diverg answers: *What can an attacker do here? What’s exposed? Where are the high-impact gaps?* Findings use a consistent schema: **title**, **severity**, **url**, **category**, **evidence**, **impact**, and **remediation**. The pipeline supports **goal-based scanning**: a natural-language goal narrows which skills run.
+Diverg answers: *What can an attacker do here? What’s exposed? Where are the high-impact gaps?*
 
-### Surface and reconnaissance
-
-- **OSINT** — DNS, historic exposure, public signals  
-- **Recon** — Subdomains, ports, technologies, WAFs, sensitive paths  
-- **Headers & SSL** — HSTS, TLS, CSP, framing, content-type, referrer, permissions  
-- **Company exposure** — Admin, debug, docs, exports, staging-style paths  
-
-### Application and API
-
-- **Web vulns** — Injection, traversal, SSRF, file exposure patterns  
-- **Auth test** — Sessions, JWT hygiene, enumeration  
-- **API test** — Methods, auth gaps, GraphQL/OpenAPI exposure  
+- **OSINT & recon** — DNS, subdomains, ports, tech stack, sensitive paths  
+- **Headers & SSL** — HSTS, TLS, CSP, framing, referrer, permissions  
+- **Web vulns & auth** — Injection patterns, session/JWT hygiene, enumeration  
+- **API test** — Discovery, methods, GraphQL/OpenAPI exposure, abuse patterns  
 - **Client surface** — Source maps, API extraction from JS, dangerous sinks  
+- **High-value flaws** — IDOR, secrets in assets, workflow / payment / race / logic abuse  
+- **Crypto & data** — JWT/TLS issues, dependency/CVE signals, data-leak patterns  
+- **Entity reputation** — Domain and entity context from OSINT-style signals  
 
-### High-value and business logic
-
-- **High-value flaws** — IDOR, secrets in assets, logic/payment tampering  
-- **Workflow / payment / race / logic abuse** — Flow bypass, double processing, numeric abuse  
-
-### Data, crypto, and trust
-
-- **Data leak risks** — Verbose errors, cache issues, PII/tokens in responses  
-- **Crypto security** — JWT `alg` issues, weak TLS in stack  
-- **Dependency audit** — Versions, CVE watchlist  
-- **Entity reputation** — Domain/entity context signals  
-
-### Optional chain-style checks
-
-- **Chain / batch validation** — For crypto-adjacent targets: batch-vs-single and parameter-trust gaps (`crypto` scope + `chain_validation_abuse` skill)  
+Findings use a canonical schema (severity, evidence, impact, remediation). The pipeline supports **goal-based scanning**: a natural-language goal narrows which skills run.
 
 ---
 
-## Solana & extension (quick reference)
+## Solana & extension parity
 
-| Surface | Role |
-|---------|------|
-| **[diverg-extension](https://github.com/fennq/diverg-extension)** | **Canonical** Chrome UX: popup, side panel, **Solana token bundle** (mint + optional wallet, **Helius** key in Options), full-scan API pairing |
-| **`extension/`** in this repo | **Mirror** of extension tech (background, API auto-detect); sync `sidepanel.*`, `solana_bundle.js`, `options.*`, `icons/` from the canonical repo |
-| **`api_server.py`** | **`POST /api/investigation/solana-bundle`** — same bundle methodology as the extension (holders, cluster %, coordination / risk score); requires **Helius API key** (dashboard Settings or `HELIUS_API_KEY`) |
-| **`investigation/`** | Python clients: Solana RPC, **Helius**, optional **Bags**, **Arkham**, blockchain fetch pipeline for research scripts |
+Solana work is first-class—not bolted on as an afterthought.
 
-Solana bundle analysis is **read-only on-chain intelligence** for investigations—not financial advice. Use only on assets and systems you are authorized to assess.
+- **Chrome extension** ([**diverg-extension**](https://github.com/fennq/diverg-extension)): paste a **token mint** (and optional wallet), run **Analyze bundle**—holder map, same-funder clusters, coordination score, and a clear risk verdict. Uses **[Helius](https://www.helius.dev/)** (API key in Options). Canonical UX lives in that repo; `extension/` here stays in sync for this monorepo.
+- **Web console** (`api_server.py` + dashboard): authenticated **`POST /api/investigation/solana-bundle`** with the same bundle logic; **`POST /api/investigation/blockchain`** for Solana (Helius) or **EVM** (e.g. Cloudflare Ethereum gateway) address summaries.
+
+Set `HELIUS_API_KEY` on the server or pass/configure the key in the console **Settings** where supported.
 
 ---
 
-## How to run
+## Quick start
 
 ### Prerequisites
 
-- **Python 3.11+**  
-- **OpenAI API key** for LLM-backed steps (set in environment)  
-- Optional: [nmap](https://nmap.org/) for recon; Docker only if using OpenClaw integration  
-- **Helius** (optional): Solana lookups in API/extension bundle features  
+- **Python 3.11+**
+- **OpenAI API key** for LLM-backed steps (`OPENAI_API_KEY` in `.env`)
+- Optional: [nmap](https://nmap.org/) for recon; Docker only if using OpenClaw integration
 
 ### Setup
 
@@ -99,10 +77,7 @@ pip install -r requirements.txt
 python orchestrator.py --target https://example.com --scope full
 python orchestrator.py --target https://example.com --scope quick
 python orchestrator.py --target example.com --scope recon
-python orchestrator.py --target https://example.com --scope web
-python orchestrator.py --target https://example.com --scope api
-python orchestrator.py --target https://example.com --scope passive
-python orchestrator.py --target https://example.com --scope crypto
+python orchestrator.py --target https://example.com --scope crypto   # adds chain/batch-style checks
 ```
 
 Optional: `--report detailed`; `--use-openclaw` if using the OpenClaw backend.
@@ -111,62 +86,71 @@ Optional: `--report detailed`; `--use-openclaw` if using the OpenClaw backend.
 
 ```bash
 python api_server.py
-# Default: http://127.0.0.1:5000 — use --host / --port to change
+# http://127.0.0.1:5000 — dashboard at /dashboard/, login at /login
 ```
 
-| Area | Endpoints (summary) |
-|------|---------------------|
-| **Auth** | `POST /api/auth/register`, `login`, `google`; `GET /api/auth/me` |
-| **Scans** | `POST /api/scan`, `POST /api/scan/stream`; `POST /api/poc/simulate` |
-| **Investigation** (auth) | `POST /api/investigation/blockchain`, `domain`, `reputation`, **`solana-bundle`** |
-| **Dashboard** | `GET /dashboard/`, `/login`; history, stats, **`/api/rewards/me`**, **`/api/rewards/leaderboard`** |
-| **Health** | `GET /api/health` |
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/scan` | Full scan (`url`, optional `goal`, `scope`) |
+| `POST /api/scan/stream` | NDJSON stream with progress, then full report |
+| `POST /api/poc/simulate` | PoC for a finding (IDOR, unauthenticated, etc.) |
+| `POST /api/investigation/blockchain` | Solana (Helius) or EVM address summary |
+| `POST /api/investigation/solana-bundle` | SPL bundle snapshot (extension parity) |
+| `POST /api/investigation/domain` | OSINT + recon + headers (full skill JSON) |
+| `POST /api/investigation/reputation` | Entity reputation + OSINT context |
+| `GET /api/rewards/me` | Points, referral code, recent ledger (authenticated) |
+| `GET /api/rewards/leaderboard` | Leaderboard windows (authenticated) |
 
-The extension can call the same API for **full scans** when `api_server.py` is running (auto-detect or configured base URL).
-
-### Chrome extension
-
-Load **unpacked** from **[github.com/fennq/diverg-extension](https://github.com/fennq/diverg-extension)**. Use this repo’s `extension/` folder only when contributing to the **monorepo mirror**—copy canonical assets from **diverg-extension** as described in `extension/README.md`.
+Auth: `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/google`, `GET /api/auth/me`.
 
 ---
 
 ## Scan profiles (CLI)
 
-| Profile | Skills (summary) |
-|---------|-------------------|
-| **full** | Full web pipeline: OSINT, recon, headers, crypto_security, data leaks, company exposure, web_vulns, auth, API, high-value, workflow, race, payment, client, dependency, logic, entity_reputation |
-| **crypto** | Same as **full** plus **chain_validation_abuse** |
-| **quick** | headers_ssl, recon, osint, company_exposure |
-| **recon** | osint, recon |
-| **web** | web_vulns, headers_ssl, auth_test, company_exposure |
-| **api** | api_test, headers_ssl, company_exposure |
-| **passive** | osint, headers_ssl, company_exposure |
+| Profile | Focus |
+|---------|--------|
+| **full** | Full web pipeline (OSINT, recon, headers, vulns, auth, API, high-value, workflow, race, payment, client, deps, logic, reputation, …) |
+| **crypto** | Full + chain/batch validation–style checks for crypto-facing targets |
+| **quick** | Headers, recon, OSINT, company exposure |
+| **recon** | OSINT + recon |
+| **web** | Web vulns, headers, auth, company exposure |
+| **api** | API test, headers, company exposure |
+| **passive** | OSINT, headers, company exposure |
 
 ---
 
-## Project layout
+## Repository layout
 
 | Path | Purpose |
 |------|---------|
-| `orchestrator.py` | CLI entry; scan profiles |
-| `api_server.py` | Flask API: auth, scans, PoC, investigation, dashboard static, rewards |
+| `orchestrator.py` | CLI; scan profiles and optional OpenClaw |
+| `api_server.py` | Flask API, dashboard static files, auth, scans, investigations, rewards |
+| `dashboard/` | Web console (HTML/JS/CSS) |
+| `dashboard_points.py` | Points, referrals, leaderboard helpers |
 | `poc_runner.py` | PoC execution for Simulate |
-| `dashboard_points.py` | Points, referrals, leaderboard (SQLite) |
-| `intent_skills.py` | Goal → skill mapping |
-| `config.json` | LLM / skill configuration |
+| `intent_skills.py` | Goal → skills mapping |
+| `config.json` | LLM and skill configuration |
 | `skills/` | Scan modules |
-| `investigation/` | On-chain clients, `blockchain_fetch`, optional case scripts |
-| `extension/` | Extension mirror (see `extension/README.md`) |
-| `rag/` | Citations index (local content; not shipped) |
+| `investigation/` | On-chain clients, Solana bundle script, optional Bags API integration |
+| `extension/` | Extension worker mirror—sync with [**diverg-extension**](https://github.com/fennq/diverg-extension) |
+| `rag/` | Citations index (local content; not always shipped) |
 | `.env.example` | Environment template |
 
-Internal runbooks and RAG content are expected locally for full citation behavior.
+Internal runbooks and exploit-catalog content may live locally for full RAG behavior; they are not required for core scans.
 
 ---
 
-## Ethics and authorization
+## Chrome extension
 
-Use Diverg only for **authorized** security testing. Obtain permission and a clear scope before testing systems you do not own. Redact PII and secrets in shared reports.
+Use the standalone repository for the shipping extension:
+
+**[github.com/fennq/diverg-extension](https://github.com/fennq/diverg-extension)** — load unpacked from there. This repo’s `extension/` folder mirrors shared pieces; see [`extension/README.md`](extension/README.md).
+
+---
+
+## Ethics & authorization
+
+Use Diverg only for **authorized** security testing. Get written permission and a clear scope before testing systems you do not own or operate. Redact PII and secrets in shared reports.
 
 ---
 
