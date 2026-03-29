@@ -334,12 +334,26 @@ def normalize_batch_identity_map(raw: Any) -> dict[str, dict[str, Any]]:
             domains = []
         parts = [p for p in (name, cat, typ) if isinstance(p, str) and p.strip()]
         primary = (parts[0].strip()[:120] if parts else None)
+        entity_type = row.get("entityType") or row.get("entity_type")
+        et = entity_type.strip()[:64] if isinstance(entity_type, str) and entity_type.strip() else None
+        risk = row.get("risk") or row.get("riskLevel") or row.get("risk_level")
+        risk_s = str(risk).strip()[:32] if risk is not None and str(risk).strip() else None
+        verified = row.get("verified")
+        if isinstance(verified, bool):
+            ver_b: Optional[bool] = verified
+        elif verified is None:
+            ver_b = None
+        else:
+            ver_b = None
         out[addr] = {
             "primary_label": primary,
             "type": typ.strip()[:64] if isinstance(typ, str) and typ.strip() else None,
+            "entity_type": et,
             "category": cat.strip()[:120] if isinstance(cat, str) and cat.strip() else None,
             "tags": [str(t)[:80] for t in tags[:12] if t is not None and str(t).strip()],
             "domain_names": [str(d)[:80] for d in domains[:8] if d is not None and str(d).strip()],
+            "risk_level": risk_s,
+            "verified": ver_b,
         }
     return out
 

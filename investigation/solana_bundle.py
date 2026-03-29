@@ -667,6 +667,17 @@ def run_bundle_snapshot(
             "Optional: enter a wallet to focus that address’s funder-linked group."
         )
 
+    funder_root_by_wallet: dict[str, Optional[str]] = {}
+    for w in lookup_order:
+        _d_f, _r_f = _direct_and_root_funder(
+            w,
+            funded_by.get(w),
+            transfers_by.get(w),
+            hop_funded_by,
+            hop_transfers_by,
+        )
+        funder_root_by_wallet[w] = _r_f if (_r_f and _d_f and _r_f != _d_f) else None
+
     bundle_signals: Optional[dict[str, Any]] = None
     try:
         bundle_signals = compute_coordination_bundle(
@@ -676,6 +687,7 @@ def run_bundle_snapshot(
             mint=mint,
             focus_wallets=sorted(focus_members),
             transfers_cache_preload=transfers_by,
+            funder_root_by_wallet=funder_root_by_wallet,
         )
     except Exception as e:
         bundle_signals = {
