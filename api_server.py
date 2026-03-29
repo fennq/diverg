@@ -224,16 +224,16 @@ def poc_simulate():
         return _poc_response(result)
 
     poc_type = (data.get("type") or "").strip().lower()
-    url = (data.get("url") or "").strip()
-    if not url:
-        return _error("Missing 'url' (or provide 'finding')")
+    poc_url, poc_err = _validate_url(data.get("url"))
+    if poc_err:
+        return _error(poc_err)
     if poc_type not in ("idor", "unauthenticated"):
         return _error("'type' must be 'idor' or 'unauthenticated'")
 
     try:
         if poc_type == "idor":
             result = run_idor_poc(
-                url=url,
+                url=poc_url,
                 method=data.get("method") or "GET",
                 params=data.get("params"),
                 data=data.get("data"),
@@ -244,7 +244,7 @@ def poc_simulate():
             )
         else:
             result = run_unauth_poc(
-                url=url,
+                url=poc_url,
                 method=data.get("method") or "GET",
                 headers=data.get("headers"),
                 cookies=data.get("cookies"),

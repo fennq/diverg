@@ -503,7 +503,13 @@ def run_skill_variant(
         else:
             return {"error": f"Unknown skill: {skill_name}"}
 
+        if not isinstance(raw, str):
+            return {"error": f"Skill returned {type(raw).__name__} instead of JSON string", "skill": skill_name}
+
         result = json.loads(raw)
+        if not isinstance(result, dict):
+            return {"error": f"Skill JSON is {type(result).__name__}, expected object", "skill": skill_name}
+
         finding_count = len(result.get("findings", []))
         finding_count += len(result.get("header_findings", []))
         finding_count += len(result.get("ssl_findings", []))
@@ -1552,6 +1558,19 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     }
 
 
+def _run_skill_with_timeout(fn, *args, timeout: int = SKILL_TIMEOUT_SECONDS, **kwargs) -> dict:
+    """Run a skill function in a thread with a timeout. Returns a result dict or error dict."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(fn, *args, **kwargs)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            return {"error": f"Skill timed out after {timeout}s", "skill": str(args[0]) if args else "unknown"}
+        except Exception as exc:
+            return {"error": str(exc), "skill": str(args[0]) if args else "unknown"}
+
+
 def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = None):
     """
     Generator that runs the same scan as run_web_scan but yields progress events (NDJSON).
@@ -1591,16 +1610,22 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
 
     results: dict[str, dict] = {}
 
+    def _stream_skill(skill_name, out_key, fn, *args, **kwargs):
+        """Run a skill with timeout, store result, yield progress events."""
+        out = _run_skill_with_timeout(fn, *args, **kwargs)
+        results[out_key] = out
+        err = out.get("error") if isinstance(out, dict) else None
+        cnt = 0 if err else (
+            len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
+        )
+        done_event = {"event": "skill_done", "skill": skill_name, "findings_count": cnt}
+        if err:
+            done_event["error"] = err
+        return done_event
+
     for skill_name in skills_phase1:
         yield {"event": "skill_start", "skill": skill_name}
-        try:
-            out = run_skill(skill_name, domain, target_url)
-            results[skill_name] = out
-            cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
-            yield {"event": "skill_done", "skill": skill_name, "findings_count": cnt}
-        except Exception as exc:
-            results[skill_name] = {"error": str(exc), "skill": skill_name}
-            yield {"event": "skill_done", "skill": skill_name, "findings_count": 0, "error": str(exc)}
+        yield _stream_skill(skill_name, skill_name, run_skill, skill_name, domain, target_url)
 
     if skills_phase2:
         ctx = {
@@ -1611,14 +1636,7 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
         }
         for skill_name in skills_phase2:
             yield {"event": "skill_start", "skill": skill_name}
-            try:
-                out = run_skill(skill_name, domain, target_url, ctx)
-                results[skill_name] = out
-                cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
-                yield {"event": "skill_done", "skill": skill_name, "findings_count": cnt}
-            except Exception as exc:
-                results[skill_name] = {"error": str(exc), "skill": skill_name}
-                yield {"event": "skill_done", "skill": skill_name, "findings_count": 0, "error": str(exc)}
+            yield _stream_skill(skill_name, skill_name, run_skill, skill_name, domain, target_url, ctx)
 
     if skills_phase3:
         ctx3 = {
@@ -1630,22 +1648,13 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
         for skill_name, stype, wl in skills_phase3:
             label = f"{skill_name}:{stype}"
             yield {"event": "skill_start", "skill": label}
-            try:
-                out = run_skill_variant(
-                    skill_name,
-                    domain,
-                    target_url,
-                    scan_type=stype,
-                    wordlist=wl,
-                    crawl_depth=3 if (skill_name == "web_vulns" and stype == "full") else 2,
-                    context=ctx3,
-                )
-                results[f"{skill_name}:{stype}:{wl}"] = out
-                cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
-                yield {"event": "skill_done", "skill": label, "findings_count": cnt}
-            except Exception as exc:
-                results[f"{skill_name}:{stype}:{wl}"] = {"error": str(exc), "skill": skill_name}
-                yield {"event": "skill_done", "skill": label, "findings_count": 0, "error": str(exc)}
+            yield _stream_skill(
+                label, f"{skill_name}:{stype}:{wl}",
+                run_skill_variant, skill_name, domain, target_url,
+                scan_type=stype, wordlist=wl,
+                crawl_depth=3 if (skill_name == "web_vulns" and stype == "full") else 2,
+                context=ctx3,
+            )
 
     findings = aggregate_findings(results)
     company_surfaces = aggregate_company_surfaces(results)

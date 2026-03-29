@@ -17,8 +17,10 @@ from urllib.parse import urlencode, urlparse, parse_qs, urlunparse
 
 try:
     import requests
+    from requests.exceptions import ConnectionError as ReqConnectionError, Timeout as ReqTimeout, RequestException
 except ImportError:
     requests = None
+    ReqConnectionError = ReqTimeout = RequestException = Exception
 
 TIMEOUT = 10
 MAX_BODY_PREVIEW = 500
@@ -107,7 +109,6 @@ def run_idor_poc(
             poc_type="idor",
         )
 
-    # Request 1: original (or with placeholder)
     try:
         if method == "GET":
             r1 = requests.get(
@@ -130,6 +131,12 @@ def run_idor_poc(
                 timeout=TIMEOUT,
                 allow_redirects=False,
             )
+    except ReqTimeout:
+        return PoCResult(success=False, error=f"Request timed out after {TIMEOUT}s", poc_type="idor")
+    except ReqConnectionError:
+        return PoCResult(success=False, error="Could not connect to target — host may be down or unreachable", poc_type="idor")
+    except RequestException as e:
+        return PoCResult(success=False, error=f"Request failed: {e}", poc_type="idor")
     except Exception as e:
         return PoCResult(success=False, error=str(e), poc_type="idor")
 
@@ -165,11 +172,15 @@ def run_idor_poc(
                 timeout=TIMEOUT,
                 allow_redirects=False,
             )
-    except Exception as e:
+    except ReqTimeout:
         return PoCResult(
-            success=True,
-            status_code=r1.status_code,
-            body_preview=_preview(r1.content),
+            success=True, status_code=r1.status_code, body_preview=_preview(r1.content),
+            conclusion=f"First request succeeded ({r1.status_code}); second request timed out after {TIMEOUT}s. Manually try changing {param}.",
+            poc_type="idor",
+        )
+    except (ReqConnectionError, RequestException, Exception) as e:
+        return PoCResult(
+            success=True, status_code=r1.status_code, body_preview=_preview(r1.content),
             conclusion=f"First request succeeded ({r1.status_code}); second request failed: {e}. Manually try changing {param}.",
             poc_type="idor",
         )
@@ -225,6 +236,12 @@ def run_unauth_poc(
             timeout=TIMEOUT,
             allow_redirects=False,
         )
+    except ReqTimeout:
+        return PoCResult(success=False, error=f"Request timed out after {TIMEOUT}s", poc_type="unauthenticated")
+    except ReqConnectionError:
+        return PoCResult(success=False, error="Could not connect to target — host may be down or unreachable", poc_type="unauthenticated")
+    except RequestException as e:
+        return PoCResult(success=False, error=f"Request failed: {e}", poc_type="unauthenticated")
     except Exception as e:
         return PoCResult(success=False, error=str(e), poc_type="unauthenticated")
 
