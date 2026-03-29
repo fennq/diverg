@@ -1615,16 +1615,22 @@ def root_redirect():
 
 def main():
     parser = argparse.ArgumentParser(description="Diverg Console API")
-    parser.add_argument("--port", type=int, default=5000)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "5000")))
+    parser.add_argument("--host", default="0.0.0.0")
     args = parser.parse_args()
     print(f"  Diverg Console  →  http://{args.host}:{args.port}/dashboard/")
     print(f"  Login           →  http://{args.host}:{args.port}/login")
     print(f"  API             →  http://{args.host}:{args.port}/api/health")
-    from werkzeug.serving import WSGIRequestHandler
-    WSGIRequestHandler.server_version = "Diverg"
-    WSGIRequestHandler.sys_version = ""
-    app.run(host=args.host, port=args.port, threaded=True)
+    try:
+        from waitress import serve
+        print(f"  Server          →  waitress on {args.host}:{args.port}")
+        serve(app, host=args.host, port=args.port, threads=8, channel_timeout=300)
+    except ImportError:
+        print("  Server          →  Flask dev (waitress not installed)")
+        from werkzeug.serving import WSGIRequestHandler
+        WSGIRequestHandler.server_version = "Diverg"
+        WSGIRequestHandler.sys_version = ""
+        app.run(host=args.host, port=args.port, threaded=True)
 
 
 if __name__ == "__main__":

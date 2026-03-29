@@ -3,4 +3,4 @@
 aptPkgs = ["nmap"]
 
 [start]
-cmd = "python -m gunicorn api_server:app --bind 0.0.0.0:${PORT:-5000} --workers 2 --threads 4 --timeout 300"
+cmd = "python api_server.py"
