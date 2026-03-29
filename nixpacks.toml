@@ -3,4 +3,4 @@
 aptPkgs = ["nmap"]
 
 [start]
-cmd = "python api_server.py"
+cmd = "python3 api_server.py"
