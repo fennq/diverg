@@ -1,2 +1,3 @@
+# nmap: used by passive recon (python-nmap). Use apt so we do not override Python’s nixPkgs defaults.
 [phases.setup]
-nixPkgs = ["...", "nmap"]
+aptPkgs = ["nmap"]
