@@ -297,3 +297,80 @@ def helius_das_assets_by_owner(
 def helius_das_asset(mint: str) -> Optional[dict]:
     """DAS API: single asset/token metadata. Requires HELIUS_API_KEY."""
     return _helius_post_json_rpc("getAsset", {"id": mint})
+
+
+def normalize_batch_identity_map(raw: Any) -> dict[str, dict[str, Any]]:
+    """
+    Normalize Helius POST /v1/wallet/batch-identity response to address -> display fields.
+    Handles array body or wrapped shapes; ignores unknown rows.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    if raw is None:
+        return out
+    rows: list[Any]
+    if isinstance(raw, list):
+        rows = raw
+    elif isinstance(raw, dict):
+        rows = raw.get("identities") or raw.get("data") or raw.get("results") or []
+        if not isinstance(rows, list):
+            rows = []
+    else:
+        return out
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        addr = row.get("address") or row.get("wallet")
+        if not isinstance(addr, str) or not addr.strip():
+            continue
+        addr = addr.strip()
+        name = row.get("name") or row.get("displayName") or row.get("label")
+        typ = row.get("type") or row.get("entityType")
+        cat = row.get("category")
+        tags = row.get("tags")
+        if not isinstance(tags, list):
+            tags = []
+        domains = row.get("domainNames") or row.get("domain_names") or []
+        if not isinstance(domains, list):
+            domains = []
+        parts = [p for p in (name, cat, typ) if isinstance(p, str) and p.strip()]
+        primary = (parts[0].strip()[:120] if parts else None)
+        out[addr] = {
+            "primary_label": primary,
+            "type": typ.strip()[:64] if isinstance(typ, str) and typ.strip() else None,
+            "category": cat.strip()[:120] if isinstance(cat, str) and cat.strip() else None,
+            "tags": [str(t)[:80] for t in tags[:12] if t is not None and str(t).strip()],
+            "domain_names": [str(d)[:80] for d in domains[:8] if d is not None and str(d).strip()],
+        }
+    return out
+
+
+def token_metadata_from_das_asset(asset: Any) -> Optional[dict[str, Any]]:
+    """Extract display fields from getAsset / DAS result (Helius-shaped)."""
+    if not asset or not isinstance(asset, dict):
+        return None
+    content = asset.get("content") if isinstance(asset.get("content"), dict) else {}
+    cmeta = content.get("metadata") if isinstance(content.get("metadata"), dict) else {}
+    token_info = asset.get("token_info") if isinstance(asset.get("token_info"), dict) else {}
+    name = cmeta.get("name") or asset.get("name") or token_info.get("name")
+    symbol = cmeta.get("symbol") or asset.get("symbol") or token_info.get("symbol")
+    image: Optional[str] = None
+    links = content.get("links") if isinstance(content.get("links"), dict) else {}
+    if isinstance(links.get("image"), str) and links["image"].strip():
+        image = links["image"].strip()[:800]
+    if not image:
+        files = content.get("files") if isinstance(content.get("files"), list) else []
+        for f in files:
+            if not isinstance(f, dict):
+                continue
+            uri = f.get("cdn_uri") or f.get("uri")
+            if isinstance(uri, str) and uri.strip():
+                image = uri.strip()[:800]
+                break
+    meta: dict[str, Any] = {}
+    if isinstance(name, str) and name.strip():
+        meta["name"] = name.strip()[:200]
+    if isinstance(symbol, str) and symbol.strip():
+        meta["symbol"] = symbol.strip()[:32]
+    if image:
+        meta["image"] = image
+    return meta if meta else None

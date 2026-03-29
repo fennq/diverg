@@ -107,6 +107,12 @@ async function del(path) {
 // ── Helpers ───────────────────────────────────────────────────────────────
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+function copyInvText(text) {
+  const t = (text || '').trim();
+  if (!t) return;
+  navigator.clipboard.writeText(t).then(() => toast('Copied', 'ok')).catch(() => toast('Copy failed', 'err'));
+}
+
 function riskClass(v) {
   const l = (v || '').toLowerCase();
   if (l.includes('critical')) return 'critical';
@@ -657,6 +663,27 @@ function _invTokenBundleSummaryHtml(d) {
   if (!d.ok) {
     return `<p class="inv-err">${esc(d.error || 'Bundle analysis failed')}</p>`;
   }
+  const mintFull = d.mint || '';
+  const meta = d.token_metadata || {};
+  const metaLine = [meta.symbol, meta.name].filter(Boolean).join(' · ');
+  let titleBlock = '';
+  if (metaLine || meta.image) {
+    titleBlock += '<div class="inv-bundle-title">';
+    if (meta.image) {
+      titleBlock += `<img class="inv-bundle-token-img" src="${esc(meta.image)}" alt="" width="36" height="36" loading="lazy" referrerpolicy="no-referrer" />`;
+    }
+    if (metaLine) {
+      titleBlock += `<span class="inv-bundle-token-name">${esc(metaLine)}</span>`;
+    }
+    titleBlock += '</div>';
+  }
+  titleBlock += `<div class="inv-bundle-mint-row"><span class="mono inv-bundle-mint-full">${esc(mintFull)}</span>`;
+  titleBlock += `<button type="button" class="btn btn-secondary inv-bundle-copy" onclick="copyInvText(this.getAttribute('data-mint'))" data-mint="${esc(mintFull)}">Copy mint</button>`;
+  if (mintFull) {
+    titleBlock += `<a class="inv-bundle-ext" href="https://solscan.io/token/${encodeURIComponent(mintFull)}" target="_blank" rel="noopener noreferrer">Solscan</a>`;
+  }
+  titleBlock += '</div>';
+
   const rs = d.risk_score != null ? d.risk_score : (d.bundle_signals && d.bundle_signals.coordination_score);
   const rv = d.risk_verdict || '—';
   const cp = d.cluster_pct_supply != null ? d.cluster_pct_supply : d.focus_cluster_pct_supply;
@@ -679,6 +706,26 @@ function _invTokenBundleSummaryHtml(d) {
   if (bs.error) {
     coordLine += `<p class="inv-err" style="margin-top:0.35rem">${esc(String(bs.error))}</p>`;
   }
+
+  const topH = (d.top_holders || [])[0];
+  let ownershipStrip = '';
+  if (topH) {
+    const id = topH.identity || {};
+    const idPart = id.label
+      ? `<span class="inv-id-chip" title="Helius wallet identity">${esc(id.label)}</span>`
+      : '<span class="inv-muted">no Helius label</span>';
+    const clPart = topH.in_focus_cluster
+      ? '<span class="inv-muted">Same-funder cluster: yes</span>'
+      : '<span class="inv-muted">Same-funder cluster: no</span>';
+    ownershipStrip = `<div class="inv-bundle-ownership"><div class="inv-bundle-ownership-h">Who holds the most (in this sample)</div><p class="inv-bundle-ownership-p">Top wallet ~<strong>${esc(String(topH.pct_supply != null ? topH.pct_supply : '—'))}%</strong> of supply · ${idPart} · ${clPart}</p></div>`;
+  }
+  const fk = d.focus_cluster_key || '';
+  if (fk.indexOf('funder:') === 0) {
+    const root = fk.slice('funder:'.length);
+    const rootDisp = root.length > 12 ? root.slice(0, 10) + '…' : root;
+    ownershipStrip += `<div class="inv-bundle-ownership inv-bundle-ownership--sub"><span class="inv-muted">Cluster aligns on shared ultimate funder</span> <span class="mono" title="${esc(root)}">${esc(rootDisp)}</span> · ${esc(String(cw))} wallets · ~${esc(String(cp != null ? cp : '—'))}% of sampled supply.</div>`;
+  }
+
   let seed = '';
   if (d.seed_wallet) {
     seed = `<p class="inv-kv"><span>Focus wallet</span> ${esc(d.seed_wallet)}</p>`;
@@ -689,6 +736,13 @@ function _invTokenBundleSummaryHtml(d) {
     const rows = d.top_holders.slice(0, 20).map(h => {
       const w = h.wallet || '';
       const short = w.length > 10 ? w.slice(0, 8) + '…' : w;
+      const id = h.identity || {};
+      const lab = id.label
+        ? `<span class="inv-id-chip">${esc(id.label)}</span>`
+        : '—';
+      const cat = id.category
+        ? esc(id.category)
+        : (id.type ? esc(id.type) : '—');
       let fund = '—';
       if (h.funder) {
         const f1 = String(h.funder).slice(0, 12) + (String(h.funder).length > 12 ? '…' : '');
@@ -698,10 +752,10 @@ function _invTokenBundleSummaryHtml(d) {
           fund = `${f1} → ${f2}`;
         }
       }
-      const cl = h.in_focus_cluster ? '<span class="inv-cluster-dot" title="In cluster">●</span>' : '';
-      return `<tr><td class="mono">${esc(short)}</td><td>${esc(String(h.pct_supply != null ? h.pct_supply : '—'))}%</td><td>${cl}</td><td class="mono" style="font-size:0.65rem">${esc(fund)}</td></tr>`;
+      const cl = h.in_focus_cluster ? '<span class="inv-cluster-dot" title="In same-funder cluster">●</span>' : '';
+      return `<tr><td class="mono"><span title="${esc(w)}">${esc(short)}</span></td><td>${esc(String(h.pct_supply != null ? h.pct_supply : '—'))}%</td><td>${lab}</td><td>${cat}</td><td>${cl}</td><td class="mono inv-funder-cell" title="Direct funder → 2-hop root">${esc(fund)}</td></tr>`;
     }).join('');
-    holders = `<div class="inv-holders"><div class="inv-subhead" style="margin-top:0.75rem">Top holders</div><table><thead><tr><th>Wallet</th><th>% supply</th><th>Cluster</th><th title="Direct funder → 2-hop root when resolvable">Funder / root</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    holders = `<div class="inv-holders"><div class="inv-subhead" style="margin-top:0.75rem">Top holders</div><table class="inv-holders-table"><thead><tr><th>Wallet</th><th>%</th><th>Label</th><th>Category</th><th title="Same-funder cluster">Cl.</th><th>Funder / root</th></tr></thead><tbody>${rows}</tbody></table><p class="inv-muted" style="font-size:0.65rem;margin-top:0.35rem">Hover wallet for full address. Labels from Helius batch-identity when available.</p></div>`;
   }
   const p = d.params || {};
   let scanMeta = '';
@@ -714,7 +768,7 @@ function _invTokenBundleSummaryHtml(d) {
     scanMeta += `<p class="inv-muted" style="font-size:0.7rem">Excluded from funder scan (liquidity-sized holder): <span class="mono">${esc(short)}</span></p>`;
   }
   const notes = [d.focus_cluster_note, d.disclaimer, d.pnl_note].filter(Boolean).map(x => `<p class="inv-muted">${esc(x)}</p>`).join('');
-  return `<p class="mono" style="font-size:0.75rem;margin-bottom:0.35rem">${esc(d.mint || '')}</p>${scanMeta}${metrics}${coordLine}${seed}${holders}${notes}`;
+  return `${titleBlock}${ownershipStrip}${scanMeta}${metrics}${coordLine}${seed}${holders}${notes}`;
 }
 
 async function runTokenBundle() {

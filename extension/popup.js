@@ -511,6 +511,13 @@
     solState.className = 'popup-sol-status';
     const parts = [];
     parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">Mint</div><div class="sol-v-mini mono">${escapeHtml(data.mint)}</div></div>`);
+    const tm = data.token_metadata;
+    if (tm && (tm.symbol || tm.name)) {
+      const line = [tm.symbol, tm.name].filter(Boolean).join(' · ');
+      parts.push(
+        `<div class="sol-card-mini highlight"><div class="sol-k-mini">Token</div><div class="sol-v-mini">${escapeHtml(line)}</div></div>`
+      );
+    }
     if (data.token_supply_ui != null) {
       parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">Token supply</div><div class="sol-v-mini">${escapeHtml(String(data.token_supply_ui))}</div></div>`);
     }
@@ -552,16 +559,25 @@
       parts.push('<div class="sol-h3-mini">Top holders</div><ul class="sol-list-mini">');
       data.top_holders.slice(0, 6).forEach((h) => {
         const tag = h.in_focus_cluster ? ' <span style="color:var(--primary)">●</span>' : '';
+        const idLab = h.identity && h.identity.label ? ` · ${escapeHtml(h.identity.label)}` : '';
         let fund = '';
         if (h.funder) {
           fund = ` · ${escapeHtml(h.funder.slice(0, 6))}…`;
           if (h.funder_root) fund += `→${escapeHtml(h.funder_root.slice(0, 5))}…`;
         }
         parts.push(
-          `<li>${escapeHtml(h.wallet.slice(0, 6))}… ${escapeHtml(String(h.pct_supply))}%${fund}${tag}</li>`
+          `<li title="${escapeHtml(h.wallet)}">${escapeHtml(h.wallet.slice(0, 6))}… ${escapeHtml(String(h.pct_supply))}%${idLab}${fund}${tag}</li>`
         );
       });
       parts.push('</ul>');
+    }
+    const fk = data.focus_cluster_key || '';
+    if (fk.indexOf('funder:') === 0 && data.top_holders && data.top_holders[0]) {
+      const th = data.top_holders[0];
+      const idPart = th.identity && th.identity.label ? escapeHtml(th.identity.label) : 'no label';
+      parts.push(
+        `<p class="sol-disclaimer-mini">Top holder ~${escapeHtml(String(th.pct_supply))}% · Helius: ${idPart}${th.in_focus_cluster ? ' · in cluster' : ''}</p>`
+      );
     }
     if (data.disclaimer) parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(data.disclaimer)}</p>`);
     if (data.pnl_note) parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(data.pnl_note)}</p>`);

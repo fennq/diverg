@@ -766,6 +766,93 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
 }
 .inv-holders th { color: var(--dim); font-weight: 500; }
 .inv-cluster-dot { color: var(--accent); font-weight: 700; }
+.inv-holders-table { min-width: 520px; }
+.inv-funder-cell { font-size: 0.65rem; max-width: 140px; word-break: break-all; }
+
+.inv-bundle-title {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 0.5rem;
+}
+.inv-bundle-token-img {
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.inv-bundle-token-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.inv-bundle-mint-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.75rem;
+}
+.inv-bundle-mint-full {
+  word-break: break-all;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.inv-bundle-copy {
+  font-size: 0.6875rem !important;
+  padding: 0.25rem 0.5rem !important;
+  height: auto !important;
+}
+.inv-bundle-ext {
+  font-size: 0.6875rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+.inv-bundle-ext:hover { text-decoration: underline; }
+
+.inv-bundle-ownership {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 0.75rem;
+}
+.inv-bundle-ownership--sub {
+  margin-top: -0.35rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 0;
+}
+.inv-bundle-ownership-h {
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--dim);
+  margin-bottom: 0.35rem;
+}
+.inv-bundle-ownership-p {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.inv-id-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 500;
+  background: rgba(59, 111, 245, 0.12);
+  border: 1px solid rgba(59, 111, 245, 0.25);
+  color: var(--text);
+  vertical-align: middle;
+  word-break: break-word;
+}
 
 .settings-help {
   font-size: 0.75rem;

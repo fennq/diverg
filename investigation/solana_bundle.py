@@ -17,11 +17,14 @@ from typing import Any, Optional
 
 from onchain_clients import (
     helius_batch_identity,
+    helius_das_asset,
     helius_das_token_accounts_for_mint,
     helius_json_rpc_ex,
     helius_transfers,
     helius_wallet_balances,
     helius_wallet_funded_by,
+    normalize_batch_identity_map,
+    token_metadata_from_das_asset,
 )
 from solana_bundle_signals import compute_coordination_bundle, effective_funder_address
 
@@ -518,10 +521,24 @@ def run_bundle_snapshot(
 
     seed_pct = supply_pct(float(seed_balance_ui or 0.0)) if sw and seed_balance_ui is not None else None
 
+    token_metadata: Optional[dict[str, Any]] = None
+    try:
+        das_asset = helius_das_asset(mint)
+        token_metadata = token_metadata_from_das_asset(das_asset)
+    except Exception:
+        token_metadata = None
+
+    id_targets: set[str] = set(focus_members)
+    for w in owners_sorted[:40]:
+        id_targets.add(w)
+    if sw:
+        id_targets.add(sw)
+    id_addrs = sorted(id_targets)[:100]
     identities: Optional[list] = None
-    id_addrs = list(focus_members)[:100]
+    identity_by_wallet: dict[str, dict[str, Any]] = {}
     if id_addrs:
         identities = helius_batch_identity(id_addrs)
+        identity_by_wallet = normalize_batch_identity_map(identities)
 
     holders_out = []
     for w in owners_sorted[:20]:
@@ -532,6 +549,24 @@ def run_bundle_snapshot(
             hop_funded_by,
             hop_transfers_by,
         )
+        idrow = identity_by_wallet.get(w)
+        ident_payload: Optional[dict[str, Any]] = None
+        if idrow and idrow.get("primary_label"):
+            ident_payload = {
+                "label": idrow.get("primary_label"),
+                "type": idrow.get("type"),
+                "category": idrow.get("category"),
+                "tags": idrow.get("tags") or [],
+                "domain_names": idrow.get("domain_names") or [],
+            }
+        elif idrow and (idrow.get("category") or idrow.get("type")):
+            ident_payload = {
+                "label": (idrow.get("category") or idrow.get("type") or "")[:120],
+                "type": idrow.get("type"),
+                "category": idrow.get("category"),
+                "tags": idrow.get("tags") or [],
+                "domain_names": idrow.get("domain_names") or [],
+            }
         holders_out.append(
             {
                 "wallet": w,
@@ -540,6 +575,7 @@ def run_bundle_snapshot(
                 "funder": d_fund,
                 "funder_root": r_fund,
                 "in_focus_cluster": w in focus_members if focus_members else False,
+                "identity": ident_payload,
             }
         )
 
@@ -576,6 +612,7 @@ def run_bundle_snapshot(
     return {
         "ok": True,
         "mint": mint,
+        "token_metadata": token_metadata,
         "token_supply_ui": total_ui,
         "seed_wallet": sw,
         "seed_balance_ui": round(float(seed_balance_ui), 8) if seed_balance_ui is not None else None,

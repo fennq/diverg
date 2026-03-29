@@ -143,6 +143,103 @@
       });
   }
 
+  /** Parity with investigation/onchain_clients.normalize_batch_identity_map */
+  function normalizeBatchIdentityMap(raw) {
+    var out = {};
+    if (!raw) return out;
+    var rows = Array.isArray(raw) ? raw : raw.identities || raw.data || raw.results || [];
+    if (!Array.isArray(rows)) return out;
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (!row || typeof row !== 'object') continue;
+      var addr = row.address || row.wallet;
+      if (typeof addr !== 'string' || !addr.trim()) continue;
+      addr = addr.trim();
+      var name = row.name || row.displayName || row.label;
+      var typ = row.type || row.entityType;
+      var cat = row.category;
+      var tags = Array.isArray(row.tags) ? row.tags : [];
+      var domains = row.domainNames || row.domain_names || [];
+      if (!Array.isArray(domains)) domains = [];
+      var parts = [];
+      if (typeof name === 'string' && name.trim()) parts.push(name.trim());
+      if (typeof cat === 'string' && cat.trim()) parts.push(cat.trim());
+      if (typeof typ === 'string' && typ.trim()) parts.push(typ.trim());
+      var primary = parts.length ? parts[0].slice(0, 120) : null;
+      out[addr] = {
+        primary_label: primary,
+        type: typeof typ === 'string' && typ.trim() ? typ.trim().slice(0, 64) : null,
+        category: typeof cat === 'string' && cat.trim() ? cat.trim().slice(0, 120) : null,
+        tags: tags
+          .slice(0, 12)
+          .map(function (t) {
+            return String(t).slice(0, 80);
+          })
+          .filter(Boolean),
+        domain_names: domains
+          .slice(0, 8)
+          .map(function (d) {
+            return String(d).slice(0, 80);
+          })
+          .filter(Boolean),
+      };
+    }
+    return out;
+  }
+
+  function identityPayloadFromMap(map, w) {
+    var idrow = map[w];
+    if (!idrow) return null;
+    if (idrow.primary_label) {
+      return {
+        label: idrow.primary_label,
+        type: idrow.type,
+        category: idrow.category,
+        tags: idrow.tags || [],
+        domain_names: idrow.domain_names || [],
+      };
+    }
+    if (idrow.category || idrow.type) {
+      return {
+        label: String(idrow.category || idrow.type || '').slice(0, 120),
+        type: idrow.type,
+        category: idrow.category,
+        tags: idrow.tags || [],
+        domain_names: idrow.domain_names || [],
+      };
+    }
+    return null;
+  }
+
+  /** Parity with investigation/onchain_clients.token_metadata_from_das_asset */
+  function tokenMetadataFromDas(asset) {
+    if (!asset || typeof asset !== 'object') return null;
+    var content = asset.content && typeof asset.content === 'object' ? asset.content : {};
+    var cmeta = content.metadata && typeof content.metadata === 'object' ? content.metadata : {};
+    var tokenInfo = asset.token_info && typeof asset.token_info === 'object' ? asset.token_info : {};
+    var name = cmeta.name || asset.name || tokenInfo.name;
+    var symbol = cmeta.symbol || asset.symbol || tokenInfo.symbol;
+    var image = null;
+    var links = content.links && typeof content.links === 'object' ? content.links : {};
+    if (typeof links.image === 'string' && links.image.trim()) image = links.image.trim().slice(0, 800);
+    if (!image && Array.isArray(content.files)) {
+      for (var fi = 0; fi < content.files.length; fi++) {
+        var f = content.files[fi];
+        if (!f || typeof f !== 'object') continue;
+        var uri = f.cdn_uri || f.uri;
+        if (typeof uri === 'string' && uri.trim()) {
+          image = uri.trim().slice(0, 800);
+          break;
+        }
+      }
+    }
+    var meta = {};
+    if (typeof name === 'string' && name.trim()) meta.name = name.trim().slice(0, 200);
+    if (typeof symbol === 'string' && symbol.trim()) meta.symbol = symbol.trim().slice(0, 32);
+    if (image) meta.image = image;
+    return Object.keys(meta).length ? meta : null;
+  }
+
   function parseTokenAccountOwner(acc) {
     if (!acc || typeof acc !== 'object') return null;
     var v = acc.value;
@@ -1279,6 +1376,21 @@
       seedPct = supplyPct(seedBalanceUi, totalUi);
     }
 
+    var idSet = {};
+    focusMembers.forEach(function (w) {
+      idSet[w] = true;
+    });
+    ownersSorted.slice(0, 40).forEach(function (w) {
+      idSet[w] = true;
+    });
+    if (sw) idSet[sw] = true;
+    var idAddrList = Object.keys(idSet).sort().slice(0, 100);
+
+    var dasMetaRes = await heliusDasRpc(key, 'getAsset', { id: mintNorm });
+    var identitiesRaw = await heliusBatchIdentity(key, idAddrList);
+    var idMap = normalizeBatchIdentityMap(identitiesRaw);
+    var token_metadata = tokenMetadataFromDas(dasMetaRes && dasMetaRes.result ? dasMetaRes.result : null);
+
     var holdersOut = ownersSorted.slice(0, 20).map(function (w) {
       var dr = directAndRootFunder(w, fundedBy[w], transfersBy[w], hopFundedBy, hopTransfersBy);
       return {
@@ -1288,6 +1400,7 @@
         funder: dr.direct,
         funder_root: dr.root,
         in_focus_cluster: focusMembers.indexOf(w) >= 0,
+        identity: identityPayloadFromMap(idMap, w),
       };
     });
 
@@ -1297,7 +1410,7 @@
         'No multi-wallet cluster with a shared ultimate funder in this sample. Optional: enter a wallet to focus that address’s funder-linked group.';
     }
 
-    var identities = await heliusBatchIdentity(key, focusMembers.slice(0, 100));
+    var identities = identitiesRaw;
 
     var bundleSignals = null;
     try {
@@ -1319,6 +1432,7 @@
     return {
       ok: true,
       mint: mintNorm,
+      token_metadata: token_metadata,
       token_supply_ui: totalUi,
       seed_wallet: sw || null,
       seed_balance_ui: seedBalanceUi != null ? Math.round(seedBalanceUi * 1e8) / 1e8 : null,
