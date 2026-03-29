@@ -1,6 +1,8 @@
-# nmap: used by passive recon (python-nmap). Use apt so we do not override Python's nixPkgs defaults.
+# Force Python provider detection (ensures python3 + pip + requirements.txt install).
+providers = ["python"]
+
 [phases.setup]
-aptPkgs = ["nmap"]
+aptPkgs = ["...", "nmap"]
 
 [start]
 cmd = "python3 api_server.py"
