@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
+  <defs>
+    <marker id="arr-cc" markerWidth="7" markerHeight="5" refX="6" refY="2.5" orient="auto">
+      <polygon points="0 0, 7 2.5, 0 5" fill="#8b949e"/>
+    </marker>
+  </defs>
+  <rect width="100%" height="100%" fill="#0d1117"/>
+
+  <style><![CDATA[
+    .b { fill: #161b22; stroke: #30363d; stroke-width: 1.2; }
+    .b-hi { fill: #161b22; stroke: #3fb950; stroke-width: 1.5; }
+    .b-out { fill: #161b22; stroke: #58a6ff; stroke-width: 1.5; }
+    .t { fill: #e6edf3; font-size: 11px; }
+    .sub { fill: #8b949e; font-size: 9px; }
+    .title { fill: #e6edf3; font-size: 14px; font-weight: 600; }
+  ]]></style>
+
+  <text class="title" x="600" y="34" text-anchor="middle">Cross-chain investigation  Diverg</text>
+  <text class="sub" x="600" y="52" text-anchor="middle">hints only; verify on official bridges and explorers</text>
+
+  <!-- Inputs -->
+  <rect class="b" x="40" y="76" width="200" height="56" rx="6"/>
+  <text class="t" x="140" y="102" text-anchor="middle" font-weight="600">Solana mint</text>
+  <text class="sub" x="140" y="118" text-anchor="middle">SPL token address</text>
+
+  <rect class="b" x="40" y="156" width="200" height="56" rx="6"/>
+  <text class="t" x="140" y="182" text-anchor="middle" font-weight="600">EVM contract</text>
+  <text class="sub" x="140" y="198" text-anchor="middle">per-chain via Etherscan v2</text>
+
+  <!-- Sources -->
+  <rect class="b-hi" x="300" y="100" width="240" height="88" rx="6"/>
+  <text class="t" x="420" y="128" text-anchor="middle" font-weight="600">Wormhole token list</text>
+  <text class="sub" x="420" y="144" text-anchor="middle">CSV registry + cache</text>
+  <text class="sub" x="420" y="160" text-anchor="middle">bridged address pairs</text>
+  <text class="sub" x="420" y="176" text-anchor="middle">allowlisted bridge program IDs (Sol)</text>
+
+  <rect class="b" x="300" y="216" width="240" height="72" rx="6"/>
+  <text class="t" x="420" y="244" text-anchor="middle" font-weight="600">CoinGecko (optional)</text>
+  <text class="sub" x="420" y="260" text-anchor="middle">contract / platform metadata</text>
+  <text class="sub" x="420" y="276" text-anchor="middle">disk TTL cache</text>
+
+  <!-- Merge -->
+  <rect class="b-out" x="600" y="140" width="260" height="100" rx="8"/>
+  <text class="t" x="730" y="172" text-anchor="middle" font-weight="600">cross_chain_hints</text>
+  <text class="sub" x="730" y="188" text-anchor="middle">candidates + confidence_tier</text>
+  <text class="sub" x="730" y="204" text-anchor="middle">foreign_explorer_url (Etherscan, Solscan, &)</text>
+  <text class="sub" x="730" y="220" text-anchor="middle">summarize_cross_chain_payload</text>
+
+  <!-- Outputs -->
+  <rect class="b" x="920" y="76" width="240" height="88" rx="6"/>
+  <text class="t" x="1040" y="104" text-anchor="middle" font-weight="600">blockchain_investigation</text>
+  <text class="sub" x="1040" y="120" text-anchor="middle">crime_report.cross_chain</text>
+  <text class="sub" x="1040" y="136" text-anchor="middle">Info finding + explorer links in evidence</text>
+
+  <rect class="b" x="920" y="184" width="240" height="100" rx="6"/>
+  <text class="t" x="1040" y="212" text-anchor="middle" font-weight="600">Solana bundle API</text>
+  <text class="sub" x="1040" y="228" text-anchor="middle">cross_chain + summary</text>
+  <text class="sub" x="1040" y="244" text-anchor="middle">bridge / mixer cluster signals</text>
+  <text class="sub" x="1040" y="260" text-anchor="middle">focus-scoped bridge_adjacent counts</text>
+
+  <!-- Bottom note -->
+  <rect class="b" x="80" y="320" width="1040" height="72" rx="6"/>
+  <text class="t" x="600" y="348" text-anchor="middle" font-weight="600">Does not prove misconduct</text>
+  <text class="sub" x="600" y="368" text-anchor="middle">Maps help you verify the same asset on another chain and trace funding context; always corroborate with primary sources.</text>
+
+  <text class="sub" x="600" y="420" text-anchor="middle">investigation/cross_chain_hints.py · skills/blockchain_investigation.py · investigation/solana_bundle.py</text>
+
+  <g stroke="#6e7681" fill="none" marker-end="url(#arr-cc)">
+    <line x1="240" y1="104" x2="300" y2="130"/>
+    <line x1="240" y1="184" x2="280" y2="164"/>
+    <line x1="420" y1="188" x2="420" y2="216"/>
+    <line x1="540" y1="144" x2="600" y2="170"/>
+    <line x1="540" y1="252" x2="620" y2="210"/>
+    <line x1="860" y1="170" x2="920" y2="120"/>
+    <line x1="860" y1="190" x2="920" y2="234"/>
+  </g>
+</svg>
