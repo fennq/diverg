@@ -3,6 +3,11 @@
  * Parity with Sectester investigation/solana_bundle.py + solana_bundle_signals.py:
  * DAS getTokenAccounts (paginated holders), largest-accounts fallback, LP skip, up to 120 wallets,
  * 2-hop ultimate-funder clustering, parallel Helius fetches, deeper coordination defaults.
+ *
+ * Optional: runBundleSnapshot(key, mint, { bundleSignalDefaults: { parallelCorroborationMode: 'dual',
+ * fundingMaxSpreadSec: 3600, enhancedTypeOverlapMin: 0.4 } }) to tune strict parallel clusters and
+ * tx-type overlap without forking defaults. JSON wallet overrides (SOLANA_BUNDLE_INTEL_OVERRIDES_PATH)
+ * are server/API only — not loaded in the extension.
  */
 (function (global) {
   var ADDR_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
@@ -1351,7 +1356,14 @@
   }
 
   async function computeCoordinationBundleAsync(apiKey, opts) {
-    var cfg = BUNDLE_SIGNAL_DEFAULTS;
+    var cfg = {};
+    Object.assign(cfg, BUNDLE_SIGNAL_DEFAULTS);
+    var bsd = opts && opts.bundleSignalDefaults;
+    if (bsd && typeof bsd === 'object') {
+      Object.keys(bsd).forEach(function (k) {
+        if (bsd[k] !== undefined && bsd[k] !== null) cfg[k] = bsd[k];
+      });
+    }
     var bucketSec = cfg.fundingBucketSec;
     var relTol = cfg.lamportsRelTol;
     var maxTransferFetch = cfg.maxTransferFetch;
@@ -2031,6 +2043,7 @@
         focusWallets: focusMembers.slice().sort(),
         transfersCache: transfersBy,
         funderRootByWallet: funderRootByWallet,
+        bundleSignalDefaults: opts.bundleSignalDefaults,
       });
     } catch (e) {
       bundleSignals = {
@@ -2076,5 +2089,8 @@
     };
   }
 
-  global.divergSolanaBundle = { runBundleSnapshot: runBundleSnapshot };
+  global.divergSolanaBundle = {
+    runBundleSnapshot: runBundleSnapshot,
+    BUNDLE_SIGNAL_DEFAULTS: BUNDLE_SIGNAL_DEFAULTS,
+  };
 })(typeof globalThis !== 'undefined' ? globalThis : self);

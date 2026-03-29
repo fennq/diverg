@@ -137,6 +137,8 @@ The core logic lives in `investigation/blockchain_fetch.py`; `run_synq_research.
 
 API / extension `bundle_signals` also includes **`funder_cex_intel`** / **`funder_mixer_intel`** (`tier` + `reasons` per funder), **`enhanced_tx_type_overlap_pairs`**, and **`mint_co_movement.enhanced.transaction_types_by_wallet`**.
 
+Chrome extension: pass **`bundleSignalDefaults`** into `runBundleSnapshot` options (same keys as `BUNDLE_SIGNAL_DEFAULTS` in `extension/solana_bundle.js`, e.g. `parallelCorroborationMode`, `fundingMaxSpreadSec`) to mirror env tuning without changing server env.
+
 ---
 
 ## License
