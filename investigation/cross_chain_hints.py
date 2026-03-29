@@ -118,8 +118,21 @@ def _foreign_explorer_url(foreign_chain: str, foreign_address: str) -> Optional[
     return None
 
 
+def confidence_to_tier(confidence: Optional[str]) -> str:
+    """Normalize vendor/registry confidence strings for UI and aggregation."""
+    c = (confidence or "").strip().lower()
+    if c in ("verified_mapping", "high"):
+        return "high"
+    if c in ("third_party_metadata", "registry_unverified", "low"):
+        return "low"
+    if c in ("medium", "heuristic"):
+        return "medium"
+    return "unknown"
+
+
 def _enrich_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     d = dict(candidate)
+    d["confidence_tier"] = confidence_to_tier(d.get("confidence") if isinstance(d.get("confidence"), str) else None)
     url = _foreign_explorer_url(d.get("foreign_chain") or "", d.get("foreign_address") or "")
     if url:
         d["foreign_explorer_url"] = url
@@ -128,6 +141,84 @@ def _enrich_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
 
 def _finalize_candidates(candidates: list) -> list[dict[str, Any]]:
     return [_enrich_candidate(c) for c in candidates if isinstance(c, dict)]
+
+
+def summarize_cross_chain_payload(payload: Any) -> dict[str, Any]:
+    """
+    Stable summary for both shapes:
+      - Solana bundle: {mint, candidates, sources, ...}
+      - Investigation skill: {lookups: [{candidates, sources, ...}, ...], note}
+    Frontends can rely on kind, candidate_count, sources, explorer_links.
+    """
+    base: dict[str, Any] = {
+        "kind": "unknown",
+        "candidate_count": 0,
+        "sources": [],
+        "explorer_links": [],
+        "has_high_tier": False,
+    }
+    if not isinstance(payload, dict):
+        return base
+    if payload.get("error") and not payload.get("candidates") and not payload.get("lookups"):
+        err = str(payload.get("error") or "error")
+        return {**base, "kind": "error", "error": err}
+
+    def _links_from(cands: list) -> tuple[list[dict[str, Any]], list[str]]:
+        links: list[dict[str, Any]] = []
+        tiers: list[str] = []
+        for c in cands:
+            if not isinstance(c, dict):
+                continue
+            u = c.get("foreign_explorer_url")
+            if u:
+                links.append({
+                    "chain": c.get("foreign_chain"),
+                    "url": u,
+                    "tier": c.get("confidence_tier") or confidence_to_tier(c.get("confidence")),
+                })
+            t = c.get("confidence_tier") or confidence_to_tier(c.get("confidence"))
+            if t:
+                tiers.append(t)
+        return links, tiers
+
+    if "mint" in payload and isinstance(payload.get("candidates"), list):
+        cands = payload["candidates"]
+        links, tiers = _links_from(cands)
+        src = [str(x) for x in (payload.get("sources") or []) if x]
+        return {
+            **base,
+            "kind": "solana_bundle",
+            "mint": payload.get("mint"),
+            "candidate_count": len(cands),
+            "sources": src,
+            "explorer_links": links[:20],
+            "has_high_tier": "high" in tiers,
+        }
+
+    lookups = payload.get("lookups")
+    if isinstance(lookups, list):
+        all_cands: list = []
+        sources: list[str] = []
+        for block in lookups:
+            if not isinstance(block, dict):
+                continue
+            all_cands.extend(block.get("candidates") or [])
+            for s in block.get("sources") or []:
+                if isinstance(s, str) and s not in sources:
+                    sources.append(s)
+        links, tiers = _links_from(all_cands)
+        return {
+            **base,
+            "kind": "investigation_report",
+            "lookup_count": len(lookups),
+            "candidate_count": len(all_cands),
+            "sources": sources,
+            "explorer_links": links[:24],
+            "has_high_tier": "high" in tiers,
+            "note": payload.get("note"),
+        }
+
+    return base
 
 
 def _http_get(url: str, timeout: float = 18.0) -> tuple[Optional[bytes], Optional[str]]:

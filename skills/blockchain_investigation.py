@@ -1486,7 +1486,7 @@ def run(
             report.flow_graph = None
 
     try:
-        from cross_chain_hints import lookup_evm_token, lookup_solana_mint
+        from cross_chain_hints import lookup_evm_token, lookup_solana_mint, summarize_cross_chain_payload
         xc_sources: list[dict[str, Any]] = []
         for tok in (report.tokens_discovered or [])[:5]:
             if not tok:
@@ -1500,13 +1500,23 @@ def run(
                 if r.get("candidates"):
                     xc_sources.append(r)
         if xc_sources:
-            report.cross_chain = {"lookups": xc_sources, "note": "Investigative hints only; verify on explorers."}
+            cc_payload: dict[str, Any] = {
+                "lookups": xc_sources,
+                "note": "Investigative hints only; verify on explorers.",
+            }
+            cc_payload["summary"] = summarize_cross_chain_payload(cc_payload)
+            report.cross_chain = cc_payload
             titles = []
             for block in xc_sources:
                 for c in (block.get("candidates") or [])[:4]:
                     fc = c.get("foreign_chain", "?")
                     fa = (c.get("foreign_address") or "")[:18]
-                    titles.append(f"{fc} {fa}… ({c.get('confidence', '')})")
+                    tier = c.get("confidence_tier") or c.get("confidence", "")
+                    ex = c.get("foreign_explorer_url")
+                    if ex:
+                        titles.append(f"{fc} {fa}… ({tier}) — {ex}")
+                    else:
+                        titles.append(f"{fc} {fa}… ({tier})")
             if titles:
                 report.findings.append(Finding(
                     title="Cross-chain asset hints [REVIEW]",
@@ -1522,7 +1532,17 @@ def run(
                     verified=False,
                 ))
     except Exception as _xce:
-        report.cross_chain = {"error": str(_xce)}
+        report.cross_chain = {
+            "error": str(_xce),
+            "summary": {
+                "kind": "error",
+                "error": str(_xce),
+                "candidate_count": 0,
+                "sources": [],
+                "explorer_links": [],
+                "has_high_tier": False,
+            },
+        }
 
     report.crime_report = _build_crime_report(report)
     if report.cross_chain and isinstance(report.crime_report, dict):

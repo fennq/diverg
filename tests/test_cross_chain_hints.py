@@ -45,6 +45,32 @@ class TestCrossChainHints(unittest.TestCase):
             eth = next(h for h in hits if h.get("foreign_chain") == "ethereum")
             self.assertIn("foreign_explorer_url", eth)
             self.assertIn("etherscan.io/token/", eth["foreign_explorer_url"])
+            self.assertEqual(eth.get("confidence_tier"), "high")
+
+    def test_summarize_cross_chain_payload(self):
+        from cross_chain_hints import summarize_cross_chain_payload
+
+        bundle = {
+            "mint": "M1",
+            "candidates": [
+                {"foreign_chain": "ethereum", "foreign_address": "0xaa", "foreign_explorer_url": "https://etherscan.io/token/0xaa", "confidence_tier": "high"},
+            ],
+            "sources": ["wormhole_token_list"],
+        }
+        s1 = summarize_cross_chain_payload(bundle)
+        self.assertEqual(s1["kind"], "solana_bundle")
+        self.assertEqual(s1["candidate_count"], 1)
+        self.assertTrue(s1["has_high_tier"])
+        self.assertEqual(len(s1["explorer_links"]), 1)
+
+        inv = {
+            "lookups": [bundle],
+            "note": "n",
+        }
+        s2 = summarize_cross_chain_payload(inv)
+        self.assertEqual(s2["kind"], "investigation_report")
+        self.assertEqual(s2["lookup_count"], 1)
+        self.assertEqual(s2["candidate_count"], 1)
 
     def test_bridge_allowlist_loads(self):
         from solana_bundle_signals import load_bridge_program_allowlist
@@ -68,6 +94,33 @@ class TestCrossChainHints(unittest.TestCase):
         )
         self.assertGreaterEqual(out["bridge_adjacent_wallet_count"], 1)
         self.assertTrue(out["shared_bridge_programs_multi_wallet"])
+        self.assertEqual(out.get("bridge_signal_scope"), "all_sampled_wallets")
+        self.assertIn(out.get("bridge_mixer_confidence_tier"), ("high", "medium", "low"))
+
+    def test_funding_cluster_bridge_mixer_focus_scope(self):
+        from solana_bundle_signals import build_funding_cluster_bridge_mixer
+
+        worm = "wormDTUJ6BPNq26feREzEhE3dxARYxkSG6AQUvU4C"
+        program_sets = {
+            "W1": {worm},
+            "W2": {worm},
+        }
+        out_all = build_funding_cluster_bridge_mixer(
+            program_sets=program_sets,
+            lookup_wallets=["W1", "W2"],
+            privacy_mixer_funding_strict=[],
+            funder_mixer_flags={},
+        )
+        out_focus = build_funding_cluster_bridge_mixer(
+            program_sets=program_sets,
+            lookup_wallets=["W1", "W2"],
+            privacy_mixer_funding_strict=[],
+            funder_mixer_flags={},
+            bridge_count_eligible_wallets=["W1"],
+        )
+        self.assertGreaterEqual(out_all["bridge_adjacent_wallet_count"], out_focus["bridge_adjacent_wallet_count"])
+        self.assertEqual(out_focus["bridge_adjacent_wallet_count"], 1)
+        self.assertEqual(out_focus.get("bridge_signal_scope"), "focus_cluster")
 
 
 if __name__ == "__main__":

@@ -930,12 +930,22 @@ def build_funding_cluster_bridge_mixer(
     lookup_wallets: list[str],
     privacy_mixer_funding_strict: list[dict[str, Any]],
     funder_mixer_flags: dict[str, bool],
+    bridge_count_eligible_wallets: Optional[list[str]] = None,
 ) -> dict[str, Any]:
+    """
+    bridge_count_eligible_wallets: when non-empty, only these wallets count toward bridge_adjacent_* and
+    shared_bridge_programs (focus-cluster–scoped signal). When None/empty, all lookup_wallets are eligible.
+    """
     allow = load_bridge_program_allowlist()
+    eligible: Optional[set[str]] = None
+    if bridge_count_eligible_wallets:
+        eligible = {str(x).strip() for x in bridge_count_eligible_wallets if x and str(x).strip()}
     risk_lines: list[str] = []
     wallet_hits: list[dict[str, Any]] = []
     bridge_touch_wallets: list[str] = []
     for w in lookup_wallets:
+        if eligible is not None and w not in eligible:
+            continue
         progs = program_sets.get(w) or set()
         hits = []
         for pid in progs:
@@ -983,6 +993,13 @@ def build_funding_cluster_bridge_mixer(
         for pid, ws in by_prog.items()
         if len(set(ws)) >= 2
     ]
+    bridge_mixer_confidence_tier = "low"
+    if shared_program_hits:
+        bridge_mixer_confidence_tier = "high"
+    elif bridge_touch_wallets and (mixer_wallet_count >= 2 or any(funder_mixer_flags.values())):
+        bridge_mixer_confidence_tier = "medium"
+    elif bridge_touch_wallets:
+        bridge_mixer_confidence_tier = "low"
     return {
         "bridge_adjacent_wallet_count": len(set(bridge_touch_wallets)),
         "bridge_adjacent_wallets": sorted(set(bridge_touch_wallets))[:40],
@@ -991,6 +1008,8 @@ def build_funding_cluster_bridge_mixer(
         "strict_mixer_cluster_max_wallets": mixer_wallet_count,
         "any_mixer_tagged_funder": any(funder_mixer_flags.values()),
         "risk_lines": risk_lines,
+        "bridge_mixer_confidence_tier": bridge_mixer_confidence_tier,
+        "bridge_signal_scope": "focus_cluster" if eligible else "all_sampled_wallets",
     }
 
 
@@ -1298,11 +1317,13 @@ def compute_coordination_bundle(
         reasons.append("program_fingerprint_overlap")
 
 
+    _bridge_eligible = list(focus_wallets) if focus_wallets else None
     funding_cluster_bridge_mixer = build_funding_cluster_bridge_mixer(
         program_sets=program_sets,
         lookup_wallets=list(lookup_wallets),
         privacy_mixer_funding_strict=privacy_mixer_funding[:12],
         funder_mixer_flags=funder_mixer_flags,
+        bridge_count_eligible_wallets=_bridge_eligible,
     )
     if funding_cluster_bridge_mixer.get("shared_bridge_programs_multi_wallet"):
         score += min(8.0, 3.0 + 2.0 * len(funding_cluster_bridge_mixer["shared_bridge_programs_multi_wallet"]))

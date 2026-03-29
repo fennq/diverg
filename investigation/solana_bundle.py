@@ -699,7 +699,7 @@ def run_bundle_snapshot(
 
     cross_chain: Optional[dict[str, Any]] = None
     try:
-        from cross_chain_hints import lookup_solana_mint
+        from cross_chain_hints import lookup_solana_mint, summarize_cross_chain_payload
 
         _sym = (token_metadata or {}).get("symbol") if isinstance(token_metadata, dict) else None
         _nm = (token_metadata or {}).get("name") if isinstance(token_metadata, dict) else None
@@ -707,8 +707,15 @@ def run_bundle_snapshot(
             mint, token_symbol=_sym if isinstance(_sym, str) else None,
             token_name=_nm if isinstance(_nm, str) else None,
         )
+        if isinstance(cross_chain, dict):
+            cross_chain = dict(cross_chain)
+            cross_chain["summary"] = summarize_cross_chain_payload(cross_chain)
     except Exception as _xc_err:
-        cross_chain = {"mint": mint, "candidates": [], "sources": [], "error": str(_xc_err)}
+        cross_chain = {
+            "mint": mint, "candidates": [], "sources": [],
+            "error": str(_xc_err),
+            "summary": {"kind": "error", "error": str(_xc_err), "candidate_count": 0, "sources": [], "explorer_links": [], "has_high_tier": False},
+        }
 
 
     return {
