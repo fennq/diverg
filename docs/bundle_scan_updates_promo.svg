@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f1419"/>
+      <stop offset="100%" style="stop-color:#1a2332"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#58a6ff"/>
+      <stop offset="100%" style="stop-color:#a371f7"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect x="48" y="48" width="1104" height="534" rx="16" fill="none" stroke="url(#accent)" stroke-width="2" opacity="0.6"/>
+  <text x="80" y="110" fill="#f0f6fc" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="42" font-weight="700">Solana bundle intel  shipped</text>
+  <text x="80" y="158" fill="#8b949e" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22">CEX · mixers · coordination  tighter heuristics + optional X mentions</text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#c9d1d9">
+    <text x="80" y="230" fill="#58a6ff" font-size="15" font-weight="600">classify_cex_tier / classify_mixer_tier</text>
+    <text x="80" y="258">  strong | weak | none  ·  DEX vs CEX disambiguation  ·  reason codes on funders</text>
+    <text x="80" y="310" fill="#58a6ff" font-size="15" font-weight="600">parallel_cex_funding (strict)</text>
+    <text x="80" y="338">  same tagged funder + time bucket OR lamports  ·  dual mode + max spread (env)</text>
+    <text x="80" y="390" fill="#58a6ff" font-size="15" font-weight="600">enhanced_transaction_type_overlap</text>
+    <text x="80" y="418">  Helius tx type Jaccard on mint-touch samples  ·  JSON wallet overrides (API)</text>
+    <text x="80" y="470" fill="#58a6ff" font-size="15" font-weight="600">Extension + dashboard</text>
+    <text x="80" y="498">  bundleSignalDefaults  ·  optional X column  ·  20+ unit tests</text>
+  </g>
+  <text x="80" y="580" fill="#484f58" font-family="ui-sans-serif, system-ui, sans-serif" font-size="16">diverg · investigation/solana_bundle_signals.py</text>
+</svg>
