@@ -59,6 +59,7 @@ scripts/generate_synq_report_pdf.py
 investigation/*
 !investigation/*.py
 !investigation/README.md
+!investigation/bundle_intel_overrides.example.json
 
 # Local-only drafts (do not commit)
 twitter/

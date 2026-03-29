@@ -1,0 +1,8 @@
+{
+  "wallet_cex_allowlist": [],
+  "wallet_cex_denylist": [],
+  "wallet_mixer_allowlist": [],
+  "wallet_mixer_denylist": [],
+  "cex_extra_label_markers": [],
+  "mixer_extra_label_markers": []
+}

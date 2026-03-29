@@ -327,6 +327,9 @@
     maxFunderRootIdentity: 24,
     signalTransfersLimit: 100,
     enhancedTxLimit: 55,
+    parallelCorroborationMode: 'either',
+    fundingMaxSpreadSec: 0,
+    enhancedTypeOverlapMin: 0.35,
   };
 
   var BUNDLE_DEEP_DEFAULTS = {
@@ -1000,7 +1003,17 @@
     return t === 'weak' || t === 'strong';
   }
 
-  function walletsFundingCorroborated(wallets, metaByWallet, bucketSec, relTol) {
+  function spreadOk(tsA, tsB, maxSpreadSec) {
+    if (maxSpreadSec <= 0) return true;
+    if (tsA == null || tsB == null) return true;
+    return Math.abs(tsA - tsB) <= maxSpreadSec;
+  }
+
+  function walletsFundingCorroborated(wallets, metaByWallet, bucketSec, relTol, extra) {
+    extra = extra || {};
+    var mode = String(extra.mode || 'either').toLowerCase();
+    var maxSpreadSec = extra.maxSpreadSec != null ? Number(extra.maxSpreadSec) : 0;
+    if (isNaN(maxSpreadSec)) maxSpreadSec = 0;
     var corroborated = {};
     var wset = [];
     var seen = {};
@@ -1012,49 +1025,90 @@
       }
     }
     if (wset.length < 2) return corroborated;
+    function lamClose(a, b) {
+      if (a <= 0 || b <= 0) return false;
+      return Math.abs(a - b) / Math.max(a, b) <= relTol;
+    }
+    if (mode === 'dual') {
+      for (var di = 0; di < wset.length; di++) {
+        for (var dj = di + 1; dj < wset.length; dj++) {
+          var wa = wset[di];
+          var wb = wset[dj];
+          var ma = metaByWallet[wa] || {};
+          var mb = metaByWallet[wb] || {};
+          var tsA = ma.first_fund_timestamp_unix;
+          var tsB = mb.first_fund_timestamp_unix;
+          var bA = tsA != null && bucketSec > 0 ? Math.floor(tsA / bucketSec) : null;
+          var bB = tsB != null && bucketSec > 0 ? Math.floor(tsB / bucketSec) : null;
+          if (bA == null || bB == null || bA !== bB) continue;
+          if (!spreadOk(tsA, tsB, maxSpreadSec)) continue;
+          var la = ma.first_fund_lamports;
+          var lb = mb.first_fund_lamports;
+          if (la == null || lb == null) continue;
+          var ia = parseInt(String(la), 10);
+          var ib = parseInt(String(lb), 10);
+          if (isNaN(ia) || isNaN(ib)) continue;
+          if (lamClose(ia, ib)) {
+            corroborated[wa] = true;
+            corroborated[wb] = true;
+          }
+        }
+      }
+      return corroborated;
+    }
     var byBucket = {};
     for (var bi = 0; bi < wset.length; bi++) {
-      var wb = wset[bi];
-      var m = metaByWallet[wb] || {};
-      var ts = m.first_fund_timestamp_unix;
-      var bkt =
-        ts != null && bucketSec > 0 ? Math.floor(ts / bucketSec) : null;
-      if (bkt != null) {
-        if (!byBucket[bkt]) byBucket[bkt] = [];
-        byBucket[bkt].push(wb);
+      var wb2 = wset[bi];
+      var m2 = metaByWallet[wb2] || {};
+      var ts2 = m2.first_fund_timestamp_unix;
+      var bkt2 = ts2 != null && bucketSec > 0 ? Math.floor(ts2 / bucketSec) : null;
+      if (bkt2 != null) {
+        if (!byBucket[bkt2]) byBucket[bkt2] = [];
+        byBucket[bkt2].push(wb2);
       }
     }
     Object.keys(byBucket).forEach(function (bk) {
       var ws = byBucket[bk];
-      var u = {};
+      var uniq = [];
+      var us = {};
       ws.forEach(function (x) {
-        u[x] = true;
+        if (!us[x]) {
+          us[x] = true;
+          uniq.push(x);
+        }
       });
-      if (Object.keys(u).length >= 2) {
-        Object.keys(u).forEach(function (k) {
-          corroborated[k] = true;
-        });
+      for (var pi = 0; pi < uniq.length; pi++) {
+        for (var pj = pi + 1; pj < uniq.length; pj++) {
+          var wxa = uniq[pi];
+          var wxb = uniq[pj];
+          var mxa = metaByWallet[wxa] || {};
+          var mxb = metaByWallet[wxb] || {};
+          if (spreadOk(mxa.first_fund_timestamp_unix, mxb.first_fund_timestamp_unix, maxSpreadSec)) {
+            corroborated[wxa] = true;
+            corroborated[wxb] = true;
+          }
+        }
       }
     });
     var lams = [];
     for (var lj = 0; lj < wset.length; lj++) {
       var wl = wset[lj];
-      var lp = (metaByWallet[wl] || {}).first_fund_lamports;
+      var mm = metaByWallet[wl] || {};
+      var lp = mm.first_fund_lamports;
+      var tst = mm.first_fund_timestamp_unix;
       if (lp != null) {
         var ln = parseInt(String(lp), 10);
-        if (!isNaN(ln)) lams.push({ w: wl, lam: ln });
+        if (!isNaN(ln)) lams.push({ w: wl, lam: ln, ts: typeof tst === 'number' ? tst : null });
       }
-    }
-    function lamClose(a, b) {
-      if (a <= 0 || b <= 0) return false;
-      return Math.abs(a - b) / Math.max(a, b) <= relTol;
     }
     for (var i = 0; i < lams.length; i++) {
       for (var j = i + 1; j < lams.length; j++) {
-        if (lamClose(lams[i].lam, lams[j].lam)) {
-          corroborated[lams[i].w] = true;
-          corroborated[lams[j].w] = true;
-        }
+        if (!lamClose(lams[i].lam, lams[j].lam)) continue;
+        var tsa = lams[i].ts;
+        var tsb = lams[j].ts;
+        if (maxSpreadSec > 0 && tsa != null && tsb != null && !spreadOk(tsa, tsb, maxSpreadSec)) continue;
+        corroborated[lams[i].w] = true;
+        corroborated[lams[j].w] = true;
       }
     }
     return corroborated;
@@ -1062,9 +1116,9 @@
 
   function walletTaggedClusterKey(wallet, metaByWallet, rootMap, funderIdents, tierStrFn) {
     var d = (metaByWallet[wallet] || {}).funder;
-    if (typeof d === 'string' && tierStrFn(funderIdents[d]) !== 'none') return d;
+    if (typeof d === 'string' && tierStrFn(d, funderIdents[d]) !== 'none') return d;
     var r = rootMap[wallet];
-    if (typeof r === 'string' && tierStrFn(funderIdents[r]) !== 'none') return r;
+    if (typeof r === 'string' && tierStrFn(r, funderIdents[r]) !== 'none') return r;
     return null;
   }
 
@@ -1090,7 +1144,7 @@
           funder: fnd,
           wallet_count: ul.length,
           wallets: ul.slice(0, 40),
-          funder_tier: tierStrFn(funderIdents[fnd]),
+          funder_tier: tierStrFn(fnd, funderIdents[fnd]),
         });
       }
     });
@@ -1100,12 +1154,13 @@
     return groups;
   }
 
-  function strictFromLoose(loose, metaByWallet, bucketSec, relTol) {
+  function strictFromLoose(loose, metaByWallet, bucketSec, relTol, corrExtra) {
+    corrExtra = corrExtra || {};
     var strict = [];
     for (var gi = 0; gi < loose.length; gi++) {
       var g = loose[gi];
       var ws = g.wallets || [];
-      var corr = walletsFundingCorroborated(ws, metaByWallet, bucketSec, relTol);
+      var corr = walletsFundingCorroborated(ws, metaByWallet, bucketSec, relTol, corrExtra);
       var u = Object.keys(corr).sort();
       if (u.length < 2) continue;
       strict.push({
@@ -1114,6 +1169,7 @@
         wallets: u.slice(0, 40),
         funder_tier: g.funder_tier,
         confidence: 'high',
+        corroboration_mode: corrExtra.mode || 'either',
       });
     }
     strict.sort(function (a, b) {
@@ -1210,12 +1266,22 @@
     return null;
   }
 
+  function enhancedTxTypeStr(tx) {
+    var keys = ['type', 'transactionType', 'source', 'txType'];
+    for (var ki = 0; ki < keys.length; ki++) {
+      var v = tx[keys[ki]];
+      if (typeof v === 'string' && v.trim()) return v.trim().toUpperCase().slice(0, 64);
+    }
+    return null;
+  }
+
   function enhancedCoMovementMint(apiKey, mint, wallet, limit) {
     return heliusEnhancedTransactions(apiKey, wallet, limit).then(function (raw) {
       var txs = unwrapEnhancedTxs(raw);
       if (!txs) return null;
       var slots = [];
       var programMap = {};
+      var typeSet = {};
       for (var i = 0; i < txs.length; i++) {
         var tx = txs[i];
         if (!tx || typeof tx !== 'object') continue;
@@ -1238,6 +1304,8 @@
         Object.keys(pm).forEach(function (p) {
           programMap[p] = true;
         });
+        var ttStr = enhancedTxTypeStr(tx);
+        if (ttStr) typeSet[ttStr] = true;
       }
       var slotSet = {};
       slots.forEach(function (s) {
@@ -1252,10 +1320,12 @@
         })
         .slice(0, 20);
       var progSample = Object.keys(programMap).sort().slice(0, 40);
+      var typeSample = Object.keys(typeSet).sort().slice(0, 32);
       return {
         wallet: wallet,
         mint_touch_slots: slotList,
         programs_sample: progSample,
+        transaction_types_sample: typeSample,
       };
     });
   }
@@ -1289,6 +1359,10 @@
     var maxFunderIdentity = cfg.maxFunderIdentity;
     var signalTrLimit = cfg.signalTransfersLimit != null ? cfg.signalTransfersLimit : 100;
     var enhancedLim = cfg.enhancedTxLimit != null ? cfg.enhancedTxLimit : 55;
+    var corrMode = cfg.parallelCorroborationMode || 'either';
+    var corrSpread = cfg.fundingMaxSpreadSec != null ? cfg.fundingMaxSpreadSec : 0;
+    var typeOverlapMin = cfg.enhancedTypeOverlapMin != null ? cfg.enhancedTypeOverlapMin : 0.35;
+    var corrExtra = { mode: corrMode, maxSpreadSec: corrSpread };
 
     var lookupOrder = opts.lookupOrder || [];
     var fundedBy = opts.fundedBy || {};
@@ -1367,9 +1441,21 @@
 
     var funderCexTier = {};
     var funderMixerTier = {};
+    var funderCexIntel = {};
+    var funderMixerIntel = {};
+    function tierCexAddr(addr, ident) {
+      return cexTierStr(ident);
+    }
+    function tierMixerAddr(addr, ident) {
+      return mixerTierStr(ident);
+    }
     Object.keys(funderIdents).forEach(function (addr) {
-      funderCexTier[addr] = cexTierStr(funderIdents[addr]);
-      funderMixerTier[addr] = mixerTierStr(funderIdents[addr]);
+      var cr = classifyCexTier(funderIdents[addr]);
+      funderCexTier[addr] = cr.tier;
+      funderCexIntel[addr] = { tier: cr.tier, reasons: cr.reasons || [] };
+      var mr = classifyMixerTier(funderIdents[addr]);
+      funderMixerTier[addr] = mr.tier;
+      funderMixerIntel[addr] = { tier: mr.tier, reasons: mr.reasons || [] };
     });
 
     var parallelCexFundingLoose = buildTaggedParallelGroups(
@@ -1377,23 +1463,36 @@
       metaByWallet,
       rootMap,
       funderIdents,
-      cexTierStr
+      tierCexAddr
     ).slice(0, 12);
-    var parallelCexFunding = strictFromLoose(parallelCexFundingLoose, metaByWallet, bucketSec, relTol).slice(0, 12);
+    var parallelCexFunding = strictFromLoose(
+      parallelCexFundingLoose,
+      metaByWallet,
+      bucketSec,
+      relTol,
+      corrExtra
+    ).slice(0, 12);
     var privacyMixerFundingLoose = buildTaggedParallelGroups(
       lookupOrder,
       metaByWallet,
       rootMap,
       funderIdents,
-      mixerTierStr
+      tierMixerAddr
     ).slice(0, 12);
-    var privacyMixerFunding = strictFromLoose(privacyMixerFundingLoose, metaByWallet, bucketSec, relTol).slice(0, 12);
+    var privacyMixerFunding = strictFromLoose(
+      privacyMixerFundingLoose,
+      metaByWallet,
+      bucketSec,
+      relTol,
+      corrExtra
+    ).slice(0, 12);
 
     var sharedInc = sharedInboundSenders(metaByWallet);
     var sharedOut = sharedOutboundReceivers(lookupOrder, transfersCache);
 
     var coSlotsByW = {};
     var programSets = {};
+    var typeSets = {};
     var mw = [];
     var srcList = focusWallets.length ? focusWallets : lookupOrder;
     for (var qi = 0; qi < srcList.length && mw.length < maxEnhancedFetch; qi++) {
@@ -1410,11 +1509,24 @@
           ps[p] = true;
         });
         programSets[we] = ps;
+        var tset = {};
+        (em.transaction_types_sample || []).forEach(function (t) {
+          if (t) tset[t] = true;
+        });
+        typeSets[we] = tset;
       }
       if (ei < mw.length - 1) await sleep(85);
     }
 
-    var enhancedSample = { wallets_analyzed: mw, mint_touch_slots_by_wallet: coSlotsByW };
+    var txTypesByWallet = {};
+    mw.forEach(function (wx) {
+      if (typeSets[wx]) txTypesByWallet[wx] = Object.keys(typeSets[wx]).sort().slice(0, 24);
+    });
+    var enhancedSample = {
+      wallets_analyzed: mw,
+      mint_touch_slots_by_wallet: coSlotsByW,
+      transaction_types_by_wallet: txTypesByWallet,
+    };
 
     var slotToW = {};
     Object.keys(coSlotsByW).forEach(function (w3) {
@@ -1453,6 +1565,20 @@
       return y.program_jaccard - x.program_jaccard;
     });
 
+    var typeOverlap = [];
+    var tKeys = Object.keys(typeSets);
+    for (var ti = 0; ti < tKeys.length; ti++) {
+      for (var tj = ti + 1; tj < tKeys.length; tj++) {
+        var ta = tKeys[ti];
+        var tb = tKeys[tj];
+        var jt = jaccard(typeSets[ta] || {}, typeSets[tb] || {});
+        if (jt > 0) typeOverlap.push({ wallet_a: ta, wallet_b: tb, type_jaccard: Math.round(jt * 1e4) / 1e4 });
+      }
+    }
+    typeOverlap.sort(function (x, y) {
+      return y.type_jaccard - x.type_jaccard;
+    });
+
     var score = 0;
     var reasons = [];
 
@@ -1468,7 +1594,8 @@
     var anyCexSample = false;
     Object.keys(sampleAddrs).forEach(function (a) {
       if ((funderCexTier[a] || '') === 'strong') anyStrongCex = true;
-      if (isCexIdentity(funderIdents[a])) anyCexSample = true;
+      var tr = funderCexTier[a] || '';
+      if (tr === 'weak' || tr === 'strong') anyCexSample = true;
     });
 
     if (timeClusters.length) {
@@ -1530,6 +1657,10 @@
       score += Math.min(18, 6 + Math.min(coMovePairs.length, 4) * 3);
       reasons.push('mint_activity_same_slot');
     }
+    if (typeOverlap.length && typeOverlap[0].type_jaccard >= typeOverlapMin) {
+      score += Math.min(10, 4 + typeOverlap[0].type_jaccard * 14);
+      reasons.push('enhanced_transaction_type_overlap');
+    }
     if (pOverlap.length && pOverlap[0].program_jaccard >= 0.15) {
       score += Math.min(15, 5 + pOverlap[0].program_jaccard * 40);
       reasons.push('program_fingerprint_overlap');
@@ -1539,8 +1670,13 @@
 
     var archetypeHints = [];
     if (parallelCexFunding.length) {
+      var strictHint =
+        corrMode === 'dual'
+          ? 'same time bucket and similar first-fund SOL (dual mode).'
+          : 'aligned first-fund time bucket or similar first-fund SOL amount';
+      if (corrSpread > 0) strictHint += ' Timestamps within ' + String(Math.round(corrSpread)) + 's where both known.';
       archetypeHints.push(
-        'High-confidence parallel CEX: shared CEX-labeled funder (direct or 2-hop root) plus aligned first-fund time or amount.'
+        'High-confidence parallel CEX: shared CEX-labeled funder (direct or 2-hop root) plus ' + strictHint
       );
     } else if (parallelCexFundingLoose.length) {
       archetypeHints.push(
@@ -1553,6 +1689,11 @@
       );
     } else if (privacyMixerFundingLoose.length) {
       archetypeHints.push('Loose privacy/mixer: same tagged funder path without funding corroboration.');
+    }
+    if (typeOverlap.length && typeOverlap[0].type_jaccard >= typeOverlapMin) {
+      archetypeHints.push(
+        'Enhanced tx types: sampled mint-touch transactions show similar Helius type labels across wallets.'
+      );
     }
 
     var tierKeySet = {};
@@ -1567,11 +1708,15 @@
     });
     var funderCexTierOut = {};
     var funderMixerTierOut = {};
+    var funderCexIntelOut = {};
+    var funderMixerIntelOut = {};
     Object.keys(tierKeySet)
       .sort()
       .forEach(function (k) {
         if (funderCexTier[k] !== undefined) funderCexTierOut[k] = funderCexTier[k];
         if (funderMixerTier[k] !== undefined) funderMixerTierOut[k] = funderMixerTier[k];
+        if (funderCexIntel[k]) funderCexIntelOut[k] = funderCexIntel[k];
+        if (funderMixerIntel[k]) funderMixerIntelOut[k] = funderMixerIntel[k];
       });
 
     return {
@@ -1582,6 +1727,8 @@
       funder_mixer_flags: mixerFunders,
       funder_cex_tier: funderCexTierOut,
       funder_mixer_tier: funderMixerTierOut,
+      funder_cex_intel: funderCexIntelOut,
+      funder_mixer_intel: funderMixerIntelOut,
       parallel_cex_funding: parallelCexFunding,
       parallel_cex_funding_loose: parallelCexFundingLoose,
       privacy_mixer_funding: privacyMixerFunding,
@@ -1590,6 +1737,7 @@
       shared_inbound_senders: sharedInc,
       shared_outbound_receivers: sharedOut,
       mint_co_movement: { same_slot_groups: coMovePairs.slice(0, 15), enhanced: enhancedSample },
+      enhanced_tx_type_overlap_pairs: typeOverlap.slice(0, 20),
       program_overlap_pairs: pOverlap.slice(0, 20),
       coordination_score: score,
       coordination_reasons: reasons,
@@ -1601,6 +1749,10 @@
         signal_transfers_limit: signalTrLimit,
         enhanced_tx_limit: enhancedLim,
         funder_root_identity_lookups: rootAddrs.length,
+        parallel_corroboration_mode: corrMode,
+        funding_max_spread_sec: corrSpread,
+        enhanced_type_overlap_min: typeOverlapMin,
+        intel_overrides_loaded: false,
       },
     };
   }

@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "investigation"))
 
 import solana_bundle_signals as sbs  # noqa: E402
+from bundle_intel_overrides import _empty_overrides  # noqa: E402
 
 
 class TestClassifyCexTier(unittest.TestCase):
@@ -46,6 +47,30 @@ class TestClassifyCexTier(unittest.TestCase):
     def test_type_dex_not_structural(self) -> None:
         tier, _ = sbs.classify_cex_tier({"type": "DEX", "name": "Router", "tags": []})
         self.assertEqual(tier, "none")
+
+    def test_extra_venue_marker(self) -> None:
+        tier, reasons = sbs.classify_cex_tier(
+            {"primary_label": "Woo deposit node", "category": "Other", "tags": []},
+            extra_venue_markers=("woo",),
+        )
+        self.assertEqual(tier, "strong")
+        self.assertTrue(any(r.startswith("venue:") for r in reasons))
+
+    def test_funder_override_denylist(self) -> None:
+        ov = _empty_overrides()
+        addr = "11111111111111111111111111111111"
+        ov["wallet_cex_denylist"] = {addr}
+        tier, r = sbs.classify_cex_tier_for_funder(addr, {"name": "Binance", "category": "CEX"}, ov)
+        self.assertEqual(tier, "none")
+        self.assertIn("override:wallet_cex_denylist", r)
+
+    def test_funder_override_allowlist(self) -> None:
+        ov = _empty_overrides()
+        addr = "22222222222222222222222222222222"
+        ov["wallet_cex_allowlist"] = {addr}
+        tier, r = sbs.classify_cex_tier_for_funder(addr, None, ov)
+        self.assertEqual(tier, "strong")
+        self.assertIn("override:wallet_cex_allowlist", r)
 
     def test_withdrawn_not_weak_cex(self) -> None:
         """'withdraw' substring inside 'withdrawn' must not trigger weak tier."""
@@ -86,6 +111,38 @@ class TestClassifyMixerTier(unittest.TestCase):
         )
         self.assertEqual(tier, "weak")
         self.assertIn("privacy_companion_weak", reasons)
+
+
+class TestCorroborationModes(unittest.TestCase):
+    def test_dual_requires_bucket_and_lamports(self) -> None:
+        meta = {
+            "a": {"first_fund_timestamp_unix": 10, "first_fund_lamports": 100},
+            "b": {"first_fund_timestamp_unix": 12, "first_fund_lamports": 999},
+        }
+        corr = sbs.wallets_funding_corroborated(
+            ["a", "b"], meta, bucket_sec=5.0, rel_tol=0.01, mode="dual", max_spread_sec=0.0
+        )
+        self.assertEqual(corr, set())
+
+    def test_dual_match(self) -> None:
+        meta = {
+            "a": {"first_fund_timestamp_unix": 10, "first_fund_lamports": 1_000_000_000},
+            "b": {"first_fund_timestamp_unix": 11, "first_fund_lamports": 1_000_000_000},
+        }
+        corr = sbs.wallets_funding_corroborated(
+            ["a", "b"], meta, bucket_sec=5.0, rel_tol=0.002, mode="dual", max_spread_sec=0.0
+        )
+        self.assertEqual(corr, {"a", "b"})
+
+    def test_spread_filters_bucket_pair(self) -> None:
+        meta = {
+            "a": {"first_fund_timestamp_unix": 100, "first_fund_lamports": 1},
+            "b": {"first_fund_timestamp_unix": 500, "first_fund_lamports": 2},
+        }
+        corr = sbs.wallets_funding_corroborated(
+            ["a", "b"], meta, bucket_sec=1000.0, rel_tol=0.5, mode="either", max_spread_sec=60.0
+        )
+        self.assertEqual(corr, set())
 
 
 class TestStrictFromLoose(unittest.TestCase):

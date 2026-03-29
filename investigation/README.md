@@ -130,6 +130,12 @@ The core logic lives in `investigation/blockchain_fetch.py`; `run_synq_research.
 | `SOLANA_BUNDLE_CEX_STRICT=1` | `is_cex_identity` requires **strong** tier only. |
 | `SOLANA_BUNDLE_MIXER_STRICT=1` | `is_mixer_privacy_identity` requires **strong** tier only. |
 | `SOLANA_BUNDLE_FUNDER_ROOT_IDENTITY_MAX` | Cap extra Helius identity calls on 2-hop root funders (default 24). |
+| `SOLANA_BUNDLE_PARALLEL_CORROBORATION_MODE` | `either` (default) = same time bucket **or** close lamports; `dual` = **both** required for strict parallel CEX/mixer groups. |
+| `SOLANA_BUNDLE_FUNDING_MAX_SPREAD_SEC` | Max `abs(ts_a - ts_b)` for funding alignment when both timestamps exist (`0` = off). Tightens bucket and lamports pairs. |
+| `SOLANA_BUNDLE_ENHANCED_TYPE_OVERLAP_MIN` | Min Jaccard on Helius enhanced-tx **type** strings (mint-touch sample) to add `enhanced_transaction_type_overlap` score (default `0.35`). |
+| `SOLANA_BUNDLE_INTEL_OVERRIDES_PATH` | JSON file: wallet CEX/mixer allow & deny lists + extra label markers. See [`bundle_intel_overrides.example.json`](bundle_intel_overrides.example.json). |
+
+API / extension `bundle_signals` also includes **`funder_cex_intel`** / **`funder_mixer_intel`** (`tier` + `reasons` per funder), **`enhanced_tx_type_overlap_pairs`**, and **`mint_co_movement.enhanced.transaction_types_by_wallet`**.
 
 ---
 

@@ -11,6 +11,9 @@ Signals (all optional; best-effort from available API fields):
 7) Shared inbound counterparties — same sender appears as source for multiple wallets.
 8) Mint co-movement — token activity for the target mint in the same slot (sampled txs).
 9) Program overlap — Jaccard-like overlap of program IDs from parsed transactions.
+10) Optional JSON overrides — wallet allow/deny lists and extra label markers (`SOLANA_BUNDLE_INTEL_OVERRIDES_PATH`).
+11) Strict parallel funding — `dual` corroboration mode and optional max timestamp spread between paired wallets.
+12) Enhanced tx type overlap — similar Helius `type` / `transactionType` labels across wallets on mint-touch samples.
 
 Not financial advice; all scores are heuristics.
 """
@@ -21,6 +24,8 @@ import re
 import time
 from collections import defaultdict
 from typing import Any, Optional
+
+from bundle_intel_overrides import load_bundle_intel_overrides
 
 # Solana base58 address (rough)
 _ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
@@ -45,6 +50,12 @@ MAX_FUNDER_ROOT_IDENTITY = int(os.environ.get("SOLANA_BUNDLE_FUNDER_ROOT_IDENTIT
 ENHANCED_TX_LIMIT = int(os.environ.get("SOLANA_BUNDLE_ENHANCED_TX_LIMIT", "55"))
 # Extra /transfers fetch during coordination pass (Helius max 100)
 SIGNAL_TRANSFERS_LIMIT = max(1, min(int(os.environ.get("SOLANA_BUNDLE_SIGNAL_TRANSFERS_LIMIT", "100")), 100))
+# parallel strict: "either" = same time bucket OR close lamports; "dual" = both required for a pair
+PARALLEL_CORROBORATION_MODE = (os.environ.get("SOLANA_BUNDLE_PARALLEL_CORROBORATION_MODE") or "either").strip().lower()
+# Max |ts_a - ts_b| for funding alignment (0 = disabled). Applies to bucket pairs and lamports pairs when both timestamps exist.
+FUNDING_MAX_SPREAD_SEC = float(os.environ.get("SOLANA_BUNDLE_FUNDING_MAX_SPREAD_SEC", "0"))
+# Minimum Jaccard on Helius enhanced tx *type* strings (e.g. SWAP) across wallet pairs to add a small score bump
+ENHANCED_TYPE_OVERLAP_MIN = float(os.environ.get("SOLANA_BUNDLE_ENHANCED_TYPE_OVERLAP_MIN", "0.35"))
 
 
 def _safe_float(x: Any) -> Optional[float]:
@@ -499,11 +510,16 @@ def _structural_cex_hit(ident: dict) -> Optional[str]:
     return None
 
 
-def classify_cex_tier(ident: Optional[dict]) -> tuple[str, list[str]]:
+def classify_cex_tier(
+    ident: Optional[dict],
+    *,
+    extra_venue_markers: tuple[str, ...] = (),
+) -> tuple[str, list[str]]:
     """
     none | weak | strong. reason_codes are short tokens for debugging/UI.
     Strong: structured exchange type/category/tags, or known venue in display name.
     Weak: generic custodial language only (hot/cold wallet, withdraw) — needs corroboration for parallel scoring.
+    extra_venue_markers: optional substrings (from JSON overrides) matched in label/name only.
     """
     reasons: list[str] = []
     if not ident or not isinstance(ident, dict):
@@ -513,8 +529,8 @@ def classify_cex_tier(ident: Optional[dict]) -> tuple[str, list[str]]:
         reasons.append(hit)
         return "strong", reasons
     lbl = _identity_label_blob(ident)
-    for v in _CEX_VENUE_LABEL_MARKERS:
-        if v in lbl:
+    for v in _CEX_VENUE_LABEL_MARKERS + tuple(extra_venue_markers):
+        if v and v in lbl:
             reasons.append(f"venue:{v}")
             return "strong", reasons
     blob = _identity_text_blob(ident)
@@ -531,14 +547,23 @@ def classify_cex_tier(ident: Optional[dict]) -> tuple[str, list[str]]:
     return "none", reasons
 
 
-def classify_mixer_tier(ident: Optional[dict]) -> tuple[str, list[str]]:
+def classify_mixer_tier(
+    ident: Optional[dict],
+    *,
+    extra_strong_blob_markers: tuple[str, ...] = (),
+) -> tuple[str, list[str]]:
     """
     none | weak | strong. Drops privacy+protocol/bridge (high false-positive); DEX blocklist kills weak tier.
+    extra_strong_blob_markers: optional substrings (overrides); if present in blob → strong.
     """
     reasons: list[str] = []
     if not ident or not isinstance(ident, dict):
         return "none", reasons
     blob = _identity_text_blob(ident)
+    for m in extra_strong_blob_markers:
+        if m and m in blob:
+            reasons.append(f"override_marker:{m[:32]}")
+            return "strong", reasons
     dex_noise = any(x in blob for x in _MIXER_DEX_BLOCKLIST)
     if re.search(r"\bmixer\b", blob) or "tumbler" in blob or "tornado" in blob:
         reasons.append("mixer_keyword")
@@ -580,17 +605,91 @@ def is_mixer_privacy_identity(ident: Optional[dict]) -> bool:
     return tier in ("weak", "strong")
 
 
+def classify_cex_tier_for_funder(
+    address: str,
+    ident: Optional[dict],
+    ov: dict[str, Any],
+) -> tuple[str, list[str]]:
+    """CEX tier for a funder address with JSON allow/deny lists and extra venue markers."""
+    addr = (address or "").strip()
+    if addr in ov.get("wallet_cex_denylist", set()):
+        return "none", ["override:wallet_cex_denylist"]
+    if addr in ov.get("wallet_cex_allowlist", set()):
+        return "strong", ["override:wallet_cex_allowlist"]
+    extra = tuple(ov.get("cex_extra_label_markers") or ())
+    return classify_cex_tier(ident, extra_venue_markers=extra)
+
+
+def classify_mixer_tier_for_funder(
+    address: str,
+    ident: Optional[dict],
+    ov: dict[str, Any],
+) -> tuple[str, list[str]]:
+    """Mixer tier for a funder address with JSON allow/deny lists and extra blob markers."""
+    addr = (address or "").strip()
+    if addr in ov.get("wallet_mixer_denylist", set()):
+        return "none", ["override:wallet_mixer_denylist"]
+    if addr in ov.get("wallet_mixer_allowlist", set()):
+        return "strong", ["override:wallet_mixer_allowlist"]
+    extra = tuple(ov.get("mixer_extra_label_markers") or ())
+    return classify_mixer_tier(ident, extra_strong_blob_markers=extra)
+
+
+def _spread_ok(ts_a: Optional[int], ts_b: Optional[int], max_spread_sec: float) -> bool:
+    if max_spread_sec <= 0:
+        return True
+    if ts_a is None or ts_b is None:
+        return True
+    return abs(int(ts_a) - int(ts_b)) <= max_spread_sec
+
+
 def wallets_funding_corroborated(
     wallets: list[str],
     meta_by_wallet: dict[str, dict[str, Any]],
     bucket_sec: float,
     rel_tol: float,
+    *,
+    mode: str = "either",
+    max_spread_sec: float = 0.0,
 ) -> set[str]:
-    """Wallets that share first-fund time bucket or matching first-fund lamports with another wallet in the list."""
+    """
+    Wallets aligned on first-fund signals.
+    mode=either: same time bucket OR close lamports (pairwise), optional max_spread on timestamps.
+    mode=dual: exists another wallet with same bucket AND close lamports (and spread when set).
+    """
     corroborated: set[str] = set()
     wset = list(dict.fromkeys(wallets))
     if len(wset) < 2:
         return corroborated
+
+    mode_l = (mode or "either").strip().lower()
+    if mode_l == "dual":
+        for i in range(len(wset)):
+            for j in range(i + 1, len(wset)):
+                wa, wb = wset[i], wset[j]
+                ma, mb = meta_by_wallet.get(wa) or {}, meta_by_wallet.get(wb) or {}
+                ts_a = ma.get("first_fund_timestamp_unix")
+                ts_b = mb.get("first_fund_timestamp_unix")
+                b_a = time_bucket(ts_a, bucket_sec) if ts_a is not None else None
+                b_b = time_bucket(ts_b, bucket_sec) if ts_b is not None else None
+                if b_a is None or b_b is None or b_a != b_b:
+                    continue
+                if not _spread_ok(ts_a, ts_b, max_spread_sec):
+                    continue
+                la = ma.get("first_fund_lamports")
+                lb = mb.get("first_fund_lamports")
+                if la is None or lb is None:
+                    continue
+                try:
+                    ia, ib = int(la), int(lb)
+                except (TypeError, ValueError):
+                    continue
+                if lamports_close(ia, ib, rel_tol):
+                    corroborated.add(wa)
+                    corroborated.add(wb)
+        return corroborated
+
+    # --- either ---
     by_bucket: dict[int, list[str]] = defaultdict(list)
     for w in wset:
         m = meta_by_wallet.get(w) or {}
@@ -599,22 +698,38 @@ def wallets_funding_corroborated(
         if b is not None:
             by_bucket[b].append(w)
     for ws in by_bucket.values():
-        if len(set(ws)) >= 2:
-            corroborated.update(ws)
-    lams: list[tuple[str, int]] = []
+        uniq = list(dict.fromkeys(ws))
+        if len(uniq) < 2:
+            continue
+        for i in range(len(uniq)):
+            for j in range(i + 1, len(uniq)):
+                wa, wb = uniq[i], uniq[j]
+                ma, mb = meta_by_wallet.get(wa) or {}, meta_by_wallet.get(wb) or {}
+                ts_a = ma.get("first_fund_timestamp_unix")
+                ts_b = mb.get("first_fund_timestamp_unix")
+                if _spread_ok(ts_a, ts_b, max_spread_sec):
+                    corroborated.add(wa)
+                    corroborated.add(wb)
+    lams: list[tuple[str, int, Optional[int]]] = []
     for w in wset:
         m = meta_by_wallet.get(w) or {}
         lp = m.get("first_fund_lamports")
+        ts = m.get("first_fund_timestamp_unix")
         if lp is not None:
             try:
-                lams.append((w, int(lp)))
+                lams.append((w, int(lp), ts if isinstance(ts, (int, float)) else None))
             except (TypeError, ValueError):
                 pass
     for i in range(len(lams)):
         for j in range(i + 1, len(lams)):
-            if lamports_close(lams[i][1], lams[j][1], rel_tol):
-                corroborated.add(lams[i][0])
-                corroborated.add(lams[j][0])
+            if not lamports_close(lams[i][1], lams[j][1], rel_tol):
+                continue
+            ts_a, ts_b = lams[i][2], lams[j][2]
+            if max_spread_sec > 0 and ts_a is not None and ts_b is not None:
+                if not _spread_ok(ts_a, ts_b, max_spread_sec):
+                    continue
+            corroborated.add(lams[i][0])
+            corroborated.add(lams[j][0])
     return corroborated
 
 
@@ -627,13 +742,13 @@ def _wallet_tagged_cluster_key(
 ) -> Optional[str]:
     """
     Address to cluster by for CEX/mixer: direct funder if tagged, else 2-hop root if tagged.
-    tier_fn(ident) -> none|weak|strong
+    tier_fn(funder_address: str, ident: Optional[dict]) -> none|weak|strong
     """
     d = meta_by_wallet.get(wallet, {}).get("funder")
-    if isinstance(d, str) and tier_fn(funder_idents.get(d)) != "none":
+    if isinstance(d, str) and tier_fn(d, funder_idents.get(d)) != "none":
         return d
     r = funder_root_by_wallet.get(wallet)
-    if isinstance(r, str) and tier_fn(funder_idents.get(r)) != "none":
+    if isinstance(r, str) and tier_fn(r, funder_idents.get(r)) != "none":
         return r
     return None
 
@@ -657,7 +772,7 @@ def _build_tagged_parallel_groups(
     for fnd, ws in key_to_wallets.items():
         u = sorted(set(ws))
         if len(u) >= 2:
-            tier = tier_fn(funder_idents.get(fnd))
+            tier = tier_fn(fnd, funder_idents.get(fnd))
             groups.append(
                 {
                     "funder": fnd,
@@ -675,14 +790,24 @@ def _strict_from_loose(
     meta_by_wallet: dict[str, dict[str, Any]],
     bucket_sec: float,
     rel_tol: float,
+    *,
+    corroboration_mode: str = "either",
+    max_spread_sec: float = 0.0,
 ) -> list[dict[str, Any]]:
-    """Keep only wallets pairwise corroborated by funding time or lamports."""
+    """Keep only wallets corroborated per SOLANA_BUNDLE_PARALLEL_CORROBORATION_MODE and spread."""
     strict: list[dict[str, Any]] = []
     for g in loose:
         ws = g.get("wallets") or []
         if not isinstance(ws, list):
             continue
-        corr = wallets_funding_corroborated(ws, meta_by_wallet, bucket_sec, rel_tol)
+        corr = wallets_funding_corroborated(
+            ws,
+            meta_by_wallet,
+            bucket_sec,
+            rel_tol,
+            mode=corroboration_mode,
+            max_spread_sec=max_spread_sec,
+        )
         if len(corr) < 2:
             continue
         u = sorted(corr)
@@ -693,6 +818,7 @@ def _strict_from_loose(
                 "wallets": u[:40],
                 "funder_tier": g.get("funder_tier"),
                 "confidence": "high",
+                "corroboration_mode": corroboration_mode,
             }
         )
     strict.sort(key=lambda x: -x["wallet_count"])
@@ -771,6 +897,14 @@ def _programs_from_enhanced(tx: dict) -> set[str]:
     return progs
 
 
+def _enhanced_tx_type_str(tx: dict) -> Optional[str]:
+    for k in ("type", "transactionType", "source", "txType"):
+        v = tx.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip().upper()[:64]
+    return None
+
+
 def enhanced_co_movement_mint(
     wallet: str,
     mint: str,
@@ -781,6 +915,7 @@ def enhanced_co_movement_mint(
         return None
     slots: list[int] = []
     programs: set[str] = set()
+    tx_types: set[str] = set()
     for tx in txs:
         if not isinstance(tx, dict):
             continue
@@ -799,10 +934,14 @@ def enhanced_co_movement_mint(
         if hit and slot is not None:
             slots.append(slot)
         programs |= _programs_from_enhanced(tx)
+        tt = _enhanced_tx_type_str(tx)
+        if tt:
+            tx_types.add(tt)
     return {
         "wallet": wallet,
         "mint_touch_slots": sorted(set(slots))[:20],
         "programs_sample": sorted(programs)[:40],
+        "transaction_types_sample": sorted(tx_types)[:32],
     }
 
 
@@ -812,14 +951,6 @@ def jaccard(a: set[str], b: set[str]) -> float:
     inter = len(a & b)
     union = len(a | b)
     return inter / union if union else 0.0
-
-
-def _tier_str_cex(ident: Optional[dict]) -> str:
-    return classify_cex_tier(ident)[0]
-
-
-def _tier_str_mixer(ident: Optional[dict]) -> str:
-    return classify_mixer_tier(ident)[0]
 
 
 def compute_coordination_bundle(
@@ -873,36 +1004,61 @@ def compute_coordination_bundle(
         if i < len(root_addrs) - 1:
             time.sleep(0.04)
 
-    cex_funders = {f: is_cex_identity(funder_idents.get(f)) for f in funders}
-    funder_mixer_flags = {f: is_mixer_privacy_identity(funder_idents.get(f)) for f in funders}
-    funder_cex_tier = {addr: classify_cex_tier(funder_idents.get(addr))[0] for addr in funder_idents}
-    funder_mixer_tier = {addr: classify_mixer_tier(funder_idents.get(addr))[0] for addr in funder_idents}
+    ov = load_bundle_intel_overrides()
+
+    def _cex_tier_str(addr: str, ident: Optional[dict]) -> str:
+        return classify_cex_tier_for_funder(addr, ident, ov)[0]
+
+    def _mixer_tier_str(addr: str, ident: Optional[dict]) -> str:
+        return classify_mixer_tier_for_funder(addr, ident, ov)[0]
+
+    funder_cex_tier: dict[str, str] = {}
+    funder_mixer_tier: dict[str, str] = {}
+    funder_cex_intel: dict[str, dict[str, Any]] = {}
+    funder_mixer_intel: dict[str, dict[str, Any]] = {}
+    for addr in funder_idents:
+        ct, cr = classify_cex_tier_for_funder(addr, funder_idents.get(addr), ov)
+        funder_cex_tier[addr] = ct
+        funder_cex_intel[addr] = {"tier": ct, "reasons": cr}
+        mt, mr = classify_mixer_tier_for_funder(addr, funder_idents.get(addr), ov)
+        funder_mixer_tier[addr] = mt
+        funder_mixer_intel[addr] = {"tier": mt, "reasons": mr}
+
+    cex_funders = {f: _cex_tier_str(f, funder_idents.get(f)) != "none" for f in funders}
+    funder_mixer_flags = {f: _mixer_tier_str(f, funder_idents.get(f)) != "none" for f in funders}
+
+    _corr_mode = PARALLEL_CORROBORATION_MODE if PARALLEL_CORROBORATION_MODE in ("either", "dual") else "either"
+    _spread = max(0.0, FUNDING_MAX_SPREAD_SEC)
 
     parallel_cex_funding_loose = _build_tagged_parallel_groups(
         lookup_wallets,
         meta_by_wallet,
         root_map,
         funder_idents,
-        _tier_str_cex,
+        _cex_tier_str,
     )
     parallel_cex_funding = _strict_from_loose(
         parallel_cex_funding_loose,
         meta_by_wallet,
         FUNDING_TIME_BUCKET_SEC,
         LAMPORTS_REL_TOL,
+        corroboration_mode=_corr_mode,
+        max_spread_sec=_spread,
     )
     privacy_mixer_funding_loose = _build_tagged_parallel_groups(
         lookup_wallets,
         meta_by_wallet,
         root_map,
         funder_idents,
-        _tier_str_mixer,
+        _mixer_tier_str,
     )
     privacy_mixer_funding = _strict_from_loose(
         privacy_mixer_funding_loose,
         meta_by_wallet,
         FUNDING_TIME_BUCKET_SEC,
         LAMPORTS_REL_TOL,
+        corroboration_mode=_corr_mode,
+        max_spread_sec=_spread,
     )
 
     shared_inc = shared_inbound_senders(meta_by_wallet)
@@ -911,15 +1067,24 @@ def compute_coordination_bundle(
     enhanced_sample: dict[str, Any] = {}
     co_slots_by_w: dict[str, list[int]] = {}
     program_sets: dict[str, set[str]] = {}
+    type_sets: dict[str, set[str]] = {}
     mw = [w for w in (focus_wallets or lookup_wallets) if w in meta_by_wallet][:MAX_ENHANCED_FETCH]
     for i, w in enumerate(mw):
         em = enhanced_co_movement_mint(w, mint, limit=ENHANCED_TX_LIMIT)
         if em:
             co_slots_by_w[w] = em.get("mint_touch_slots") or []
             program_sets[w] = set(em.get("programs_sample") or [])
+            ts = em.get("transaction_types_sample") or []
+            if isinstance(ts, list):
+                type_sets[w] = {str(x).strip().upper()[:64] for x in ts if x is not None and str(x).strip()}
         if i < len(mw) - 1:
             time.sleep(0.085)
-    enhanced_sample = {"wallets_analyzed": mw, "mint_touch_slots_by_wallet": co_slots_by_w}
+    tx_types_by_wallet = {w: sorted(type_sets.get(w, set()))[:24] for w in mw if w in type_sets}
+    enhanced_sample = {
+        "wallets_analyzed": mw,
+        "mint_touch_slots_by_wallet": co_slots_by_w,
+        "transaction_types_by_wallet": tx_types_by_wallet,
+    }
 
     # Same-slot mint touch: wallets that appear in same slot for mint-related txs (any pair)
     slot_to_w: dict[int, list[str]] = defaultdict(list)
@@ -947,6 +1112,18 @@ def compute_coordination_bundle(
             )
     p_overlap.sort(key=lambda x: -x["program_jaccard"])
 
+    type_overlap: list[dict[str, Any]] = []
+    tkeys = list(type_sets.keys())
+    for i in range(len(tkeys)):
+        for j in range(i + 1, len(tkeys)):
+            a, b = tkeys[i], tkeys[j]
+            jt = jaccard(type_sets.get(a, set()), type_sets.get(b, set()))
+            if jt > 0:
+                type_overlap.append(
+                    {"wallet_a": a, "wallet_b": b, "type_jaccard": round(jt, 4)}
+                )
+    type_overlap.sort(key=lambda x: -x["type_jaccard"])
+
     # --- Score 0-100 (cap)
     score = 0.0
     reasons: list[str] = []
@@ -964,7 +1141,7 @@ def compute_coordination_bundle(
 
     sample_addrs = _sample_funder_addrs()
     any_strong_cex = any(funder_cex_tier.get(a) == "strong" for a in sample_addrs)
-    any_cex = any(is_cex_identity(funder_idents.get(a)) for a in sample_addrs)
+    any_cex = any(funder_cex_tier.get(a) in ("weak", "strong") for a in sample_addrs)
 
     if time_clusters:
         score += min(22, 6 + max(0, len(time_clusters[0]["wallets"]) - 2) * 4)
@@ -1015,6 +1192,9 @@ def compute_coordination_bundle(
     if co_move_pairs:
         score += min(18, 6 + min(len(co_move_pairs), 4) * 3)
         reasons.append("mint_activity_same_slot")
+    if type_overlap and type_overlap[0]["type_jaccard"] >= ENHANCED_TYPE_OVERLAP_MIN:
+        score += min(10, 4 + type_overlap[0]["type_jaccard"] * 14)
+        reasons.append("enhanced_transaction_type_overlap")
     if p_overlap and p_overlap[0]["program_jaccard"] >= 0.15:
         score += min(15, 5 + p_overlap[0]["program_jaccard"] * 40)
         reasons.append("program_fingerprint_overlap")
@@ -1023,8 +1203,15 @@ def compute_coordination_bundle(
 
     archetype_hints: list[str] = []
     if parallel_cex_funding:
+        _strict_hint = (
+            "same time bucket and similar first-fund SOL (dual mode)."
+            if _corr_mode == "dual"
+            else "aligned first-fund time bucket or similar first-fund SOL amount"
+        )
+        if _spread > 0:
+            _strict_hint += f"; timestamps within {_spread:.0f}s where both known."
         archetype_hints.append(
-            "High-confidence parallel CEX: shared CEX-labeled funder (direct or 2-hop root) plus aligned first-fund time or amount."
+            f"High-confidence parallel CEX: shared CEX-labeled funder (direct or 2-hop root) plus {_strict_hint}."
         )
     elif parallel_cex_funding_loose:
         archetype_hints.append(
@@ -1038,6 +1225,12 @@ def compute_coordination_bundle(
         archetype_hints.append(
             "Loose privacy/mixer: same tagged funder path without funding corroboration."
         )
+    if type_overlap and type_overlap[0]["type_jaccard"] >= ENHANCED_TYPE_OVERLAP_MIN:
+        archetype_hints.append(
+            "Enhanced tx types: sampled mint-touch transactions show similar Helius type labels across wallets."
+        )
+
+    tier_export_keys = sorted(sample_addrs | set(funders) | set(root_addrs))
 
     return {
         "funding_metadata_by_wallet": meta_by_wallet,
@@ -1045,16 +1238,10 @@ def compute_coordination_bundle(
         "funding_same_amount_clusters": amount_clusters,
         "funder_cex_flags": cex_funders,
         "funder_mixer_flags": funder_mixer_flags,
-        "funder_cex_tier": {
-            k: funder_cex_tier[k]
-            for k in sorted(sample_addrs | set(funders) | set(root_addrs))
-            if k in funder_cex_tier
-        },
-        "funder_mixer_tier": {
-            k: funder_mixer_tier[k]
-            for k in sorted(sample_addrs | set(funders) | set(root_addrs))
-            if k in funder_mixer_tier
-        },
+        "funder_cex_tier": {k: funder_cex_tier[k] for k in tier_export_keys if k in funder_cex_tier},
+        "funder_mixer_tier": {k: funder_mixer_tier[k] for k in tier_export_keys if k in funder_mixer_tier},
+        "funder_cex_intel": {k: funder_cex_intel[k] for k in tier_export_keys if k in funder_cex_intel},
+        "funder_mixer_intel": {k: funder_mixer_intel[k] for k in tier_export_keys if k in funder_mixer_intel},
         "parallel_cex_funding": parallel_cex_funding[:12],
         "parallel_cex_funding_loose": parallel_cex_funding_loose[:12],
         "privacy_mixer_funding": privacy_mixer_funding[:12],
@@ -1063,6 +1250,7 @@ def compute_coordination_bundle(
         "shared_inbound_senders": shared_inc,
         "shared_outbound_receivers": shared_out,
         "mint_co_movement": {"same_slot_groups": co_move_pairs[:15], "enhanced": enhanced_sample},
+        "enhanced_tx_type_overlap_pairs": type_overlap[:20],
         "program_overlap_pairs": p_overlap[:20],
         "coordination_score": score,
         "coordination_reasons": reasons,
@@ -1074,5 +1262,9 @@ def compute_coordination_bundle(
             "signal_transfers_limit": SIGNAL_TRANSFERS_LIMIT,
             "enhanced_tx_limit": ENHANCED_TX_LIMIT,
             "funder_root_identity_lookups": len(root_addrs),
+            "parallel_corroboration_mode": _corr_mode,
+            "funding_max_spread_sec": _spread,
+            "enhanced_type_overlap_min": ENHANCED_TYPE_OVERLAP_MIN,
+            "intel_overrides_loaded": bool((os.environ.get("SOLANA_BUNDLE_INTEL_OVERRIDES_PATH") or "").strip()),
         },
     }
