@@ -61,12 +61,12 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 try:
-    from flask import Flask, request, jsonify, send_from_directory
+    from flask import Flask, request, jsonify, send_from_directory, g
 except ImportError:
     print("Install Flask: pip install flask")
     sys.exit(1)
 
-from flask import Response, current_app, stream_with_context
+from flask import Response, stream_with_context
 
 try:
     import bcrypt
@@ -375,7 +375,7 @@ def require_auth(f):
         user = get_current_user()
         if not user:
             return jsonify({"error": "Authentication required"}), 401
-        request.user = user
+        g.user = user
         return f(*args, **kwargs)
     return decorated
 
@@ -629,7 +629,7 @@ def auth_google():
 @app.route("/api/auth/me", methods=["GET"])
 @require_auth
 def auth_me():
-    return jsonify({"user": request.user})
+    return jsonify({"user": g.user})
 
 
 # ── Dashboard static files ───────────────────────────────────────────────────
@@ -703,7 +703,7 @@ def api_scan():
     try:
         result = run_web_scan(url, scope=scope, goal=goal, auth_context=auth_context)
         scan_id = str(uuid.uuid4())
-        save_scan(scan_id, result, scope, user_id=request.user["id"])
+        save_scan(scan_id, result, scope, user_id=g.user["id"])
         payload = {
             "id": scan_id,
             "target_url": result["target_url"],
@@ -746,11 +746,12 @@ def api_scan_stream():
         return err
 
     scan_id = str(uuid.uuid4())
-    user_id = request.user["id"]
+    user_id = g.user["id"]
+    _log = logging.getLogger("diverg.api")
 
     def _ndjson(obj: dict) -> str:
-        """NDJSON line; default=str avoids 500s from non-JSON-serializable values in stream."""
-        return json.dumps(obj, default=str, ensure_ascii=False) + "\n"
+        """NDJSON line. ensure_ascii=True keeps output UTF-8-safe on the wire (e.g. lone surrogates)."""
+        return json.dumps(obj, default=str, ensure_ascii=True) + "\n"
 
     def generate():
         accumulated = None
@@ -765,14 +766,11 @@ def api_scan_stream():
                 try:
                     yield _ndjson(event)
                 except (TypeError, ValueError) as enc_err:
-                    current_app.logger.exception("scan stream encode failed: %s", enc_err)
+                    _log.exception("scan stream encode failed: %s", enc_err)
                     yield _ndjson({"event": "error", "error": f"encode_failed: {enc_err}"})
                     break
         except Exception as e:
-            try:
-                current_app.logger.exception("scan stream failed: %s", e)
-            except RuntimeError:
-                logging.getLogger("diverg.api").exception("scan stream failed: %s", e)
+            _log.exception("scan stream failed: %s", e)
             yield _ndjson({"event": "error", "error": str(e)})
         finally:
             if accumulated:
@@ -783,11 +781,10 @@ def api_scan_stream():
 
     return Response(
         stream_with_context(generate()),
-        mimetype="application/x-ndjson",
+        mimetype="text/plain; charset=utf-8",
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
         },
     )
 
@@ -842,7 +839,7 @@ def poc_simulate():
                                     max_body_preview=pv_lim)
 
     if result.success:
-        _reward_poc(request.user["id"])
+        _reward_poc(g.user["id"])
     return jsonify({
         "success": result.success,
         "status_code": result.status_code,
@@ -973,7 +970,7 @@ def investigation_blockchain():
             out["summary"] = _summarize_chain_evm(raw)
         except Exception as e:
             return jsonify({"error": str(e), "address": addr, "chain": "evm"}), 200
-        _reward_investigation(request.user["id"], "blockchain")
+        _reward_investigation(g.user["id"], "blockchain")
         return jsonify(out)
 
     # Solana-style (base58)
@@ -1012,7 +1009,7 @@ def investigation_blockchain():
         raw["getTokenAccountsByOwner"] = {"error": str(e)}
     out["raw"] = raw
     out["summary"] = _summarize_chain_solana(raw)
-    _reward_investigation(request.user["id"], "blockchain")
+    _reward_investigation(g.user["id"], "blockchain")
     return jsonify(out)
 
 
@@ -1045,7 +1042,7 @@ def investigation_domain():
             headers_ssl = f_hd.result(timeout=120)
         combined = {"osint": osint, "recon": recon, "headers_ssl": headers_ssl}
         findings = aggregate_findings(combined)
-        _reward_investigation(request.user["id"], "domain")
+        _reward_investigation(g.user["id"], "domain")
         return jsonify({
             "domain": domain,
             "target_url": target_url,
@@ -1082,7 +1079,7 @@ def investigation_reputation():
         if isinstance(osint, dict) and "error" not in osint:
             ctx["osint_json"] = json.dumps(osint)
         rep = run_skill("entity_reputation", domain, target_url, ctx, scan_type="full")
-        _reward_investigation(request.user["id"], "reputation")
+        _reward_investigation(g.user["id"], "reputation")
         return jsonify({
             "domain": domain,
             "target_url": target_url,
@@ -1208,7 +1205,7 @@ def investigation_solana_bundle():
         out = _enrich_solana_bundle_payload(out)
     payload = out if isinstance(out, dict) else {"ok": False, "error": "Unexpected response"}
     if isinstance(payload, dict) and payload.get("ok"):
-        _reward_investigation(request.user["id"], "solana_bundle")
+        _reward_investigation(g.user["id"], "solana_bundle")
     try:
         return jsonify(payload)
     except TypeError:
@@ -1331,7 +1328,7 @@ def rewards_leaderboard():
 def history_list():
     limit = _safe_int(request.args.get("limit"), 50, 1, 200)
     offset = _safe_int(request.args.get("offset"), 0, 0, 999999)
-    user_id = request.user["id"]
+    user_id = g.user["id"]
 
     with _db() as conn:
         total = conn.execute("SELECT COUNT(*) FROM scans WHERE user_id = ?", (user_id,)).fetchone()[0]
@@ -1379,7 +1376,7 @@ def _safe_report_json(raw: str | None) -> dict:
 @app.route("/api/analytics/summary", methods=["GET"])
 @require_auth
 def analytics_summary():
-    user_id = request.user["id"]
+    user_id = g.user["id"]
     limit = _safe_int(request.args.get("limit"), 100, 1, 400)
     with _db() as conn:
         rows = conn.execute(
@@ -1454,7 +1451,7 @@ def analytics_summary():
 @app.route("/api/findings", methods=["GET"])
 @require_auth
 def findings_list():
-    user_id = request.user["id"]
+    user_id = g.user["id"]
     scan_limit = _safe_int(request.args.get("scan_limit"), 120, 1, 400)
     finding_limit = _safe_int(request.args.get("finding_limit"), 2000, 1, 10000)
     with _db() as conn:
@@ -1489,7 +1486,7 @@ def findings_list():
 @app.route("/api/attack-paths", methods=["GET"])
 @require_auth
 def attack_paths_list():
-    user_id = request.user["id"]
+    user_id = g.user["id"]
     scan_limit = _safe_int(request.args.get("scan_limit"), 120, 1, 400)
     path_limit = _safe_int(request.args.get("path_limit"), 1000, 1, 5000)
     with _db() as conn:
@@ -1528,7 +1525,7 @@ def history_get(scan_id):
         return jsonify({"error": "Invalid scan ID"}), 400
     with _db() as conn:
         row = conn.execute("SELECT * FROM scans WHERE id = ? AND user_id = ?",
-                           (scan_id, request.user["id"])).fetchone()
+                           (scan_id, g.user["id"])).fetchone()
     if not row:
         return jsonify({"error": "Scan not found"}), 404
     data = dict(row)
@@ -1563,7 +1560,7 @@ def history_patch(scan_id):
     label = sanitize_text(data.get("label", ""), 200)
     with _db() as conn:
         conn.execute("UPDATE scans SET label = ? WHERE id = ? AND user_id = ?",
-                     (label, scan_id, request.user["id"]))
+                     (label, scan_id, g.user["id"]))
     return jsonify({"id": scan_id, "label": label})
 
 
@@ -1572,7 +1569,7 @@ def history_patch(scan_id):
 @app.route("/api/stats", methods=["GET"])
 @require_auth
 def stats():
-    user_id = request.user["id"]
+    user_id = g.user["id"]
     with _db() as conn:
         row = conn.execute("""
             SELECT
