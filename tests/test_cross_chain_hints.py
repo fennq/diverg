@@ -11,8 +11,29 @@ _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "investigation"))
 
 FIX = Path(__file__).resolve().parent / "fixtures" / "wormhole_tokens_min.json"
+FIX_CSV = Path(__file__).resolve().parent / "fixtures" / "wormhole_by_source_min.csv"
 
 class TestCrossChainHints(unittest.TestCase):
+    def test_wormhole_csv_golden_fixture(self):
+        from cross_chain_hints import _wormhole_csv_to_rows
+
+        raw = FIX_CSV.read_bytes()
+        rows = _wormhole_csv_to_rows(raw)
+        self.assertEqual(len(rows), 1)
+        pl = rows[0]["platforms"]
+        self.assertEqual(pl["solana"], "So11111111111111111111111111111111111111112")
+        self.assertEqual(pl["ethereum"], "0xdac17f958d2ee523a2206206994597c13d831ec7")
+
+    def test_foreign_explorer_url_solana_and_evm(self):
+        from cross_chain_hints import _foreign_explorer_url
+
+        u = _foreign_explorer_url("ethereum", "0xdac17f958d2ee523a2206206994597c13d831ec7")
+        self.assertEqual(u, "https://etherscan.io/token/0xdac17f958d2ee523a2206206994597c13d831ec7")
+        u2 = _foreign_explorer_url("binance-smart-chain", "0xabc0000000000000000000000000000000000001")
+        self.assertTrue(u2.startswith("https://bscscan.com/token/"))
+        u3 = _foreign_explorer_url("solana", "So11111121111111111111111111111111111111112")
+        self.assertEqual(u3, "https://solscan.io/token/So11111121111111111111111111111111111111112")
+
     def test_lookup_from_fixture_rows(self):
         from cross_chain_hints import lookup_from_wormhole_list
 
@@ -21,6 +42,9 @@ class TestCrossChainHints(unittest.TestCase):
             sol = "So11111111111111111111111111111111111111112"
             hits = lookup_from_wormhole_list(sol_mint=sol, evm_chain=None, evm_address=None)
             self.assertTrue(any(h.get("foreign_chain") == "ethereum" for h in hits))
+            eth = next(h for h in hits if h.get("foreign_chain") == "ethereum")
+            self.assertIn("foreign_explorer_url", eth)
+            self.assertIn("etherscan.io/token/", eth["foreign_explorer_url"])
 
     def test_bridge_allowlist_loads(self):
         from solana_bundle_signals import load_bridge_program_allowlist

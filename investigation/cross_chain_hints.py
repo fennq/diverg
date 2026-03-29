@@ -1,4 +1,10 @@
-"""Free cross-chain hints: cached Wormhole token list + optional CoinGecko. Env: DIVERG_WORMHOLE_CACHE_SEC, COINGECKO_API_KEY."""
+"""Free cross-chain hints: cached Wormhole token list + optional CoinGecko.
+
+Env:
+  DIVERG_WORMHOLE_CACHE_SEC — wormhole CSV/json TTL (default 86400).
+  DIVERG_COINGECKO_CACHE_SEC — CoinGecko response disk cache TTL (default 21600).
+  COINGECKO_API_KEY — optional Pro API.
+"""
 from __future__ import annotations
 
 import csv
@@ -15,6 +21,30 @@ ROOT = Path(__file__).resolve().parent
 _REPO_ROOT = ROOT.parent
 DATA_DIR = _REPO_ROOT / "data"
 CACHE_FILE = DATA_DIR / "wormhole_tokenlist_cache.json"
+COINGECKO_CACHE_FILE = DATA_DIR / "coingecko_cross_chain_cache.json"
+
+# Canonical chain slug -> block explorer token (contract) URL prefix
+EXPLORER_TOKEN_PREFIX: dict[str, str] = {
+    "ethereum": "https://etherscan.io/token/",
+    "bsc": "https://bscscan.com/token/",
+    "polygon": "https://polygonscan.com/token/",
+    "base": "https://basescan.org/token/",
+    "arbitrum": "https://arbiscan.io/token/",
+    "optimism": "https://optimistic.etherscan.io/token/",
+    "avalanche": "https://snowtrace.io/token/",
+}
+SOLSCAN_TOKEN_URL = "https://solscan.io/token/"
+# CoinGecko / API platform id -> slug keys in EXPLORER_TOKEN_PREFIX (or solana)
+_COINGECKO_PLAT_TO_SLUG: dict[str, str] = {
+    "ethereum": "ethereum",
+    "binance-smart-chain": "bsc",
+    "polygon-pos": "polygon",
+    "base": "base",
+    "arbitrum-one": "arbitrum",
+    "optimistic-ethereum": "optimism",
+    "avalanche": "avalanche",
+    "solana": "solana",
+}
 _WORMHOLE_CSV_URL = (
     "https://raw.githubusercontent.com/wormhole-foundation/wormhole-token-list/main/content/by_source.csv"
 )
@@ -31,6 +61,73 @@ def _ttl() -> float:
         return float(os.environ.get("DIVERG_WORMHOLE_CACHE_SEC", "86400"))
     except ValueError:
         return 86400.0
+
+
+def _coingecko_cache_ttl() -> float:
+    try:
+        return float(os.environ.get("DIVERG_COINGECKO_CACHE_SEC", "21600"))
+    except ValueError:
+        return 21600.0
+
+
+def _coingecko_disk_load() -> dict[str, Any]:
+    if not COINGECKO_CACHE_FILE.exists():
+        return {}
+    try:
+        j = json.loads(COINGECKO_CACHE_FILE.read_text(encoding="utf-8"))
+        return j if isinstance(j, dict) else {}
+    except Exception:
+        return {}
+
+
+def _coingecko_cache_get_list(key: str) -> Optional[list]:
+    blob = _coingecko_disk_load().get(key)
+    if not isinstance(blob, dict):
+        return None
+    if time.time() - float(blob.get("fetched_at", 0)) > _coingecko_cache_ttl():
+        return None
+    items = blob.get("items")
+    return items if isinstance(items, list) else None
+
+
+def _coingecko_cache_set_list(key: str, items: list) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    data = _coingecko_disk_load()
+    data[key] = {"fetched_at": time.time(), "items": items}
+    COINGECKO_CACHE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=0), encoding="utf-8")
+
+
+def _canonical_explorer_slug(foreign_chain: str) -> Optional[str]:
+    fc = (foreign_chain or "").strip().lower().replace(" ", "-")
+    if fc in EXPLORER_TOKEN_PREFIX or fc == "solana":
+        return fc
+    return _COINGECKO_PLAT_TO_SLUG.get(fc)
+
+
+def _foreign_explorer_url(foreign_chain: str, foreign_address: str) -> Optional[str]:
+    fa = (foreign_address or "").strip()
+    if not fa:
+        return None
+    slug = _canonical_explorer_slug(foreign_chain)
+    if slug == "solana":
+        if re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", fa):
+            return SOLSCAN_TOKEN_URL + fa
+        return None
+    if slug and slug in EXPLORER_TOKEN_PREFIX and fa.startswith("0x") and len(fa) >= 10:
+        return EXPLORER_TOKEN_PREFIX[slug] + fa.lower()
+    return None
+
+
+def _enrich_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    d = dict(candidate)
+    url = _foreign_explorer_url(d.get("foreign_chain") or "", d.get("foreign_address") or "")
+    if url:
+        d["foreign_explorer_url"] = url
+    return d
+
+
+def _finalize_candidates(candidates: list) -> list[dict[str, Any]]:
+    return [_enrich_candidate(c) for c in candidates if isinstance(c, dict)]
 
 
 def _http_get(url: str, timeout: float = 18.0) -> tuple[Optional[bytes], Optional[str]]:
@@ -240,16 +337,11 @@ def lookup_from_wormhole_list(sol_mint: Optional[str], evm_chain: Optional[str],
                         "foreign_symbol": str(sym)[:32] if sym else None, "confidence": "verified_mapping",
                         "evidence_url": f"https://solscan.io/token/{sm}",
                     })
-    return candidates
+    return _finalize_candidates(candidates)
 
 
-def lookup_coingecko_solana_mint(mint: str, timeout: float = 8.0) -> list[dict[str, Any]]:
-    mint = (mint or "").strip()
-    if not mint:
-        return []
+def _coingecko_fetch_json(url: str, timeout: float) -> Optional[dict[str, Any]]:
     key = (os.environ.get("COINGECKO_API_KEY") or "").strip()
-    base = "https://pro-api.coingecko.com/api/v3" if key else "https://api.coingecko.com/api/v3"
-    url = f"{base}/coins/solana/contract/{mint}"
     headers = {"User-Agent": "Sectester-cross-chain/1.0"}
     if key:
         headers["x-cg-pro-api-key"] = key
@@ -257,9 +349,27 @@ def lookup_coingecko_solana_mint(mint: str, timeout: float = 8.0) -> list[dict[s
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=timeout) as r:
             j = json.loads(r.read().decode("utf-8"))
+        return j if isinstance(j, dict) else None
     except Exception:
+        return None
+
+
+def lookup_coingecko_solana_mint(mint: str, timeout: float = 8.0) -> list[dict[str, Any]]:
+    mint = (mint or "").strip()
+    if not mint:
         return []
-    if not isinstance(j, dict):
+
+    cache_key = f"sol:{mint}"
+    cached = _coingecko_cache_get_list(cache_key)
+    if cached is not None:
+        base = [c for c in cached if isinstance(c, dict)]
+        return _finalize_candidates(base)[:25]
+
+    key = (os.environ.get("COINGECKO_API_KEY") or "").strip()
+    base_url = "https://pro-api.coingecko.com/api/v3" if key else "https://api.coingecko.com/api/v3"
+    url = f"{base_url}/coins/solana/contract/{mint}"
+    j = _coingecko_fetch_json(url, timeout)
+    if not j:
         return []
     platforms = j.get("platforms") or {}
     if not isinstance(platforms, dict):
@@ -273,7 +383,9 @@ def lookup_coingecko_solana_mint(mint: str, timeout: float = 8.0) -> list[dict[s
             "bridge_hint": "coingecko_platforms", "foreign_chain": str(plat)[:64], "foreign_address": addr.lower(),
             "foreign_symbol": sym, "confidence": "third_party_metadata", "evidence_url": "https://www.coingecko.com/",
         })
-    return out[:25]
+    out = out[:25]
+    _coingecko_cache_set_list(cache_key, out)
+    return _finalize_candidates(out)
 
 
 def lookup_solana_mint(
@@ -296,6 +408,40 @@ def lookup_solana_mint(
     return out
 
 
+def _lookup_coingecko_evm_other_platforms(platform: str, contract: str, timeout: float = 8.0) -> tuple[list[dict[str, Any]], bool]:
+    """Returns (cross-chain candidate rows, coingecko_fetch_ok)."""
+    contract = (contract or "").strip().lower()
+    platform = (platform or "").strip()
+    if not contract.startswith("0x") or len(contract) != 42 or not platform:
+        return [], False
+
+    cache_key = f"evm:{platform}:{contract}"
+    cached = _coingecko_cache_get_list(cache_key)
+    if cached is not None:
+        base = [c for c in cached if isinstance(c, dict)]
+        return _finalize_candidates(base)[:25], True
+
+    base_api = (os.environ.get("COINGECKO_API_KEY") or "").strip()
+    root = "https://pro-api.coingecko.com/api/v3" if base_api else "https://api.coingecko.com/api/v3"
+    url = f"{root}/coins/{platform}/contract/{contract}"
+    j = _coingecko_fetch_json(url, timeout)
+    if not j or not isinstance(j.get("platforms"), dict):
+        return [], False
+    out: list[dict[str, Any]] = []
+    sym = j.get("symbol") or ""
+    for p2, a2 in j["platforms"].items():
+        if p2 == platform or not isinstance(a2, str) or not a2.startswith("0x"):
+            continue
+        out.append({
+            "bridge_hint": "coingecko_platforms", "foreign_chain": str(p2)[:64],
+            "foreign_address": a2.lower(), "foreign_symbol": sym,
+            "confidence": "third_party_metadata", "evidence_url": "https://www.coingecko.com/",
+        })
+    out = out[:25]
+    _coingecko_cache_set_list(cache_key, out)
+    return _finalize_candidates(out), True
+
+
 def lookup_evm_token(chain_slug: str, contract: str, *, include_coingecko: bool = True) -> dict[str, Any]:
     chain_slug = (chain_slug or "").strip().lower()
     contract = (contract or "").strip()
@@ -310,30 +456,12 @@ def lookup_evm_token(chain_slug: str, contract: str, *, include_coingecko: bool 
         "ethereum": "ethereum", "eth": "ethereum", "bsc": "binance-smart-chain", "bnb": "binance-smart-chain",
         "polygon": "polygon-pos", "matic": "polygon-pos", "base": "base",
         "arbitrum": "arbitrum-one", "arb": "arbitrum-one", "avalanche": "avalanche", "avax": "avalanche",
+        "optimism": "optimistic-ethereum", "op": "optimistic-ethereum",
     }
     plat = platform_map.get(chain_slug)
     if include_coingecko and plat:
-        key = (os.environ.get("COINGECKO_API_KEY") or "").strip()
-        base = "https://pro-api.coingecko.com/api/v3" if key else "https://api.coingecko.com/api/v3"
-        url = f"{base}/coins/{plat}/contract/{contract.lower()}"
-        headers = {"User-Agent": "Sectester-cross-chain/1.0"}
-        if key:
-            headers["x-cg-pro-api-key"] = key
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=8.0) as r:
-                j = json.loads(r.read().decode("utf-8"))
-            if isinstance(j, dict) and isinstance(j.get("platforms"), dict):
-                out["sources"].append("coingecko")
-                sym = j.get("symbol") or ""
-                for p2, a2 in j["platforms"].items():
-                    if p2 == plat or not isinstance(a2, str) or not a2.startswith("0x"):
-                        continue
-                    out["candidates"].append({
-                        "bridge_hint": "coingecko_platforms", "foreign_chain": str(p2)[:64],
-                        "foreign_address": a2.lower(), "foreign_symbol": sym,
-                        "confidence": "third_party_metadata", "evidence_url": "https://www.coingecko.com/",
-                    })
-        except Exception:
-            pass
+        cg_items, cg_ok = _lookup_coingecko_evm_other_platforms(plat, contract)
+        if cg_ok:
+            out["sources"].append("coingecko")
+            out["candidates"].extend(cg_items)
     return out
