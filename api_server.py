@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import logging
 import os
 import re
 import secrets
@@ -65,7 +66,7 @@ except ImportError:
     print("Install Flask: pip install flask")
     sys.exit(1)
 
-from flask import Response, stream_with_context
+from flask import Response, current_app, stream_with_context
 
 try:
     import bcrypt
@@ -223,7 +224,11 @@ CREATE TABLE IF NOT EXISTS referral_events (
 
 
 def _db():
-    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        timeout = float(os.environ.get("DIVERG_SQLITE_TIMEOUT_SEC", "30"))
+    except ValueError:
+        timeout = 30.0
+    conn = sqlite3.connect(str(DB_PATH), timeout=timeout)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -352,10 +357,16 @@ def get_current_user():
     payload = decode_token(token)
     if not payload:
         return None
-    with _db() as conn:
-        row = conn.execute("SELECT id, email, name, provider, avatar_url, created_at FROM users WHERE id = ?",
-                           (payload["sub"],)).fetchone()
-    return dict(row) if row else None
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT id, email, name, provider, avatar_url, created_at FROM users WHERE id = ?",
+                (payload["sub"],),
+            ).fetchone()
+        return dict(row) if row else None
+    except sqlite3.Error as e:
+        logging.getLogger("diverg.api").warning("get_current_user db error: %s", e)
+        return None
 
 
 def require_auth(f):
@@ -410,9 +421,13 @@ def _security_headers(resp):
     connect_src = "'self' https://mainnet.helius-rpc.com"
     if not IS_PRODUCTION:
         connect_src += " http://127.0.0.1:*"
+    # Cloudflare Web Analytics injects beacon on proxied pages; allow or browser console shows CSP noise.
+    script_src = "'self' 'unsafe-inline'"
+    if IS_PRODUCTION:
+        script_src += " https://static.cloudflareinsights.com"
     csp = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
+        f"script-src {script_src}; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src https://fonts.gstatic.com; "
         "img-src 'self' data: https:; "
@@ -733,19 +748,32 @@ def api_scan_stream():
     scan_id = str(uuid.uuid4())
     user_id = request.user["id"]
 
+    def _ndjson(obj: dict) -> str:
+        """NDJSON line; default=str avoids 500s from non-JSON-serializable values in stream."""
+        return json.dumps(obj, default=str, ensure_ascii=False) + "\n"
+
     def generate():
         accumulated = None
         try:
-            yield json.dumps({"event": "scan_start", "id": scan_id, "url": url, "scope": scope}) + "\n"
+            yield _ndjson({"event": "scan_start", "id": scan_id, "url": url, "scope": scope})
             for event in run_web_scan_streaming(url, scope=scope, goal=goal, auth_context=auth_context):
                 if event.get("event") == "done":
                     report = event.get("report") or {}
                     report["id"] = scan_id
                     accumulated = report
                     event["id"] = scan_id
-                yield json.dumps(event) + "\n"
+                try:
+                    yield _ndjson(event)
+                except (TypeError, ValueError) as enc_err:
+                    current_app.logger.exception("scan stream encode failed: %s", enc_err)
+                    yield _ndjson({"event": "error", "error": f"encode_failed: {enc_err}"})
+                    break
         except Exception as e:
-            yield json.dumps({"event": "error", "error": str(e)}) + "\n"
+            try:
+                current_app.logger.exception("scan stream failed: %s", e)
+            except RuntimeError:
+                logging.getLogger("diverg.api").exception("scan stream failed: %s", e)
+            yield _ndjson({"event": "error", "error": str(e)})
         finally:
             if accumulated:
                 try:
@@ -755,7 +783,7 @@ def api_scan_stream():
 
     return Response(
         stream_with_context(generate()),
-        mimetype="text/event-stream",
+        mimetype="application/x-ndjson",
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
@@ -1623,8 +1651,13 @@ def main():
     print(f"  API             →  http://{args.host}:{args.port}/api/health")
     try:
         from waitress import serve
-        print(f"  Server          →  waitress on {args.host}:{args.port}")
-        serve(app, host=args.host, port=args.port, threads=8, channel_timeout=300)
+        try:
+            w_threads = int(os.environ.get("WAITRESS_THREADS", "16"))
+        except ValueError:
+            w_threads = 16
+        w_threads = max(4, min(w_threads, 32))
+        print(f"  Server          →  waitress on {args.host}:{args.port} (threads={w_threads})")
+        serve(app, host=args.host, port=args.port, threads=w_threads, channel_timeout=300)
     except ImportError:
         print("  Server          →  Flask dev (waitress not installed)")
         from werkzeug.serving import WSGIRequestHandler
