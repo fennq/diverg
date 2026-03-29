@@ -46,6 +46,10 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         Findings
       </div>
+      <div class="nav-item" data-page="results">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18"/><path d="m14 5 7 7-7 7"/></svg>
+        Results
+      </div>
       <div class="nav-item" data-page="attack-paths">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
         Attack Paths
@@ -131,7 +135,7 @@
           </div>
           <div class="stat">
             <div class="stat-value" id="statAvgRisk">—</div>
-            <div class="stat-label">Avg risk</div>
+            <div class="stat-label">Avg safety score</div>
           </div>
         </div>
 
@@ -248,12 +252,12 @@
           </div>
 
           <div class="card" style="max-width:none">
-            <div class="card-h"><h3>Average Risk Score</h3></div>
+            <div class="card-h"><h3>Average Safety Score</h3></div>
             <div class="card-b" style="display:flex; align-items:center; justify-content:center; min-height:200px">
               <div class="donut-chart" id="riskDonut">
                 <div class="donut-center">
                   <div class="donut-value" id="donutValue">—</div>
-                  <div class="donut-label">avg risk</div>
+                  <div class="donut-label">avg safety (0-100)</div>
                 </div>
               </div>
             </div>
@@ -301,6 +305,20 @@
       <div class="page" id="page-findings">
         <div class="section-h">
           <span class="section-title">All findings</span>
+        </div>
+
+        <div class="card" style="margin-bottom:1rem">
+          <div class="card-b" style="display:flex; gap:0.75rem; flex-wrap:wrap">
+            <select id="findingsSeverityFilter" class="input" style="max-width:220px">
+              <option value="">All severities</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="info">Info</option>
+            </select>
+            <input type="text" id="findingsSearchInput" class="input" placeholder="Search title, category, evidence..." style="min-width:280px; flex:1">
+          </div>
         </div>
 
         <div class="card">

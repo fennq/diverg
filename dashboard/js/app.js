@@ -41,7 +41,15 @@ function navigate(page, data) {
   if (page === 'attack-paths') loadAttackPaths();
   if (page === 'rewards') loadRewards();
   if (page === 'settings') loadSettings();
-  if (page === 'results' && data) showResults(data);
+  if (page === 'results') {
+    const rep = data || State.report;
+    if (rep) showResults(rep);
+    else {
+      document.getElementById('resultsTarget').textContent = 'Results';
+      document.getElementById('resultsBadges').innerHTML = '';
+      document.getElementById('resultsFindings').innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">No results loaded</div><div class="empty-d">Open a scan from History or run a new scan.</div></div>`;
+    }
+  }
 
   window.scrollTo(0, 0);
 }
@@ -174,6 +182,37 @@ function provChip(meta) {
   </div>`;
 }
 
+function findingMatchesFilter(item) {
+  const sevSel = (document.getElementById('findingsSeverityFilter')?.value || '').toLowerCase();
+  const q = (document.getElementById('findingsSearchInput')?.value || '').trim().toLowerCase();
+  const f = item?.finding || {};
+  const sev = sevClass(f.severity).toLowerCase();
+  if (sevSel && sev !== sevSel) return false;
+  if (!q) return true;
+  const blob = [
+    f.title,
+    f.category,
+    f.description,
+    f.impact,
+    f.remediation,
+    f.evidence,
+    item?.target_url,
+    item?.scan_id,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return blob.includes(q);
+}
+
+function renderFindingsList() {
+  const el = document.getElementById('findingsList');
+  if (!el) return;
+  const rows = (State.findings || []).filter(findingMatchesFilter);
+  if (!rows.length) {
+    el.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">No matching findings</div><div class="empty-d">Adjust severity or search query.</div></div>`;
+    return;
+  }
+  el.innerHTML = rows.map(x => findingRow(x.finding || {}, x)).join('');
+}
+
 function scanRow(s) {
   const cls = riskClass(s.risk_verdict);
   return `
@@ -189,13 +228,13 @@ function scanRow(s) {
 // ── HOME ───────────────────────────────────────────────────────────────────
 async function loadHome() {
   try {
+    const recent = document.getElementById('recentScans');
+    if (recent) recent.innerHTML = `<div class="empty"><div class="empty-t">Loading recent scans…</div></div>`;
     const s = await get('/api/stats');
     document.getElementById('statScans').textContent = s.total_scans ?? '0';
     document.getElementById('statCritical').textContent = s.total_critical ?? '0';
     document.getElementById('statTargets').textContent = s.unique_targets ?? '0';
     document.getElementById('statAvgRisk').textContent = s.avg_risk_score > 0 ? s.avg_risk_score : '—';
-
-    const recent = document.getElementById('recentScans');
     if (!s.recent_scans?.length) {
       recent.innerHTML = `<div class="empty"><div class="empty-t">No scans yet</div><div class="empty-d">Enter a URL above to start</div></div>`;
     } else {
@@ -203,6 +242,7 @@ async function loadHome() {
     }
   } catch (e) {
     document.getElementById('statScans').textContent = '—';
+    document.getElementById('recentScans').innerHTML = `<div class="empty"><div class="empty-t">Home stats unavailable</div><div class="empty-d">${esc(e?.message || 'Unknown error')}</div></div>`;
     toast('Failed to load home stats: ' + (e?.message || 'unknown error'), 'err');
   }
 }
@@ -227,6 +267,7 @@ async function quickLaunch() {
 
   const skills = {};
   let findingCount = 0;
+  let parseWarned = false;
 
   try {
     const resp = await fetch(api('/api/scan/stream'), {
@@ -270,7 +311,15 @@ async function quickLaunch() {
             pText.textContent = 'Scan error: ' + (e.error || 'unknown');
             toast('Scan error: ' + (e.error || 'unknown'), 'err');
           }
-        } catch {}
+        } catch (err) {
+          if (!parseWarned) {
+            parseWarned = true;
+            const msg = 'Malformed stream chunk from scanner';
+            pText.textContent = msg;
+            toast(msg, 'err');
+            console.warn('quickLaunch stream parse error', err, line);
+          }
+        }
       }
     }
 
@@ -319,6 +368,8 @@ async function launchScan() {
   if (!url.startsWith('http')) url = 'https://' + url;
 
   const box = document.getElementById('progressBox');
+  const launchBtn = document.querySelector('#page-scanner .btn.btn-primary[onclick="launchScan()"]');
+  if (launchBtn) launchBtn.disabled = true;
   box.classList.add('show');
 
   document.getElementById('skillsList').innerHTML = '';
@@ -326,6 +377,7 @@ async function launchScan() {
   document.getElementById('progressText').textContent = 'Scanning…';
 
   const skills = {};
+  let parseWarned = false;
 
   try {
     const resp = await fetch(api('/api/scan/stream'), {
@@ -364,7 +416,15 @@ async function launchScan() {
             document.getElementById('progressText').textContent = 'Scan error: ' + (e.error || 'unknown');
             toast('Scan error: ' + (e.error || 'unknown'), 'err');
           }
-        } catch {}
+        } catch (err) {
+          if (!parseWarned) {
+            parseWarned = true;
+            const msg = 'Malformed stream chunk from scanner';
+            document.getElementById('progressText').textContent = msg;
+            toast(msg, 'err');
+            console.warn('launchScan stream parse error', err, line);
+          }
+        }
       }
     }
 
@@ -376,9 +436,15 @@ async function launchScan() {
       if (document.getElementById('toggleAutoNav')?.checked) {
         setTimeout(() => navigate('results', lastReport), 400);
       }
+    } else {
+      document.getElementById('progressText').textContent = 'Scan finished (no report returned)';
+      toast('Scan finished without final report', 'err');
     }
   } catch (e) {
+    document.getElementById('progressText').textContent = 'Failed: ' + (e?.message || 'unknown error');
     toast('Scan failed: ' + e.message, 'err');
+  } finally {
+    if (launchBtn) launchBtn.disabled = false;
   }
 }
 
@@ -409,6 +475,8 @@ function addLiveFinding(f) {
 // ── ANALYTICS ──────────────────────────────────────────────────────────────
 async function loadAnalytics() {
   try {
+    const topCats = document.getElementById('topCategories');
+    if (topCats) topCats.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">Loading analytics…</div></div>`;
     const summary = await get('/api/analytics/summary?limit=120');
     const sev = summary.severity || {};
     const critical = sev.critical || 0;
@@ -429,10 +497,8 @@ async function loadAnalytics() {
     const avgRisk = summary.avg_risk_score || 0;
     document.getElementById('donutValue').textContent = avgRisk > 0 ? avgRisk : '—';
     const donut = document.getElementById('riskDonut');
-    if (avgRisk > 0) {
-      const pct = Math.min(avgRisk / 10 * 100, 100);
-      donut.style.background = `conic-gradient(var(--red) 0% ${pct}%, var(--elevated) ${pct}% 100%)`;
-    }
+    const pct = Math.max(0, Math.min(avgRisk, 100));
+    donut.style.background = `conic-gradient(var(--green) 0% ${pct}%, var(--red) ${pct}% 100%)`;
 
     // Trend chart (last 30 days) from scanned_at-backed API buckets
     const act = Array.isArray(summary.activity_30d) ? summary.activity_30d : [];
@@ -467,15 +533,20 @@ async function loadAnalytics() {
     }
   } catch (e) {
     toast('Analytics load failed: ' + (e?.message || 'unknown error'), 'err');
+    const catsEl = document.getElementById('topCategories');
+    if (catsEl) {
+      catsEl.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">Analytics unavailable</div><div class="empty-d">${esc(e?.message || 'Unknown error')}</div></div>`;
+    }
   }
 }
 
 // ── HISTORY ────────────────────────────────────────────────────────────────
 async function loadHistory() {
   try {
+    const el = document.getElementById('historyList');
+    if (el) el.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">Loading scans…</div></div>`;
     const data = await get('/api/history?limit=50');
     State.historyData = data.scans || [];
-    const el = document.getElementById('historyList');
     if (!State.historyData.length) {
       el.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">No scans</div><div class="empty-d">Run a scan from Home to see results here</div></div>`;
     } else {
@@ -490,7 +561,11 @@ async function loadHistory() {
         </div>
       `).join('');
     }
-  } catch { toast('Failed to load history', 'err'); }
+  } catch (e) {
+    toast('Failed to load history', 'err');
+    const el = document.getElementById('historyList');
+    if (el) el.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">History unavailable</div><div class="empty-d">${esc(e?.message || 'Unknown error')}</div></div>`;
+  }
 }
 
 async function openScan(id) {
@@ -511,16 +586,21 @@ async function deleteScan(id) {
 // ── FINDINGS ────────────────────────────────────────────────────────────────
 async function loadFindings() {
   try {
+    const el = document.getElementById('findingsList');
+    if (el) el.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">Loading findings…</div></div>`;
     const data = await get('/api/findings?scan_limit=120&finding_limit=2000');
     const all = Array.isArray(data.findings) ? data.findings : [];
-    State.findings = all.map(x => x.finding || {}).filter(Boolean);
-    const el = document.getElementById('findingsList');
+    State.findings = all;
     if (!all.length) {
       el.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">No findings</div><div class="empty-d">Run a scan to see vulnerability findings</div></div>`;
     } else {
-      el.innerHTML = all.map(x => findingRow(x.finding || {}, x)).join('');
+      renderFindingsList();
     }
-  } catch (e) { toast('Failed to load findings: ' + (e?.message || 'unknown error'), 'err'); }
+  } catch (e) {
+    toast('Failed to load findings: ' + (e?.message || 'unknown error'), 'err');
+    const el = document.getElementById('findingsList');
+    if (el) el.innerHTML = `<div class="empty" style="padding:2rem"><div class="empty-t">Findings unavailable</div><div class="empty-d">${esc(e?.message || 'Unknown error')}</div></div>`;
+  }
 }
 
 function findingRow(f, meta) {
@@ -532,12 +612,12 @@ function findingRow(f, meta) {
         <span class="finding-t">${esc(f.title || 'Finding')}</span>
         <span class="finding-cat">${esc(f.category || '')}</span>
       </div>
+      ${meta ? `<div style="padding:0 1rem 0.35rem 1rem">${provChip(meta)}</div>` : ''}
       <div class="finding-b">
         ${f.description ? `<p style="margin-bottom:0.5rem; color:var(--muted); font-size:0.8125rem; line-height:1.6">${esc(f.description)}</p>` : ''}
         ${f.impact ? `<p style="margin-bottom:0.5rem; color:var(--muted); font-size:0.8125rem"><strong style="color:var(--text)">Impact:</strong> ${esc(f.impact)}</p>` : ''}
         ${f.evidence ? `<pre style="margin-top:0.5rem; padding:0.75rem; background:var(--elevated); border-radius:4px; font-size:0.75rem; overflow-x:auto; white-space:pre-wrap; word-break:break-all">${esc(String(f.evidence).substring(0, 500))}</pre>` : ''}
         ${f.remediation ? `<p style="margin-top:0.5rem; color:var(--muted); font-size:0.8125rem"><strong style="color:var(--text)">Fix:</strong> ${esc(f.remediation)}</p>` : ''}
-        ${meta ? provChip(meta) : ''}
       </div>
     </div>`;
 }
@@ -558,7 +638,7 @@ function showResults(report) {
 
   const cls = riskClass(report.risk_verdict);
   const badgesEl = document.getElementById('resultsBadges');
-  const parts = [`<span class="badge ${cls}">${esc(report.risk_verdict || 'Unknown')}${report.risk_score != null ? ' · ' + report.risk_score : ''}</span>`];
+  const parts = [`<span class="badge ${cls}">${esc(report.risk_verdict || 'Unknown')}${report.risk_score != null ? ' · safety ' + report.risk_score : ''}</span>`];
   if (counts.c) parts.push(`<span class="badge critical">${counts.c} Critical</span>`);
   if (counts.h) parts.push(`<span class="badge high">${counts.h} High</span>`);
   if (counts.m) parts.push(`<span class="badge medium">${counts.m} Medium</span>`);
@@ -578,9 +658,10 @@ function showResults(report) {
 // ── ATTACK PATHS ───────────────────────────────────────────────────────────
 async function loadAttackPaths() {
   try {
+    const el = document.getElementById('attackPathsList');
+    if (el) el.innerHTML = `<div class="empty"><div class="empty-t">Loading attack paths…</div></div>`;
     const data = await get('/api/attack-paths?scan_limit=120&path_limit=1200');
     const paths = Array.isArray(data.attack_paths) ? data.attack_paths : [];
-    const el = document.getElementById('attackPathsList');
     if (!paths.length) {
       el.innerHTML = `<div class="empty"><div class="empty-t">No attack paths discovered</div><div class="empty-d">Run a full scan to find chained vulnerabilities</div></div>`;
     } else {
@@ -595,7 +676,11 @@ async function loadAttackPaths() {
         </div>`;
       }).join('')}</div>`;
     }
-  } catch (e) { toast('Failed to load attack paths: ' + (e?.message || 'unknown error'), 'err'); }
+  } catch (e) {
+    toast('Failed to load attack paths: ' + (e?.message || 'unknown error'), 'err');
+    const el = document.getElementById('attackPathsList');
+    if (el) el.innerHTML = `<div class="empty"><div class="empty-t">Attack paths unavailable</div><div class="empty-d">${esc(e?.message || 'Unknown error')}</div></div>`;
+  }
 }
 
 // ── INVESTIGATION ──────────────────────────────────────────────────────────
@@ -1100,6 +1185,13 @@ function exportReport() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && app.classList.contains('sidebar-open')) closeSidebar();
   });
+})();
+
+(function initFindingsFilters() {
+  const sev = document.getElementById('findingsSeverityFilter');
+  const q = document.getElementById('findingsSearchInput');
+  if (sev) sev.addEventListener('change', renderFindingsList);
+  if (q) q.addEventListener('input', renderFindingsList);
 })();
 
 loadHome();
