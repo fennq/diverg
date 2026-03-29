@@ -58,6 +58,7 @@ scripts/generate_synq_report_pdf.py
 # Investigation: Python modules are tracked; case outputs (reports, JSON) stay private
 investigation/*
 !investigation/*.py
+!investigation/README.md
 
 # Local-only drafts (do not commit)
 twitter/
