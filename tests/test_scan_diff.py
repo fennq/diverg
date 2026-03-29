@@ -53,6 +53,19 @@ class TestScanDiff(unittest.TestCase):
         )
         self.assertIn("No changes detected", out)
 
+    def test_format_markdown_no_changes(self):
+        import scan_diff as sd
+
+        f = {"title": "Same", "url": "https://t.com/", "category": "x", "severity": "Info"}
+        diff = sd.diff_findings([f], [f])
+        md = sd.format_markdown(
+            diff, "old", "new",
+            {"timestamp": "2026-01-01T00:00:00Z", "target_url": "https://t.com", "findings": [f]},
+            {"timestamp": "2026-01-02T00:00:00Z", "target_url": "https://t.com", "findings": [f]},
+        )
+        self.assertIn("No changes detected", md)
+        self.assertIn("# Scan Diff:", md)
+
     def test_cli_two_json_files(self):
         import scan_diff as sd
 
