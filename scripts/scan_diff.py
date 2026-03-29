@@ -60,7 +60,10 @@ def _friendly_ts(iso: str) -> str:
         return "unknown date"
     try:
         dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-        return dt.strftime("%b %-d, %Y at %H:%M UTC")
+        # Portable day (avoid %-d / %#d — not portable across macOS vs Linux)
+        mon = dt.strftime("%b")
+        hm = dt.strftime("%H:%M")
+        return f"{mon} {dt.day}, {dt.year} at {hm} UTC"
     except Exception:
         return iso[:19]
 
