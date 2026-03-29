@@ -885,6 +885,16 @@
     return parts.join(' ');
   }
 
+  function dexLabelNoise(vl) {
+    if (typeof vl !== 'string' || !vl.trim()) return false;
+    var s = vl.toLowerCase();
+    if (s.indexOf('decentralized') >= 0) return true;
+    if (/\bdex\b/.test(s)) return true;
+    if (/\bamm\b/.test(s) || s.indexOf('automated market') >= 0) return true;
+    if (s.indexOf('liquidity pool') >= 0 || s.indexOf('swap pool') >= 0) return true;
+    return false;
+  }
+
   function structuralCexHit(ident) {
     if (!ident || typeof ident !== 'object') return null;
     var keys = ['type', 'category', 'entity_type', 'entityType'];
@@ -892,12 +902,14 @@
       var v = ident[keys[ki]];
       if (typeof v !== 'string' || !v.trim()) continue;
       var vl = v.toLowerCase();
+      if (dexLabelNoise(v)) continue;
       if (vl.indexOf('exchange') >= 0 || /\bcex\b/.test(vl) || vl.indexOf('custodial') >= 0) return 'struct:' + keys[ki];
     }
     var tags = ident.tags;
     if (Array.isArray(tags)) {
       for (var tj = 0; tj < tags.length; tj++) {
         var tl = String(tags[tj] || '').toLowerCase();
+        if (dexLabelNoise(tl)) continue;
         if (tl.indexOf('exchange') >= 0 || /\bcex\b/.test(tl) || tl.indexOf('custodial') >= 0) return 'struct:tag';
       }
     }
@@ -920,12 +932,13 @@
       }
     }
     var blob = identityTextBlob(ident);
-    var weakM = ['hot wallet', 'cold wallet', 'deposit wallet', 'withdraw'];
-    for (var wi = 0; wi < weakM.length; wi++) {
-      if (blob.indexOf(weakM[wi]) >= 0) {
-        reasons.push('weak_custodial_language');
-        return { tier: 'weak', reasons: reasons };
-      }
+    if (/\b(hot wallet|cold wallet|deposit wallet)\b/.test(blob)) {
+      reasons.push('weak_custodial_language');
+      return { tier: 'weak', reasons: reasons };
+    }
+    if (/\bwithdraw(?:al)?s?\b/.test(blob)) {
+      reasons.push('weak_custodial_language');
+      return { tier: 'weak', reasons: reasons };
     }
     if (/\bdeposit\b/.test(blob) && blob.indexOf('exchange') < 0) {
       reasons.push('weak_deposit_keyword');

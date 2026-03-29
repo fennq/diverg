@@ -121,7 +121,7 @@ The core logic lives in `investigation/blockchain_fetch.py`; `run_synq_research.
 - `bags_client.py` — Bags API client (Section 1): creators, lifetime fees, claim events for token intelligence. Requires `BAGS_API_KEY`.
 - `blockchain_fetch.py` — Generic fetch: `run_blockchain_research(wallet_addresses, token_mint=..., output_path=...)`. Used by `run_synq_research.py` and `run_blockchain_research.py`.
 - `solana_bundle.py` — Holder/cluster bundle snapshot logic (shared with **`POST /api/investigation/solana-bundle`** and the Chrome extension).
-- `solana_bundle_signals.py` — Coordination heuristics; **CEX/mixer tiers** (`classify_cex_tier` / `classify_mixer_tier`: `none` | `weak` | `strong`). Parallel CEX and privacy/mixer clusters default to **high confidence** only when wallets share a tagged funder **and** first-fund time bucket or matching lamports; **loose** variants appear in `parallel_cex_funding_loose` / `privacy_mixer_funding_loose` for review without full score weight.
+- `solana_bundle_signals.py` — Coordination heuristics; **CEX/mixer tiers** (`classify_cex_tier` / `classify_mixer_tier`: `none` | `weak` | `strong`). Structural “exchange” labels skip **DEX-shaped** fields (`decentralized`, `dex`, `amm`, liquidity-pool wording) so “Decentralized Exchange” is not scored as CEX. Parallel CEX and privacy/mixer clusters default to **high confidence** only when wallets share a tagged funder **and** first-fund time bucket or matching lamports; **loose** variants appear in `parallel_cex_funding_loose` / `privacy_mixer_funding_loose` for review without full score weight.
 
 **Env (bundle / CEX-mixer):**
 

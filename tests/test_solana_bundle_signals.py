@@ -37,6 +37,23 @@ class TestClassifyCexTier(unittest.TestCase):
         )
         self.assertEqual(tier, "none")
 
+    def test_decentralized_exchange_not_strong_cex(self) -> None:
+        tier, _ = sbs.classify_cex_tier(
+            {"category": "Decentralized Exchange", "name": "Some DEX", "tags": []}
+        )
+        self.assertEqual(tier, "none")
+
+    def test_type_dex_not_structural(self) -> None:
+        tier, _ = sbs.classify_cex_tier({"type": "DEX", "name": "Router", "tags": []})
+        self.assertEqual(tier, "none")
+
+    def test_withdrawn_not_weak_cex(self) -> None:
+        """'withdraw' substring inside 'withdrawn' must not trigger weak tier."""
+        tier, _ = sbs.classify_cex_tier(
+            {"primary_label": "User withdrawn funds log", "category": "Other", "tags": []}
+        )
+        self.assertEqual(tier, "none")
+
     def test_is_cex_strict_env(self) -> None:
         weak_ident = {"tags": ["withdraw"], "category": "Other"}
         try:
@@ -69,6 +86,22 @@ class TestClassifyMixerTier(unittest.TestCase):
         )
         self.assertEqual(tier, "weak")
         self.assertIn("privacy_companion_weak", reasons)
+
+
+class TestStrictFromLoose(unittest.TestCase):
+    def test_keeps_only_corroborated_wallets(self) -> None:
+        loose = [
+            {"funder": "F11111111111111111111111111111111111111111", "wallets": ["a", "b", "c"], "funder_tier": "strong"}
+        ]
+        meta = {
+            "a": {"first_fund_timestamp_unix": 10, "first_fund_lamports": 100},
+            "b": {"first_fund_timestamp_unix": 12, "first_fund_lamports": 100},
+            "c": {"first_fund_timestamp_unix": 99999, "first_fund_lamports": 999},
+        }
+        strict = sbs._strict_from_loose(loose, meta, bucket_sec=5.0, rel_tol=0.002)
+        self.assertEqual(len(strict), 1)
+        self.assertEqual(set(strict[0]["wallets"]), {"a", "b"})
+        self.assertEqual(strict[0]["confidence"], "high")
 
 
 class TestFundingCorroboration(unittest.TestCase):

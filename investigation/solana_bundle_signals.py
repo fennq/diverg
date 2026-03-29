@@ -459,13 +459,31 @@ _MIXER_DEX_BLOCKLIST = (
 )
 
 
+def _dex_label_noise(vl: str) -> bool:
+    """True if this field reads as DEX/AMM, not a centralized venue (avoid 'Decentralized Exchange' → CEX)."""
+    if not vl or not isinstance(vl, str):
+        return False
+    s = vl.lower()
+    if "decentralized" in s:
+        return True
+    if re.search(r"\bdex\b", s):
+        return True
+    if re.search(r"\bamm\b", s) or "automated market" in s:
+        return True
+    if "liquidity pool" in s or "swap pool" in s:
+        return True
+    return False
+
+
 def _structural_cex_hit(ident: dict) -> Optional[str]:
-    """True if type/category/entity tags clearly indicate exchange (strong)."""
+    """True if type/category/entity tags clearly indicate centralized exchange (strong)."""
     for k in ("type", "category", "entity_type", "entityType"):
         v = ident.get(k)
         if not isinstance(v, str) or not v.strip():
             continue
         vl = v.lower()
+        if _dex_label_noise(v):
+            continue
         if "exchange" in vl or re.search(r"\bcex\b", vl) or "custodial" in vl:
             return f"struct:{k}"
     tags = ident.get("tags")
@@ -474,6 +492,8 @@ def _structural_cex_hit(ident: dict) -> Optional[str]:
             if not isinstance(t, str) or not t.strip():
                 continue
             tl = t.lower()
+            if _dex_label_noise(t):
+                continue
             if "exchange" in tl or re.search(r"\bcex\b", tl) or "custodial" in tl:
                 return "struct:tag"
     return None
@@ -498,8 +518,11 @@ def classify_cex_tier(ident: Optional[dict]) -> tuple[str, list[str]]:
             reasons.append(f"venue:{v}")
             return "strong", reasons
     blob = _identity_text_blob(ident)
-    weak_markers = ("hot wallet", "cold wallet", "deposit wallet", "withdraw")
-    if any(m in blob for m in weak_markers):
+    # Word-safe weak custodial tokens (avoid matching unrelated substrings)
+    if re.search(r"\b(hot wallet|cold wallet|deposit wallet)\b", blob):
+        reasons.append("weak_custodial_language")
+        return "weak", reasons
+    if re.search(r"\bwithdraw(?:al)?s?\b", blob):
         reasons.append("weak_custodial_language")
         return "weak", reasons
     if re.search(r"\bdeposit\b", blob) and "exchange" not in blob:
