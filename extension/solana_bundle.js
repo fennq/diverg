@@ -158,9 +158,11 @@
       var name = row.name || row.displayName || row.label;
       var typ = row.type || row.entityType;
       var cat = row.category;
+      var et = row.entityType || row.entity_type;
       var tags = Array.isArray(row.tags) ? row.tags : [];
       var domains = row.domainNames || row.domain_names || [];
       if (!Array.isArray(domains)) domains = [];
+      var risk = row.risk != null ? row.risk : row.riskLevel != null ? row.riskLevel : row.risk_level;
       var parts = [];
       if (typeof name === 'string' && name.trim()) parts.push(name.trim());
       if (typeof cat === 'string' && cat.trim()) parts.push(cat.trim());
@@ -169,6 +171,7 @@
       out[addr] = {
         primary_label: primary,
         type: typeof typ === 'string' && typ.trim() ? typ.trim().slice(0, 64) : null,
+        entity_type: typeof et === 'string' && et.trim() ? et.trim().slice(0, 64) : null,
         category: typeof cat === 'string' && cat.trim() ? cat.trim().slice(0, 120) : null,
         tags: tags
           .slice(0, 12)
@@ -182,6 +185,8 @@
             return String(d).slice(0, 80);
           })
           .filter(Boolean),
+        risk_level: risk != null && String(risk).trim() ? String(risk).trim().slice(0, 32) : null,
+        verified: typeof row.verified === 'boolean' ? row.verified : null,
       };
     }
     return out;
@@ -319,6 +324,7 @@
     maxTransferFetch: 72,
     maxEnhancedFetch: 32,
     maxFunderIdentity: 56,
+    maxFunderRootIdentity: 24,
     signalTransfersLimit: 100,
     enhancedTxLimit: 55,
   };
@@ -809,10 +815,54 @@
     return out;
   }
 
+  var CEX_VENUE_LABEL_MARKERS = [
+    'binance',
+    'coinbase',
+    'kraken',
+    'okx',
+    'bybit',
+    'kucoin',
+    'gate.io',
+    'gate io',
+    'gemini',
+    'bitfinex',
+    'mexc',
+    'htx',
+    'huobi',
+    'crypto.com',
+    'bitstamp',
+    'upbit',
+    'bitget',
+    'deribit',
+    'bingx',
+  ];
+  var MIXER_DEX_BLOCKLIST = [
+    'jupiter',
+    'raydium',
+    'orca',
+    'uniswap',
+    'meteora',
+    'phoenix',
+    'lifinity',
+    'pump.fun',
+    'pumpswap',
+    'curve',
+    'balancer',
+  ];
+
   function identityTextBlob(o) {
     if (!o || typeof o !== 'object') return '';
     var parts = [];
-    var cands = [o.primary_label, o.name, o.displayName, o.label, o.category, o.type, o.entityType];
+    var cands = [
+      o.primary_label,
+      o.name,
+      o.displayName,
+      o.label,
+      o.category,
+      o.type,
+      o.entityType,
+      o.entity_type,
+    ];
     for (var ci = 0; ci < cands.length; ci++) {
       if (typeof cands[ci] === 'string' && cands[ci].trim()) parts.push(cands[ci].toLowerCase());
     }
@@ -825,51 +875,238 @@
     return parts.join(' ');
   }
 
-  function isCexIdentity(ident) {
-    var blob = identityTextBlob(ident);
-    if (!blob) return false;
-    if (blob.indexOf('exchange') >= 0) return true;
-    if (/\bcex\b/.test(blob)) return true;
-    if (blob.indexOf('custody') >= 0) return true;
-    var venues = [
-      'binance',
-      'coinbase',
-      'kraken',
-      'okx',
-      'bybit',
-      'kucoin',
-      'gate.io',
-      'gate io',
-      'gemini',
-      'bitfinex',
-      'mexc',
-      'htx',
-      'huobi',
-      'crypto.com',
-      'bitstamp',
-      'upbit',
-      'bitget',
-      'deribit',
-      'bingx',
-      'withdraw',
-      'deposit wallet',
-      'hot wallet',
-      'cold wallet',
-    ];
-    for (var vi = 0; vi < venues.length; vi++) {
-      if (blob.indexOf(venues[vi]) >= 0) return true;
+  function identityLabelBlob(o) {
+    if (!o || typeof o !== 'object') return '';
+    var parts = [];
+    var cands = [o.primary_label, o.name, o.displayName, o.label];
+    for (var li = 0; li < cands.length; li++) {
+      if (typeof cands[li] === 'string' && cands[li].trim()) parts.push(cands[li].toLowerCase());
     }
-    return false;
+    return parts.join(' ');
+  }
+
+  function structuralCexHit(ident) {
+    if (!ident || typeof ident !== 'object') return null;
+    var keys = ['type', 'category', 'entity_type', 'entityType'];
+    for (var ki = 0; ki < keys.length; ki++) {
+      var v = ident[keys[ki]];
+      if (typeof v !== 'string' || !v.trim()) continue;
+      var vl = v.toLowerCase();
+      if (vl.indexOf('exchange') >= 0 || /\bcex\b/.test(vl) || vl.indexOf('custodial') >= 0) return 'struct:' + keys[ki];
+    }
+    var tags = ident.tags;
+    if (Array.isArray(tags)) {
+      for (var tj = 0; tj < tags.length; tj++) {
+        var tl = String(tags[tj] || '').toLowerCase();
+        if (tl.indexOf('exchange') >= 0 || /\bcex\b/.test(tl) || tl.indexOf('custodial') >= 0) return 'struct:tag';
+      }
+    }
+    return null;
+  }
+
+  function classifyCexTier(ident) {
+    var reasons = [];
+    if (!ident || typeof ident !== 'object') return { tier: 'none', reasons: reasons };
+    var hit = structuralCexHit(ident);
+    if (hit) {
+      reasons.push(hit);
+      return { tier: 'strong', reasons: reasons };
+    }
+    var lbl = identityLabelBlob(ident);
+    for (var vi = 0; vi < CEX_VENUE_LABEL_MARKERS.length; vi++) {
+      if (lbl.indexOf(CEX_VENUE_LABEL_MARKERS[vi]) >= 0) {
+        reasons.push('venue:' + CEX_VENUE_LABEL_MARKERS[vi]);
+        return { tier: 'strong', reasons: reasons };
+      }
+    }
+    var blob = identityTextBlob(ident);
+    var weakM = ['hot wallet', 'cold wallet', 'deposit wallet', 'withdraw'];
+    for (var wi = 0; wi < weakM.length; wi++) {
+      if (blob.indexOf(weakM[wi]) >= 0) {
+        reasons.push('weak_custodial_language');
+        return { tier: 'weak', reasons: reasons };
+      }
+    }
+    if (/\bdeposit\b/.test(blob) && blob.indexOf('exchange') < 0) {
+      reasons.push('weak_deposit_keyword');
+      return { tier: 'weak', reasons: reasons };
+    }
+    return { tier: 'none', reasons: reasons };
+  }
+
+  function classifyMixerTier(ident) {
+    var reasons = [];
+    if (!ident || typeof ident !== 'object') return { tier: 'none', reasons: reasons };
+    var blob = identityTextBlob(ident);
+    var dexNoise = false;
+    for (var di = 0; di < MIXER_DEX_BLOCKLIST.length; di++) {
+      if (blob.indexOf(MIXER_DEX_BLOCKLIST[di]) >= 0) {
+        dexNoise = true;
+        break;
+      }
+    }
+    if (/\bmixer\b/.test(blob) || blob.indexOf('tumbler') >= 0 || blob.indexOf('tornado') >= 0) {
+      reasons.push('mixer_keyword');
+      return { tier: 'strong', reasons: reasons };
+    }
+    if (/obfuscat|blender|sanction|laundr|anon surf/.test(blob)) {
+      reasons.push('obfuscation_sanction_language');
+      return { tier: 'strong', reasons: reasons };
+    }
+    if (blob.indexOf('privacy pool') >= 0 || (blob.indexOf('privacy') >= 0 && blob.indexOf('shield') >= 0)) {
+      reasons.push('privacy_pool_or_shield');
+      return { tier: 'strong', reasons: reasons };
+    }
+    if (blob.indexOf('relayer') >= 0 && blob.indexOf('privacy') >= 0) {
+      reasons.push('privacy_relayer');
+      return { tier: 'strong', reasons: reasons };
+    }
+    if (dexNoise) return { tier: 'none', reasons: reasons };
+    if (blob.indexOf('privacy') >= 0 && /pool|cash|shield/.test(blob)) {
+      reasons.push('privacy_companion_weak');
+      return { tier: 'weak', reasons: reasons };
+    }
+    return { tier: 'none', reasons: reasons };
+  }
+
+  function cexTierStr(ident) {
+    return classifyCexTier(ident).tier;
+  }
+
+  function mixerTierStr(ident) {
+    return classifyMixerTier(ident).tier;
+  }
+
+  function isCexIdentity(ident) {
+    var t = classifyCexTier(ident).tier;
+    return t === 'weak' || t === 'strong';
   }
 
   function isMixerPrivacyIdentity(ident) {
-    var blob = identityTextBlob(ident);
-    if (!blob) return false;
-    if (/\bmixer\b/.test(blob) || blob.indexOf('tumbler') >= 0 || blob.indexOf('tornado') >= 0) return true;
-    if (blob.indexOf('privacy') >= 0 && /pool|cash|protocol|bridge|service/.test(blob)) return true;
-    if (/obfuscat|blender|sanction|laundr|anon surf/.test(blob)) return true;
-    if (blob.indexOf('relayer') >= 0 && blob.indexOf('privacy') >= 0) return true;
-    return false;
+    var t = classifyMixerTier(ident).tier;
+    return t === 'weak' || t === 'strong';
+  }
+
+  function walletsFundingCorroborated(wallets, metaByWallet, bucketSec, relTol) {
+    var corroborated = {};
+    var wset = [];
+    var seen = {};
+    for (var si = 0; si < wallets.length; si++) {
+      var wx = wallets[si];
+      if (!seen[wx]) {
+        seen[wx] = true;
+        wset.push(wx);
+      }
+    }
+    if (wset.length < 2) return corroborated;
+    var byBucket = {};
+    for (var bi = 0; bi < wset.length; bi++) {
+      var wb = wset[bi];
+      var m = metaByWallet[wb] || {};
+      var ts = m.first_fund_timestamp_unix;
+      var bkt =
+        ts != null && bucketSec > 0 ? Math.floor(ts / bucketSec) : null;
+      if (bkt != null) {
+        if (!byBucket[bkt]) byBucket[bkt] = [];
+        byBucket[bkt].push(wb);
+      }
+    }
+    Object.keys(byBucket).forEach(function (bk) {
+      var ws = byBucket[bk];
+      var u = {};
+      ws.forEach(function (x) {
+        u[x] = true;
+      });
+      if (Object.keys(u).length >= 2) {
+        Object.keys(u).forEach(function (k) {
+          corroborated[k] = true;
+        });
+      }
+    });
+    var lams = [];
+    for (var lj = 0; lj < wset.length; lj++) {
+      var wl = wset[lj];
+      var lp = (metaByWallet[wl] || {}).first_fund_lamports;
+      if (lp != null) {
+        var ln = parseInt(String(lp), 10);
+        if (!isNaN(ln)) lams.push({ w: wl, lam: ln });
+      }
+    }
+    function lamClose(a, b) {
+      if (a <= 0 || b <= 0) return false;
+      return Math.abs(a - b) / Math.max(a, b) <= relTol;
+    }
+    for (var i = 0; i < lams.length; i++) {
+      for (var j = i + 1; j < lams.length; j++) {
+        if (lamClose(lams[i].lam, lams[j].lam)) {
+          corroborated[lams[i].w] = true;
+          corroborated[lams[j].w] = true;
+        }
+      }
+    }
+    return corroborated;
+  }
+
+  function walletTaggedClusterKey(wallet, metaByWallet, rootMap, funderIdents, tierStrFn) {
+    var d = (metaByWallet[wallet] || {}).funder;
+    if (typeof d === 'string' && tierStrFn(funderIdents[d]) !== 'none') return d;
+    var r = rootMap[wallet];
+    if (typeof r === 'string' && tierStrFn(funderIdents[r]) !== 'none') return r;
+    return null;
+  }
+
+  function buildTaggedParallelGroups(lookupOrder, metaByWallet, rootMap, funderIdents, tierStrFn) {
+    var keyToWallets = {};
+    for (var qi = 0; qi < lookupOrder.length; qi++) {
+      var wq = lookupOrder[qi];
+      var k = walletTaggedClusterKey(wq, metaByWallet, rootMap, funderIdents, tierStrFn);
+      if (!k) continue;
+      if (!keyToWallets[k]) keyToWallets[k] = [];
+      keyToWallets[k].push(wq);
+    }
+    var groups = [];
+    Object.keys(keyToWallets).forEach(function (fnd) {
+      var ws = keyToWallets[fnd];
+      var u = {};
+      ws.forEach(function (x) {
+        u[x] = true;
+      });
+      var ul = Object.keys(u).sort();
+      if (ul.length >= 2) {
+        groups.push({
+          funder: fnd,
+          wallet_count: ul.length,
+          wallets: ul.slice(0, 40),
+          funder_tier: tierStrFn(funderIdents[fnd]),
+        });
+      }
+    });
+    groups.sort(function (a, b) {
+      return b.wallet_count - a.wallet_count;
+    });
+    return groups;
+  }
+
+  function strictFromLoose(loose, metaByWallet, bucketSec, relTol) {
+    var strict = [];
+    for (var gi = 0; gi < loose.length; gi++) {
+      var g = loose[gi];
+      var ws = g.wallets || [];
+      var corr = walletsFundingCorroborated(ws, metaByWallet, bucketSec, relTol);
+      var u = Object.keys(corr).sort();
+      if (u.length < 2) continue;
+      strict.push({
+        funder: g.funder,
+        wallet_count: u.length,
+        wallets: u.slice(0, 40),
+        funder_tier: g.funder_tier,
+        confidence: 'high',
+      });
+    }
+    strict.sort(function (a, b) {
+      return b.wallet_count - a.wallet_count;
+    });
+    return strict;
   }
 
   function sharedInboundSenders(metaByWallet) {
@@ -1045,6 +1282,8 @@
     var mint = opts.mint;
     var focusWallets = opts.focusWallets || [];
     var pre = opts.transfersCache || {};
+    var rootMap = opts.funderRootByWallet || {};
+    var maxRootId = cfg.maxFunderRootIdentity != null ? cfg.maxFunderRootIdentity : 24;
 
     var transfersCache = {};
     Object.keys(pre).forEach(function (k) {
@@ -1088,6 +1327,23 @@
       if (ii < sliceF.length - 1) await sleep(40);
     }
 
+    var rootAddrs = [];
+    var rootSeen = {};
+    Object.keys(rootMap).forEach(function (wk) {
+      var r = rootMap[wk];
+      if (typeof r !== 'string' || !r || funderIdents[r] !== undefined) return;
+      if (rootSeen[r]) return;
+      rootSeen[r] = true;
+      rootAddrs.push(r);
+    });
+    rootAddrs.sort();
+    rootAddrs = rootAddrs.slice(0, Math.max(0, maxRootId));
+    for (var ri = 0; ri < rootAddrs.length; ri++) {
+      var ra = rootAddrs[ri];
+      funderIdents[ra] = await heliusWalletIdentity(apiKey, ra);
+      if (ri < rootAddrs.length - 1) await sleep(40);
+    }
+
     var cexFunders = {};
     var mixerFunders = {};
     for (var ci = 0; ci < funders.length; ci++) {
@@ -1096,39 +1352,29 @@
       mixerFunders[cf] = isMixerPrivacyIdentity(funderIdents[cf]);
     }
 
-    var cexFunderToWallets = {};
-    var mixerFunderToWallets = {};
-    for (var wi = 0; wi < lookupOrder.length; wi++) {
-      var wf2 = lookupOrder[wi];
-      var fu2 = metaByWallet[wf2] && metaByWallet[wf2].funder;
-      if (typeof fu2 !== 'string') continue;
-      if (cexFunders[fu2]) {
-        if (!cexFunderToWallets[fu2]) cexFunderToWallets[fu2] = [];
-        cexFunderToWallets[fu2].push(wf2);
-      }
-      if (mixerFunders[fu2]) {
-        if (!mixerFunderToWallets[fu2]) mixerFunderToWallets[fu2] = [];
-        mixerFunderToWallets[fu2].push(wf2);
-      }
-    }
-    function funderGroups(counter) {
-      var groups = [];
-      Object.keys(counter).forEach(function (fnd) {
-        var ws = counter[fnd];
-        var u = {};
-        ws.forEach(function (x) {
-          u[x] = true;
-        });
-        var ul = Object.keys(u).sort();
-        if (ul.length >= 2) groups.push({ funder: fnd, wallet_count: ul.length, wallets: ul.slice(0, 40) });
-      });
-      groups.sort(function (a, b) {
-        return b.wallet_count - a.wallet_count;
-      });
-      return groups;
-    }
-    var parallelCexFunding = funderGroups(cexFunderToWallets).slice(0, 12);
-    var privacyMixerFunding = funderGroups(mixerFunderToWallets).slice(0, 12);
+    var funderCexTier = {};
+    var funderMixerTier = {};
+    Object.keys(funderIdents).forEach(function (addr) {
+      funderCexTier[addr] = cexTierStr(funderIdents[addr]);
+      funderMixerTier[addr] = mixerTierStr(funderIdents[addr]);
+    });
+
+    var parallelCexFundingLoose = buildTaggedParallelGroups(
+      lookupOrder,
+      metaByWallet,
+      rootMap,
+      funderIdents,
+      cexTierStr
+    ).slice(0, 12);
+    var parallelCexFunding = strictFromLoose(parallelCexFundingLoose, metaByWallet, bucketSec, relTol).slice(0, 12);
+    var privacyMixerFundingLoose = buildTaggedParallelGroups(
+      lookupOrder,
+      metaByWallet,
+      rootMap,
+      funderIdents,
+      mixerTierStr
+    ).slice(0, 12);
+    var privacyMixerFunding = strictFromLoose(privacyMixerFundingLoose, metaByWallet, bucketSec, relTol).slice(0, 12);
 
     var sharedInc = sharedInboundSenders(metaByWallet);
     var sharedOut = sharedOutboundReceivers(lookupOrder, transfersCache);
@@ -1197,6 +1443,21 @@
     var score = 0;
     var reasons = [];
 
+    var sampleAddrs = {};
+    for (var sai = 0; sai < lookupOrder.length; sai++) {
+      var sw0 = lookupOrder[sai];
+      var d0 = (metaByWallet[sw0] || {}).funder;
+      if (typeof d0 === 'string') sampleAddrs[d0] = true;
+      var r0 = rootMap[sw0];
+      if (typeof r0 === 'string') sampleAddrs[r0] = true;
+    }
+    var anyStrongCex = false;
+    var anyCexSample = false;
+    Object.keys(sampleAddrs).forEach(function (a) {
+      if ((funderCexTier[a] || '') === 'strong') anyStrongCex = true;
+      if (isCexIdentity(funderIdents[a])) anyCexSample = true;
+    });
+
     if (timeClusters.length) {
       score += Math.min(22, 6 + Math.max(0, timeClusters[0].wallets.length - 2) * 4);
       reasons.push('funding_time_sync');
@@ -1205,23 +1466,44 @@
       score += Math.min(18, 5 + Math.max(0, amountClusters[0].wallets.length - 2) * 3);
       reasons.push('same_first_fund_amount');
     }
-    var anyCex = false;
-    Object.keys(cexFunders).forEach(function (k) {
-      if (cexFunders[k]) anyCex = true;
-    });
-    if (anyCex) {
-      score += 12;
-      reasons.push('cex_tagged_funder_present');
+    if (anyStrongCex) {
+      score += 10;
+      reasons.push('cex_strong_funder_in_sample');
+    } else if (anyCexSample) {
+      score += 4;
+      reasons.push('cex_weak_funder_in_sample');
     }
     if (parallelCexFunding.length) {
-      var topN = parallelCexFunding[0].wallet_count;
-      score += Math.min(16, 6 + Math.max(0, topN - 2) * 3);
-      reasons.push('parallel_cex_funder_cluster');
+      var topG = parallelCexFunding[0];
+      var topN = topG.wallet_count;
+      var ft = String(topG.funder_tier || '');
+      if (ft === 'strong') {
+        score += Math.min(16, 6 + Math.max(0, topN - 2) * 3);
+        reasons.push('parallel_cex_funder_cluster_strict');
+      } else {
+        score += Math.min(10, 4 + Math.max(0, topN - 2) * 2);
+        reasons.push('parallel_cex_funder_cluster_strict_weak_tier');
+      }
+    } else if (parallelCexFundingLoose.length) {
+      var topL = parallelCexFundingLoose[0].wallet_count;
+      score += Math.min(6, 2 + Math.max(0, topL - 2) * 2);
+      reasons.push('parallel_cex_funder_cluster_loose_only');
     }
     if (privacyMixerFunding.length) {
-      var topM = privacyMixerFunding[0].wallet_count;
-      score += Math.min(14, 5 + Math.max(0, topM - 2) * 2);
-      reasons.push('privacy_mixer_shared_funder');
+      var topGm = privacyMixerFunding[0];
+      var topM = topGm.wallet_count;
+      var mt = String(topGm.funder_tier || '');
+      if (mt === 'strong') {
+        score += Math.min(14, 5 + Math.max(0, topM - 2) * 2);
+        reasons.push('privacy_mixer_shared_funder_strict');
+      } else {
+        score += Math.min(9, 3 + Math.max(0, topM - 2) * 2);
+        reasons.push('privacy_mixer_shared_funder_strict_weak_tier');
+      }
+    } else if (privacyMixerFundingLoose.length) {
+      var topMl = privacyMixerFundingLoose[0].wallet_count;
+      score += Math.min(5, 2 + Math.max(0, topMl - 2));
+      reasons.push('privacy_mixer_funder_cluster_loose_only');
     }
     if (sharedInc.top_shared && sharedInc.top_shared.length) {
       score += Math.min(15, 5 + sharedInc.top_shared.length * 2);
@@ -1245,14 +1527,39 @@
     var archetypeHints = [];
     if (parallelCexFunding.length) {
       archetypeHints.push(
-        'Parallel CEX pattern: two or more sampled wallets share a CEX-tagged first funder (common withdrawal routing).'
+        'High-confidence parallel CEX: shared CEX-labeled funder (direct or 2-hop root) plus aligned first-fund time or amount.'
+      );
+    } else if (parallelCexFundingLoose.length) {
+      archetypeHints.push(
+        'Loose parallel CEX: same CEX-tagged funder among sampled wallets without funding-time/amount corroboration.'
       );
     }
     if (privacyMixerFunding.length) {
       archetypeHints.push(
-        'Privacy / mixer pattern: multiple sampled wallets share a mixer- or privacy-tagged funder path.'
+        'High-confidence privacy/mixer cluster: shared tagged funder plus aligned first-fund timing or lamports.'
       );
+    } else if (privacyMixerFundingLoose.length) {
+      archetypeHints.push('Loose privacy/mixer: same tagged funder path without funding corroboration.');
     }
+
+    var tierKeySet = {};
+    Object.keys(sampleAddrs).forEach(function (k) {
+      tierKeySet[k] = true;
+    });
+    funders.forEach(function (f) {
+      tierKeySet[f] = true;
+    });
+    rootAddrs.forEach(function (ra) {
+      tierKeySet[ra] = true;
+    });
+    var funderCexTierOut = {};
+    var funderMixerTierOut = {};
+    Object.keys(tierKeySet)
+      .sort()
+      .forEach(function (k) {
+        if (funderCexTier[k] !== undefined) funderCexTierOut[k] = funderCexTier[k];
+        if (funderMixerTier[k] !== undefined) funderMixerTierOut[k] = funderMixerTier[k];
+      });
 
     return {
       funding_metadata_by_wallet: metaByWallet,
@@ -1260,8 +1567,12 @@
       funding_same_amount_clusters: amountClusters,
       funder_cex_flags: cexFunders,
       funder_mixer_flags: mixerFunders,
+      funder_cex_tier: funderCexTierOut,
+      funder_mixer_tier: funderMixerTierOut,
       parallel_cex_funding: parallelCexFunding,
+      parallel_cex_funding_loose: parallelCexFundingLoose,
       privacy_mixer_funding: privacyMixerFunding,
+      privacy_mixer_funding_loose: privacyMixerFundingLoose,
       bundle_archetype_hints: archetypeHints,
       shared_inbound_senders: sharedInc,
       shared_outbound_receivers: sharedOut,
@@ -1276,6 +1587,7 @@
         max_enhanced_fetch: mw.length,
         signal_transfers_limit: signalTrLimit,
         enhanced_tx_limit: enhancedLim,
+        funder_root_identity_lookups: rootAddrs.length,
       },
     };
   }
@@ -1539,6 +1851,12 @@
 
     var identities = identitiesRaw;
 
+    var funderRootByWallet = {};
+    lookupOrder.forEach(function (w) {
+      var dr = directAndRootFunder(w, fundedBy[w], transfersBy[w], hopFundedBy, hopTransfersBy);
+      funderRootByWallet[w] = dr.root && dr.direct && dr.root !== dr.direct ? dr.root : null;
+    });
+
     var bundleSignals = null;
     try {
       bundleSignals = await computeCoordinationBundleAsync(key, {
@@ -1547,6 +1865,7 @@
         mint: mintNorm,
         focusWallets: focusMembers.slice().sort(),
         transfersCache: transfersBy,
+        funderRootByWallet: funderRootByWallet,
       });
     } catch (e) {
       bundleSignals = {
