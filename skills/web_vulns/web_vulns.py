@@ -23,6 +23,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from stealth import get_session, randomize_order
 SESSION = get_session()
 
+
+def _req():
+    try:
+        from scan_context import get_active_http_session
+
+        s = get_active_http_session()
+        if s is not None:
+            return s
+    except Exception:
+        pass
+    return SESSION
+
 TIMEOUT = 5
 TEST_TIME_BUDGET = 5   # max sec per test; 8 types * 5s = 40s + crawl keeps under 55s
 RUN_BUDGET_SEC = 25   # exit before bot 120s; return partial results
@@ -81,7 +93,7 @@ def _inject_into_params(url: str, payload: str, param_filter: Optional[list[str]
 
 def _get_baseline(url: str) -> Optional[requests.Response]:
     try:
-        return SESSION.get(url, timeout=TIMEOUT, allow_redirects=False)
+        return _req().get(url, timeout=TIMEOUT, allow_redirects=False)
     except requests.RequestException:
         return None
 
@@ -90,29 +102,45 @@ def _get_baseline(url: str) -> Optional[requests.Response]:
 # Crawler — discovers pages and input points
 # ---------------------------------------------------------------------------
 
-def crawl(base_url: str, depth: int = 2) -> list[str]:
+def crawl(base_url: str, depth: int = 2, max_urls: int = 50) -> list[str]:
+    """Same-origin BFS up to depth; caps URLs; includes form action targets."""
     visited: set[str] = set()
     to_visit = [base_url]
     domain = urlparse(base_url).netloc
+    out: list[str] = []
+    eff_depth = max(1, min(int(depth), 8))
 
-    for _ in range(depth):
+    for _ in range(eff_depth):
+        if len(out) >= max_urls:
+            break
         next_level: list[str] = []
         for url in to_visit:
+            if len(out) >= max_urls:
+                break
             if url in visited:
                 continue
             visited.add(url)
+            out.append(url)
             try:
-                resp = SESSION.get(url, timeout=TIMEOUT, allow_redirects=True)
+                resp = _req().get(url, timeout=TIMEOUT, allow_redirects=True)
                 soup = BeautifulSoup(resp.text, "html.parser")
                 for link in soup.find_all("a", href=True):
                     abs_url = urljoin(url, link["href"])
-                    if urlparse(abs_url).netloc == domain and abs_url not in visited:
+                    pu = urlparse(abs_url)
+                    if pu.netloc == domain and abs_url not in visited and abs_url not in next_level:
+                        next_level.append(abs_url)
+                for form in soup.find_all("form"):
+                    act = form.get("action")
+                    if not act:
+                        continue
+                    abs_url = urljoin(url, act)
+                    if urlparse(abs_url).netloc == domain and abs_url not in visited and abs_url not in next_level:
                         next_level.append(abs_url)
             except requests.RequestException:
                 continue
         to_visit = next_level
 
-    return list(visited)
+    return out[:max_urls]
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +238,7 @@ def test_xss(url: str) -> list[Finding]:
             test_url = urlunparse(parsed._replace(query=urlencode(test_params)))
 
             try:
-                resp = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                 for pattern in XSS_REFLECTION_PATTERNS:
                     if pattern.search(resp.text):
                         evidence_extra = ""
@@ -220,7 +248,7 @@ def test_xss(url: str) -> list[Finding]:
                             proof_params[param_name] = proof_payload
                             proof_url = urlunparse(parsed._replace(query=urlencode(proof_params)))
                             try:
-                                SESSION.get(proof_url, timeout=TIMEOUT, allow_redirects=False)
+                                _req().get(proof_url, timeout=TIMEOUT, allow_redirects=False)
                                 evidence_extra = " Proof: callback payload sent; verify receipt at your listener for execution proof."
                             except requests.RequestException:
                                 evidence_extra = " Proof: callback URL configured but proof request failed."
@@ -370,7 +398,7 @@ def _try_sqli_extract(url: str, param_name: str) -> str:
     for payload in SQLI_EXTRACT_PAYLOADS[:3]:
         for _pn, test_url in _inject_into_params(url, payload, [param_name]):
             try:
-                resp = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                 if resp.status_code != 200:
                     continue
                 # Look for version-like string (x.y.z) in response
@@ -402,7 +430,7 @@ def test_sqli(url: str) -> list[Finding]:
         for payload in randomize_order(SQLI_ERROR_PATTERNS_PAYLOADS := SQLI_PAYLOADS_ERROR):
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
-                    resp = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                    resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                     for pat in SQLI_ERROR_PATTERNS:
                         if pat.search(resp.text):
                             proof = _try_sqli_extract(url, pn)
@@ -430,7 +458,7 @@ def test_sqli(url: str) -> list[Finding]:
         for payload in randomize_order(SQLI_PAYLOADS_UNION):
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
-                    resp = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                    resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                     for pat in SQLI_ERROR_PATTERNS:
                         if pat.search(resp.text):
                             findings.append(Finding(
@@ -473,8 +501,8 @@ def test_sqli(url: str) -> list[Finding]:
                 if not false_url:
                     continue
                 try:
-                    resp_true = SESSION.get(true_url, timeout=TIMEOUT, allow_redirects=False)
-                    resp_false = SESSION.get(false_url, timeout=TIMEOUT, allow_redirects=False)
+                    resp_true = _req().get(true_url, timeout=TIMEOUT, allow_redirects=False)
+                    resp_false = _req().get(false_url, timeout=TIMEOUT, allow_redirects=False)
                     len_diff = abs(len(resp_true.text) - len(resp_false.text))
                     if len_diff > 50 and baseline:
                         true_like_baseline = abs(len(resp_true.text) - baseline_len) < abs(len(resp_false.text) - baseline_len)
@@ -500,11 +528,11 @@ def test_sqli(url: str) -> list[Finding]:
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
                     start = time.time()
-                    SESSION.get(test_url, timeout=TIMEOUT + delay, allow_redirects=False)
+                    _req().get(test_url, timeout=TIMEOUT + delay, allow_redirects=False)
                     elapsed = time.time() - start
                     if elapsed >= delay * 0.8:
                         start2 = time.time()
-                        SESSION.get(url, timeout=TIMEOUT, allow_redirects=False)
+                        _req().get(url, timeout=TIMEOUT, allow_redirects=False)
                         baseline_time = time.time() - start2
                         if elapsed > baseline_time + (delay * 0.6):
                             findings.append(Finding(
@@ -527,7 +555,7 @@ def test_sqli(url: str) -> list[Finding]:
         for payload in randomize_order(SQLI_PAYLOADS_WAF_BYPASS):
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
-                    resp = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                    resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                     for pat in SQLI_ERROR_PATTERNS:
                         if pat.search(resp.text):
                             findings.append(Finding(
@@ -550,7 +578,7 @@ def test_sqli(url: str) -> list[Finding]:
         for payload in randomize_order(SQLI_PAYLOADS_STACKED):
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
-                    resp = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                    resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                     for pat in SQLI_ERROR_PATTERNS:
                         if pat.search(resp.text):
                             findings.append(Finding(
@@ -577,7 +605,7 @@ def test_sqli(url: str) -> list[Finding]:
 def test_csrf(url: str) -> list[Finding]:
     findings: list[Finding] = []
     try:
-        resp = SESSION.get(url, timeout=TIMEOUT)
+        resp = _req().get(url, timeout=TIMEOUT)
         soup = BeautifulSoup(resp.text, "html.parser")
 
         forms = soup.find_all("form", method=re.compile(r"post", re.IGNORECASE))
@@ -646,7 +674,7 @@ def test_traversal(url: str) -> list[Finding]:
             test_url = urlunparse(parsed._replace(query=urlencode(test_params)))
 
             try:
-                resp = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                 body_lower = resp.text.lower()
                 if any(ind.lower() in body_lower for ind in indicators):
                     findings.append(Finding(
@@ -729,7 +757,7 @@ def test_ssrf(url: str) -> list[Finding]:
         for ssrf_url, label in randomize_order(SSRF_TARGETS):
             for pn, test_url in _inject_into_params(url, ssrf_url, [param_name]):
                 try:
-                    resp = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                    resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
 
                     for indicator in SSRF_INDICATORS:
                         if indicator.search(resp.text):
@@ -815,7 +843,7 @@ def test_ssti(url: str) -> list[Finding]:
                 continue
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
-                    resp = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                    resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                     if expected in resp.text:
                         if payload in resp.text and expected not in payload:
                             continue
@@ -899,7 +927,7 @@ def test_cmdi(url: str) -> list[Finding]:
         for payload, patterns in randomize_order(CMDI_OUTPUT_PAYLOADS):
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
-                    resp = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                    resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                     for pat in patterns:
                         if pat.search(resp.text):
                             findings.append(Finding(
@@ -924,12 +952,12 @@ def test_cmdi(url: str) -> list[Finding]:
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
                     start = time.time()
-                    SESSION.get(test_url, timeout=TIMEOUT + delay, allow_redirects=False)
+                    _req().get(test_url, timeout=TIMEOUT + delay, allow_redirects=False)
                     elapsed = time.time() - start
 
                     if elapsed >= delay * 0.8:
                         start2 = time.time()
-                        SESSION.get(url, timeout=TIMEOUT, allow_redirects=False)
+                        _req().get(url, timeout=TIMEOUT, allow_redirects=False)
                         baseline_time = time.time() - start2
                         if elapsed > baseline_time + (delay * 0.6):
                             findings.append(Finding(
@@ -996,7 +1024,7 @@ def test_open_redirect(url: str) -> list[Finding]:
         for payload in randomize_order(REDIRECT_PAYLOADS):
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
-                    resp = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                    resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                     if resp.status_code in (301, 302, 303, 307, 308):
                         location = resp.headers.get("Location", "")
                         loc_parsed = urlparse(location)
@@ -1082,7 +1110,7 @@ def test_nosqli(url: str) -> list[Finding]:
         for payload in randomize_order(NOSQLI_PAYLOADS):
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
-                    resp = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                    resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                     if resp.status_code != 200:
                         continue
                     for pat in NOSQLI_ERROR_PATTERNS:
@@ -1213,7 +1241,7 @@ def test_sensitive_files(url: str) -> list[Finding]:
             return findings
         check_url = urljoin(base, path)
         try:
-            resp = SESSION.get(check_url, timeout=TIMEOUT, allow_redirects=False)
+            resp = _req().get(check_url, timeout=TIMEOUT, allow_redirects=False)
 
             if resp.status_code == 200 and len(resp.text) > 0:
                 if not indicators:
@@ -1266,7 +1294,7 @@ SECURITY_HEADERS = {
 def test_security_headers(url: str) -> list[Finding]:
     findings: list[Finding] = []
     try:
-        resp = SESSION.get(url, timeout=TIMEOUT)
+        resp = _req().get(url, timeout=TIMEOUT)
         for header, (desc, severity) in SECURITY_HEADERS.items():
             if header.lower() not in {k.lower() for k in resp.headers}:
                 findings.append(Finding(
@@ -1290,15 +1318,20 @@ def test_security_headers(url: str) -> list[Finding]:
 def run(target_url: str, scan_type: str = "full", crawl_depth: int = 2) -> str:
     report = WebVulnReport(target_url=target_url)
     run_start = time.time()
+    max_pages = int(os.environ.get("DIVERG_WEB_VULN_MAX_PAGES", "8"))
+    max_depth_cap = int(os.environ.get("DIVERG_WEB_CRAWL_MAX_DEPTH", "4"))
 
     try:
         if scan_type == "full":
-            # Cap crawl: 1 depth, max 2 pages so we finish in RUN_BUDGET
-            pages = crawl(target_url, depth=1)
+            eff_depth = max(1, min(int(crawl_depth), max_depth_cap))
+            raw_pages = crawl(target_url, depth=eff_depth, max_urls=max_pages)
+            ordered: list[str] = []
+            for p in [target_url] + raw_pages:
+                if p not in ordered:
+                    ordered.append(p)
+            pages = ordered[:max_pages]
             if _run_budget_expired(run_start):
                 pages = pages[:1] if pages else [target_url]
-            else:
-                pages = (pages or [target_url])[:1]  # single page so we never blow budget
         else:
             pages = [target_url]
         report.pages_crawled = len(pages)

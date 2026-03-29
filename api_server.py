@@ -643,18 +643,33 @@ def login_page():
 
 def _parse_scan_body():
     if not request.is_json:
-        return None, None, None, (jsonify({"error": "Content-Type must be application/json"}), 400)
+        return None, None, None, None, (jsonify({"error": "Content-Type must be application/json"}), 400)
     data = request.get_json(silent=True) or {}
     url = sanitize_text(data.get("url") or "", 2048)
     if not url:
-        return None, None, None, (jsonify({"error": "Missing 'url' in body"}), 400)
+        return None, None, None, None, (jsonify({"error": "Missing 'url' in body"}), 400)
     if not url.startswith("http://") and not url.startswith("https://"):
         url = "https://" + url
     goal = sanitize_text(data.get("goal") or "", 500) or None
     scope = sanitize_text(data.get("scope") or "full", 20).lower()
     if scope not in VALID_SCOPES:
         scope = "full"
-    return url, goal, scope, None
+    cookie_header = sanitize_text(
+        data.get("cookie_header") or data.get("cookies") or "",
+        8192,
+    ).strip()
+    bearer_token = sanitize_text(
+        data.get("bearer_token") or data.get("bearer") or "",
+        4096,
+    ).strip()
+    auth_context = None
+    if cookie_header or bearer_token:
+        auth_context = {}
+        if cookie_header:
+            auth_context["cookie_header"] = cookie_header
+        if bearer_token:
+            auth_context["bearer_token"] = bearer_token
+    return url, goal, scope, auth_context, None
 
 
 @app.route("/api/scan", methods=["OPTIONS"])
@@ -667,11 +682,11 @@ def api_scan_options():
 def api_scan():
     if not SCANNER_AVAILABLE:
         return jsonify({"error": "Scanner engine not available on this instance"}), 503
-    url, goal, scope, err = _parse_scan_body()
+    url, goal, scope, auth_context, err = _parse_scan_body()
     if err:
         return err
     try:
-        result = run_web_scan(url, scope=scope, goal=goal)
+        result = run_web_scan(url, scope=scope, goal=goal, auth_context=auth_context)
         scan_id = str(uuid.uuid4())
         save_scan(scan_id, result, scope, user_id=request.user["id"])
         payload = {
@@ -681,6 +696,8 @@ def api_scan():
             "scanned_at": result["scanned_at"],
             "summary": result.get("summary"),
             "skills_run": result.get("skills_run"),
+            "scan_metrics": result.get("scan_metrics"),
+            "auth_supplied": result.get("auth_supplied"),
             "site_classification": result.get("site_classification"),
             "evidence_summary": result.get("evidence_summary"),
             "attack_paths": result.get("attack_paths"),
@@ -709,7 +726,7 @@ def api_scan_stream_options():
 def api_scan_stream():
     if not SCANNER_AVAILABLE:
         return jsonify({"error": "Scanner engine not available on this instance"}), 503
-    url, goal, scope, err = _parse_scan_body()
+    url, goal, scope, auth_context, err = _parse_scan_body()
     if err:
         return err
 
@@ -720,7 +737,7 @@ def api_scan_stream():
         accumulated = None
         try:
             yield json.dumps({"event": "scan_start", "id": scan_id, "url": url, "scope": scope}) + "\n"
-            for event in run_web_scan_streaming(url, scope=scope, goal=goal):
+            for event in run_web_scan_streaming(url, scope=scope, goal=goal, auth_context=auth_context):
                 if event.get("event") == "done":
                     report = event.get("report") or {}
                     report["id"] = scan_id

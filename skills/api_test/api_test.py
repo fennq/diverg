@@ -20,6 +20,18 @@ from stealth import get_session, randomize_order
 SESSION = get_session()
 
 
+def _S():
+    try:
+        from scan_context import get_active_http_session
+
+        s = get_active_http_session()
+        if s is not None:
+            return s
+    except Exception:
+        pass
+    return SESSION
+
+
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
@@ -455,17 +467,59 @@ HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
 ENDPOINT_TIME_BUDGET = 40
 
 
-def discover_endpoints(base_url: str, wordlist: str = "medium") -> list[Endpoint]:
+def _urls_from_client_surface(client_surface_json: str | None, base_url: str) -> list[str]:
+    """Resolve client_surface.extracted_endpoints to same-origin absolute URLs."""
+    if not client_surface_json or not str(client_surface_json).strip():
+        return []
+    try:
+        data = json.loads(client_surface_json)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    eps = data.get("extracted_endpoints")
+    if not isinstance(eps, list):
+        return []
+    parsed_base = urlparse(base_url)
+    scheme = parsed_base.scheme or "https"
+    host = parsed_base.netloc
+    if not host:
+        return []
+    root = f"{scheme}://{host}"
+    out: list[str] = []
+    for e in eps[:80]:
+        if not isinstance(e, str):
+            continue
+        e = e.strip()
+        if not e or e.startswith("#"):
+            continue
+        if e.startswith("http://") or e.startswith("https://"):
+            u = e
+        elif e.startswith("//"):
+            u = f"{scheme}:{e}"
+        elif e.startswith("/"):
+            u = urljoin(root, e)
+        else:
+            u = urljoin(base_url.rstrip("/") + "/", e)
+        if urlparse(u).netloc == host:
+            out.append(u)
+    return list(dict.fromkeys(out))[:40]
+
+
+def discover_endpoints(
+    base_url: str,
+    wordlist: str = "medium",
+    extra_seed_urls: list[str] | None = None,
+) -> list[Endpoint]:
     paths = randomize_order(WORDLISTS.get(wordlist, WORDLISTS["medium"]))
     found: list[Endpoint] = []
+    seen: set[str] = set()
     _t0 = time.time()
 
-    for path in paths:
-        if (time.time() - _t0) > ENDPOINT_TIME_BUDGET:
-            break
-        url = urljoin(base_url, path)
+    def _probe(url: str) -> None:
+        if url in seen or (time.time() - _t0) > ENDPOINT_TIME_BUDGET:
+            return
+        seen.add(url)
         try:
-            resp = SESSION.get(url, timeout=6, allow_redirects=False)
+            resp = _S().get(url, timeout=6, allow_redirects=False)
             if resp.status_code not in (404, 410, 502, 503):
                 found.append(Endpoint(
                     url=url,
@@ -474,7 +528,17 @@ def discover_endpoints(base_url: str, wordlist: str = "medium") -> list[Endpoint
                     auth_required=resp.status_code in (401, 403),
                 ))
         except requests.RequestException:
-            continue
+            pass
+
+    for u in list(dict.fromkeys(extra_seed_urls or [])):
+        if (time.time() - _t0) > ENDPOINT_TIME_BUDGET:
+            break
+        _probe(u)
+
+    for path in paths:
+        if (time.time() - _t0) > ENDPOINT_TIME_BUDGET:
+            break
+        _probe(urljoin(base_url, path))
 
     return found
 
@@ -502,7 +566,7 @@ def test_methods(endpoints: list[Endpoint]) -> tuple[list[Endpoint], list[Findin
         allowed: list[str] = []
         for method in HTTP_METHODS:
             try:
-                resp = SESSION.request(method, ep.url, timeout=8, allow_redirects=False)
+                resp = _S().request(method, ep.url, timeout=8, allow_redirects=False)
                 if resp.status_code not in (404, 405, 501):
                     allowed.append(method)
             except requests.RequestException:
@@ -556,7 +620,7 @@ def test_cors(endpoints: list[Endpoint]) -> list[Finding]:
 
         for origin in randomize_order(test_origins):
             try:
-                resp = SESSION.options(
+                resp = _S().options(
                     ep.url,
                     headers={"Origin": origin, "Access-Control-Request-Method": "GET"},
                     timeout=8,
@@ -623,7 +687,7 @@ def test_cors(endpoints: list[Endpoint]) -> list[Finding]:
 
         # Preflight method check
         try:
-            resp = SESSION.options(
+            resp = _S().options(
                 ep.url,
                 headers={
                     "Origin": "https://attacker.com",
@@ -671,7 +735,7 @@ def test_host_header_injection(endpoints: list[Endpoint]) -> list[Finding]:
                 ("X-Forwarded-Host", HOST_INJECTION_MARKER),
                 ("X-Host", HOST_INJECTION_MARKER),
             ]:
-                resp = SESSION.get(
+                resp = _S().get(
                     ep.url,
                     headers={header_name: header_val},
                     timeout=8,
@@ -766,7 +830,7 @@ def test_auth_bypass(endpoints: list[Endpoint]) -> list[Finding]:
         # Header-based bypass
         for bypass_headers in randomize_order(AUTH_BYPASS_HEADERS):
             try:
-                resp = SESSION.get(ep.url, headers=bypass_headers, timeout=8, allow_redirects=False)
+                resp = _S().get(ep.url, headers=bypass_headers, timeout=8, allow_redirects=False)
                 if resp.status_code == 200:
                     header_name = list(bypass_headers.keys())[0]
                     findings.append(Finding(
@@ -792,7 +856,7 @@ def test_auth_bypass(endpoints: list[Endpoint]) -> list[Finding]:
         for variant_path in _path_bypass_variants(parsed.path):
             variant_url = base + variant_path
             try:
-                resp = SESSION.get(variant_url, timeout=8, allow_redirects=False)
+                resp = _S().get(variant_url, timeout=8, allow_redirects=False)
                 if resp.status_code == 200:
                     findings.append(Finding(
                         title=f"Authentication bypass via path manipulation",
@@ -814,7 +878,7 @@ def test_auth_bypass(endpoints: list[Endpoint]) -> list[Finding]:
         if ep.status_code in (401, 403):
             for method in randomize_order(["POST", "PUT", "PATCH", "DELETE", "TRACE", "OPTIONS", "HEAD"]):
                 try:
-                    resp = SESSION.request(method, ep.url, timeout=8, allow_redirects=False)
+                    resp = _S().request(method, ep.url, timeout=8, allow_redirects=False)
                     if resp.status_code == 200:
                         findings.append(Finding(
                             title=f"Authentication bypass via HTTP verb tampering ({method})",
@@ -837,7 +901,7 @@ def test_auth_bypass(endpoints: list[Endpoint]) -> list[Finding]:
             for test_id in ["1", "2", "0", "999"]:
                 test_url = ep.url.rstrip("/") + f"/{test_id}"
                 try:
-                    resp = SESSION.get(test_url, timeout=8, allow_redirects=False)
+                    resp = _S().get(test_url, timeout=8, allow_redirects=False)
                     if resp.status_code == 200:
                         try:
                             data = resp.json()
@@ -944,7 +1008,7 @@ def _fetch_openapi_spec(base_url: str, timeout: int = 8) -> Optional[dict]:
     for path in OPENAPI_SPEC_PATHS:
         try:
             url = urljoin(base, path)
-            r = SESSION.get(url, timeout=timeout, allow_redirects=False)
+            r = _S().get(url, timeout=timeout, allow_redirects=False)
             if r.status_code != 200:
                 continue
             ct = (r.headers.get("Content-Type") or "").lower()
@@ -953,6 +1017,31 @@ def _fetch_openapi_spec(base_url: str, timeout: int = 8) -> Optional[dict]:
         except (requests.RequestException, ValueError):
             continue
     return None
+
+
+def _openapi_parameter_names_for_fuzz(base_url: str) -> list[str]:
+    """Collect query/header/path parameter names from OpenAPI for guided fuzzing."""
+    spec = _fetch_openapi_spec(base_url)
+    if not spec or not isinstance(spec, dict):
+        return []
+    names: list[str] = []
+    paths = spec.get("paths") or {}
+    if not isinstance(paths, dict):
+        return []
+    for _path_key, path_item in list(paths.items())[:35]:
+        if not isinstance(path_item, dict):
+            continue
+        for param in path_item.get("parameters") or []:
+            if isinstance(param, dict) and param.get("name"):
+                names.append(str(param["name"]))
+        for m in ("get", "post", "put", "patch", "delete", "head"):
+            op = path_item.get(m)
+            if not isinstance(op, dict):
+                continue
+            for param in op.get("parameters") or []:
+                if isinstance(param, dict) and param.get("name"):
+                    names.append(str(param["name"]))
+    return list(dict.fromkeys(names))[:50]
 
 
 def _parse_openapi_paths(spec: dict, base_url: str) -> list[tuple[str, str, list[str], bool, list[str]]]:
@@ -1042,7 +1131,7 @@ def test_contract_drift(
             if method in declared_methods:
                 continue
             try:
-                r = SESSION.request(method, full_url, timeout=6, allow_redirects=False)
+                r = _S().request(method, full_url, timeout=6, allow_redirects=False)
                 if r.status_code in (200, 201, 204):
                     findings.append(Finding(
                         title="Contract drift: server accepts method not in schema [CONFIRMED]",
@@ -1060,7 +1149,7 @@ def test_contract_drift(
         # (2) If schema implies auth required, GET without auth — 200 = drift
         if requires_auth:
             try:
-                r = SESSION.get(full_url, timeout=6, allow_redirects=False)
+                r = _S().get(full_url, timeout=6, allow_redirects=False)
                 if r.status_code == 200 and len(r.content) > 0:
                     try:
                         r.json()
@@ -1083,7 +1172,7 @@ def test_contract_drift(
             method = "PATCH" if "PATCH" in declared_methods else "PUT"
             payload = {f: "contract_drift_test_value" for f in read_only_fields[:3]}
             try:
-                r = SESSION.request(method, full_url, json=payload, timeout=6, allow_redirects=False)
+                r = _S().request(method, full_url, json=payload, timeout=6, allow_redirects=False)
                 if r.status_code in (200, 201, 204):
                     findings.append(Finding(
                         title="Contract drift: declared read-only field accepted in request [CONFIRMED]",
@@ -1152,7 +1241,7 @@ def test_graphql(base_url: str) -> list[Finding]:
     for path in randomize_order(GRAPHQL_ENDPOINTS):
         url = urljoin(base_url, path)
         try:
-            resp = SESSION.post(
+            resp = _S().post(
                 url,
                 json={"query": "{__typename}"},
                 timeout=8,
@@ -1171,7 +1260,7 @@ def test_graphql(base_url: str) -> list[Finding]:
     for gql_url in detected_endpoints:
         # Phase 2: introspection query
         try:
-            resp = SESSION.post(
+            resp = _S().post(
                 gql_url,
                 json={"query": _INTROSPECTION_QUERY},
                 timeout=15,
@@ -1242,7 +1331,7 @@ def test_graphql(base_url: str) -> list[Finding]:
         # Phase 3: query depth limit bypass
         try:
             deep_query = '{ __typename ' + ''.join([f'a{i}: __typename ' for i in range(50)]) + '}'
-            resp = SESSION.post(gql_url, json={"query": deep_query}, timeout=10)
+            resp = _S().post(gql_url, json={"query": deep_query}, timeout=10)
             if resp.status_code == 200:
                 body = resp.json()
                 if "data" in body and not body.get("errors"):
@@ -1267,7 +1356,7 @@ def test_graphql(base_url: str) -> list[Finding]:
                 {"query": "{__typename}"},
                 {"query": "{__typename}"},
             ]
-            resp = SESSION.post(gql_url, json=batch_payload, timeout=10)
+            resp = _S().post(gql_url, json=batch_payload, timeout=10)
             if resp.status_code == 200:
                 try:
                     body = resp.json()
@@ -1353,8 +1442,10 @@ _INFO_LEAK_KEYWORDS = [
 ]
 
 
-def test_parameter_fuzzing(endpoints: list[Endpoint]) -> list[Finding]:
+def test_parameter_fuzzing(endpoints: list[Endpoint], base_url: str | None = None) -> list[Finding]:
     findings: list[Finding] = []
+    openapi_names = _openapi_parameter_names_for_fuzz(base_url) if base_url else []
+    merged_param_names = list(dict.fromkeys(openapi_names + FUZZ_PARAM_NAMES))
     accessible = [ep for ep in endpoints if ep.status_code == 200 and ep.content_type and "json" in ep.content_type.lower()]
 
     if not accessible:
@@ -1364,16 +1455,16 @@ def test_parameter_fuzzing(endpoints: list[Endpoint]) -> list[Finding]:
 
     for ep in fuzz_targets:
         try:
-            baseline_resp = SESSION.get(ep.url, timeout=8)
+            baseline_resp = _S().get(ep.url, timeout=8)
             baseline_len = len(baseline_resp.text)
             baseline_status = baseline_resp.status_code
         except requests.RequestException:
             continue
 
-        for param in randomize_order(FUZZ_PARAM_NAMES[:30]):
+        for param in randomize_order(merged_param_names[:45]):
             for value, desc in FUZZ_VALUES[:8]:
                 try:
-                    resp = SESSION.get(
+                    resp = _S().get(
                         ep.url,
                         params={param: value},
                         timeout=8,
@@ -1479,7 +1570,7 @@ def test_mass_assignment(endpoints: list[Endpoint]) -> list[Finding]:
                 continue
 
             try:
-                baseline_resp = SESSION.request(
+                baseline_resp = _S().request(
                     method, ep.url,
                     json={"test_field": "test_value"},
                     timeout=8,
@@ -1494,7 +1585,7 @@ def test_mass_assignment(endpoints: list[Endpoint]) -> list[Finding]:
                 extra_payload = {"test_field": "test_value"}
                 extra_payload.update(MASS_ASSIGN_FIELDS)
 
-                test_resp = SESSION.request(
+                test_resp = _S().request(
                     method, ep.url,
                     json=extra_payload,
                     timeout=8,
@@ -1596,7 +1687,7 @@ def test_rate_limiting(endpoints: list[Endpoint]) -> list[Finding]:
 
         for i in range(RATE_LIMIT_BURST):
             try:
-                resp = SESSION.get(ep.url, timeout=5, allow_redirects=False)
+                resp = _S().get(ep.url, timeout=5, allow_redirects=False)
                 statuses.append(resp.status_code)
 
                 if resp.status_code == 429:
@@ -1662,16 +1753,24 @@ def test_rate_limiting(endpoints: list[Endpoint]) -> list[Finding]:
 RUN_BUDGET_SEC = 25  # finish before bot 120s timeout
 
 
-def run(target_url: str, scan_type: str = "full", wordlist: str = "medium") -> str:
+def run(
+    target_url: str,
+    scan_type: str = "full",
+    wordlist: str = "medium",
+    client_surface_json: str | None = None,
+) -> str:
     report = APIReport(target_url=target_url)
     run_start = time.time()
+    extra_seeds = _urls_from_client_surface(client_surface_json, target_url)
 
     def _over_budget() -> bool:
         return (time.time() - run_start) > RUN_BUDGET_SEC
 
     if scan_type in ("full", "discovery") and not _over_budget():
         try:
-            report.endpoints_found = discover_endpoints(target_url, wordlist)
+            report.endpoints_found = discover_endpoints(
+                target_url, wordlist, extra_seed_urls=extra_seeds,
+            )
             if _over_budget():
                 report.endpoints_found = report.endpoints_found[:15]  # cap under budget
         except Exception as exc:
@@ -1716,7 +1815,9 @@ def run(target_url: str, scan_type: str = "full", wordlist: str = "medium") -> s
 
     if scan_type in ("full", "param_fuzz") and not _over_budget():
         try:
-            report.findings.extend(test_parameter_fuzzing(report.endpoints_found[:15]))
+            report.findings.extend(
+                test_parameter_fuzzing(report.endpoints_found[:15], base_url=target_url),
+            )
         except Exception as exc:
             report.errors.append(f"Parameter fuzzing error: {exc}")
 

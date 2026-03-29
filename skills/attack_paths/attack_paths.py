@@ -177,6 +177,7 @@ class PathStep:
     finding_url: str
     source_skill: str
     severity: str
+    evidence_excerpt: str = ""
 
 
 @dataclass
@@ -257,12 +258,14 @@ def _build_paths(findings: list[dict], max_variants_per_template: int = 2) -> li
             for role in template:
                 cands = by_role[role]
                 cand = cands[min(variant_idx, len(cands) - 1)]
+                ev = (cand.get("evidence") or "")[:220]
                 steps_list.append(PathStep(
                     role=role,
                     finding_title=(cand.get("title") or "")[:120],
                     finding_url=(cand.get("url") or "")[:500],
                     source_skill=cand.get("_source_skill", ""),
                     severity=cand.get("severity", "Info"),
+                    evidence_excerpt=ev,
                 ))
                 refs.append(f"{cand.get('title','')} [{cand.get('_source_skill','')}]")
 
@@ -388,7 +391,14 @@ def run(
             "impact_summary": p.impact_summary,
             "attack_story": _attack_story_narrative(p),
             "steps": [
-                {"role": s.role, "finding_title": s.finding_title, "finding_url": s.finding_url, "source_skill": s.source_skill, "severity": s.severity}
+                {
+                    "role": s.role,
+                    "finding_title": s.finding_title,
+                    "finding_url": s.finding_url,
+                    "source_skill": s.source_skill,
+                    "severity": s.severity,
+                    "evidence_excerpt": s.evidence_excerpt,
+                }
                 for s in p.steps
             ],
             "evidence_refs": p.evidence_refs,
@@ -401,7 +411,10 @@ def run(
         "role_counts": role_counts,
         "gap_analysis": gap_analysis,
         "suggested_next_actions": suggested_next_actions,
-        "note": "Diverg attack-path correlation: chains built from your scan findings. Use gap_analysis and suggested_next_actions to prioritize follow-up; prioritize paths with high exploitability_score and financial/data impact.",
+        "note": (
+            "Diverg attack-path correlation: heuristic chains from scan findings (pattern-matched roles), not live multi-hop exploit verification. "
+            "Use evidence_excerpt and source_skill per step to trace back to the original finding; use gap_analysis for coverage gaps."
+        ),
     }
     return json.dumps(report, indent=2)
 

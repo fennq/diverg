@@ -37,6 +37,18 @@ from stealth import get_session, jitter, heavy_jitter
 SESSION = get_session()
 
 
+def _S():
+    try:
+        from scan_context import get_active_http_session
+
+        s = get_active_http_session()
+        if s is not None:
+            return s
+    except Exception:
+        pass
+    return SESSION
+
+
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
@@ -95,7 +107,7 @@ def find_login_pages(base_url: str) -> list[str]:
     for path in login_paths:
         url = urljoin(base_url, path)
         try:
-            resp = SESSION.get(url, timeout=4, allow_redirects=True)
+            resp = _S().get(url, timeout=4, allow_redirects=True)
             if resp.status_code == 200:
                 body_lower = resp.text.lower()
                 if any(kw in body_lower for kw in PASSWORD_FIELD_NAMES):
@@ -141,7 +153,7 @@ def _extract_form_fields(form, inputs):
 def analyse_login_form(url: str) -> list[Finding]:
     findings: list[Finding] = []
     try:
-        resp = SESSION.get(url, timeout=10)
+        resp = _S().get(url, timeout=10)
         soup = BeautifulSoup(resp.text, "html.parser")
 
         forms = soup.find_all("form")
@@ -340,7 +352,7 @@ def test_default_credentials(login_pages: list[str]) -> list[Finding]:
         if (time.time() - _t0) > CRED_TIME_BUDGET:
             return findings
         try:
-            resp = SESSION.get(page_url, timeout=10)
+            resp = _S().get(page_url, timeout=10)
         except requests.RequestException:
             continue
 
@@ -379,7 +391,7 @@ def test_default_credentials(login_pages: list[str]) -> list[Finding]:
 
                 try:
                     # Re-fetch form page to get fresh CSRF tokens
-                    pre_resp = SESSION.get(page_url, timeout=8)
+                    pre_resp = _S().get(page_url, timeout=8)
                     pre_soup = BeautifulSoup(pre_resp.text, "html.parser")
                     fresh_form = None
                     for f in pre_soup.find_all("form"):
@@ -391,14 +403,14 @@ def test_default_credentials(login_pages: list[str]) -> list[Finding]:
                             if inp.get("type", "").lower() == "hidden" and inp.get("name"):
                                 form_data[inp["name"]] = inp.get("value", "")
 
-                    pre_cookies = dict(SESSION.cookies)
+                    pre_cookies = dict(_S().cookies)
 
                     if method == "POST":
-                        cred_resp = SESSION.post(
+                        cred_resp = _S().post(
                             abs_action, data=form_data, timeout=10, allow_redirects=True,
                         )
                     else:
-                        cred_resp = SESSION.get(
+                        cred_resp = _S().get(
                             abs_action, params=form_data, timeout=10, allow_redirects=True,
                         )
 
@@ -421,7 +433,7 @@ def test_default_credentials(login_pages: list[str]) -> list[Finding]:
                             remediation="Change all default credentials immediately. Enforce strong passwords. Implement account lockout.",
                         ))
                         # Try to logout for next attempt
-                        SESSION.cookies.clear()
+                        _S().cookies.clear()
 
                     jitter(0.3, 1.0)
 
@@ -599,7 +611,7 @@ def test_jwt_attacks(target_url: str, login_pages: list[str]) -> list[Finding]:
     urls_to_check = list(set([target_url] + login_pages))
     for url in urls_to_check:
         try:
-            resp = SESSION.get(url, timeout=10, allow_redirects=True)
+            resp = _S().get(url, timeout=10, allow_redirects=True)
             for source, token in _find_jwts(resp):
                 all_jwts.append((source, token, url))
         except requests.RequestException:
@@ -644,7 +656,7 @@ def test_jwt_attacks(target_url: str, login_pages: list[str]) -> list[Finding]:
             )
 
             test_headers_none = {"Authorization": f"Bearer {none_token}"}
-            none_resp = SESSION.get(origin_url, timeout=10, headers=test_headers_none)
+            none_resp = _S().get(origin_url, timeout=10, headers=test_headers_none)
 
             if none_resp.status_code == 200 and not any(
                 err in none_resp.text.lower() for err in ("invalid", "unauthorized", "error", "denied", "forbidden")
@@ -680,7 +692,7 @@ def test_jwt_attacks(target_url: str, login_pages: list[str]) -> list[Finding]:
                 )
 
                 test_headers_confused = {"Authorization": f"Bearer {confused_token}"}
-                confused_resp = SESSION.get(origin_url, timeout=10, headers=test_headers_confused)
+                confused_resp = _S().get(origin_url, timeout=10, headers=test_headers_confused)
 
                 if confused_resp.status_code == 200 and not any(
                     err in confused_resp.text.lower()
@@ -748,7 +760,7 @@ def test_jwt_attacks(target_url: str, login_pages: list[str]) -> list[Finding]:
 def analyse_cookies(target_url: str) -> list[Finding]:
     findings: list[Finding] = []
     try:
-        resp = SESSION.get(target_url, timeout=10, allow_redirects=True)
+        resp = _S().get(target_url, timeout=10, allow_redirects=True)
         cookies = resp.cookies
 
         for cookie in cookies:
@@ -842,7 +854,7 @@ def analyse_session(target_url: str, login_pages: list[str] | None = None) -> li
 
     # Check if session IDs appear in URLs
     try:
-        resp = SESSION.get(target_url, timeout=10, allow_redirects=True)
+        resp = _S().get(target_url, timeout=10, allow_redirects=True)
         final_url = resp.url
         session_url_patterns = re.compile(
             r"[?&;](jsessionid|phpsessid|sid|session_id|token)=",
@@ -971,7 +983,7 @@ def analyse_session(target_url: str, login_pages: list[str] | None = None) -> li
 
             if method == "POST":
                 try:
-                    err_resp = SESSION.post(action, data=form_data, timeout=10, allow_redirects=True)
+                    err_resp = _S().post(action, data=form_data, timeout=10, allow_redirects=True)
                     body_lower = err_resp.text.lower()
                     enum_phrases = [
                         "user not found", "no account", "username not found",
@@ -1014,7 +1026,7 @@ def test_account_enumeration(target_url: str, login_pages: list[str]) -> list[Fi
     # --- Login form enumeration with expanded patterns and timing ---
     for page_url in login_pages:
         try:
-            resp = SESSION.get(page_url, timeout=10)
+            resp = _S().get(page_url, timeout=10)
         except requests.RequestException:
             continue
 
@@ -1056,7 +1068,7 @@ def test_account_enumeration(target_url: str, login_pages: list[str]) -> list[Fi
 
                 try:
                     # Refresh CSRF
-                    pre = SESSION.get(page_url, timeout=8)
+                    pre = _S().get(page_url, timeout=8)
                     pre_soup = BeautifulSoup(pre.text, "html.parser")
                     for f in pre_soup.find_all("form"):
                         for inp in f.find_all("input"):
@@ -1064,7 +1076,7 @@ def test_account_enumeration(target_url: str, login_pages: list[str]) -> list[Fi
                                 form_data[inp["name"]] = inp.get("value", "")
 
                     t0 = time.time()
-                    err_resp = SESSION.post(action, data=form_data, timeout=15, allow_redirects=True)
+                    err_resp = _S().post(action, data=form_data, timeout=15, allow_redirects=True)
                     elapsed = time.time() - t0
 
                     timings[probe] = elapsed
@@ -1133,7 +1145,7 @@ def test_account_enumeration(target_url: str, login_pages: list[str]) -> list[Fi
     for reg_path in REGISTRATION_PATHS:
         reg_url = urljoin(base + "/", reg_path.lstrip("/"))
         try:
-            resp = SESSION.get(reg_url, timeout=8, allow_redirects=True)
+            resp = _S().get(reg_url, timeout=8, allow_redirects=True)
             if resp.status_code != 200:
                 continue
 
@@ -1170,7 +1182,7 @@ def test_account_enumeration(target_url: str, login_pages: list[str]) -> list[Fi
                 form_data[email_or_user_field] = "admin"
 
                 try:
-                    reg_resp = SESSION.post(reg_action, data=form_data, timeout=10, allow_redirects=True)
+                    reg_resp = _S().post(reg_action, data=form_data, timeout=10, allow_redirects=True)
                     body_lower = reg_resp.text.lower()
                     exists_phrases = [
                         "already exists", "already taken", "already registered",
@@ -1199,7 +1211,7 @@ def test_account_enumeration(target_url: str, login_pages: list[str]) -> list[Fi
     for reset_path in PASSWORD_RESET_PATHS:
         reset_url = urljoin(base + "/", reset_path.lstrip("/"))
         try:
-            resp = SESSION.get(reset_url, timeout=8, allow_redirects=True)
+            resp = _S().get(reset_url, timeout=8, allow_redirects=True)
             if resp.status_code != 200:
                 continue
 
@@ -1229,7 +1241,7 @@ def test_account_enumeration(target_url: str, login_pages: list[str]) -> list[Fi
                 # Test with a definitely-nonexistent email
                 form_data[email_field] = "nonexistent_xyzzy_8271@fakefake.invalid"
                 try:
-                    reset_resp = SESSION.post(reset_action, data=form_data, timeout=10, allow_redirects=True)
+                    reset_resp = _S().post(reset_action, data=form_data, timeout=10, allow_redirects=True)
                     body_lower = reset_resp.text.lower()
                     not_found_phrases = [
                         "not found", "no account", "doesn't exist",
@@ -1274,7 +1286,7 @@ def test_password_policy(target_url: str) -> list[Finding]:
     for reg_path in REGISTRATION_PATHS:
         reg_url = urljoin(base + "/", reg_path.lstrip("/"))
         try:
-            resp = SESSION.get(reg_url, timeout=8, allow_redirects=True)
+            resp = _S().get(reg_url, timeout=8, allow_redirects=True)
             if resp.status_code != 200:
                 continue
         except requests.RequestException:
@@ -1344,7 +1356,7 @@ def test_password_policy(target_url: str) -> list[Finding]:
             for test_pw, description in test_passwords:
                 try:
                     # Refresh CSRF
-                    pre = SESSION.get(reg_url, timeout=8)
+                    pre = _S().get(reg_url, timeout=8)
                     pre_soup = BeautifulSoup(pre.text, "html.parser")
                     fresh_hidden = dict(hidden_fields)
                     for f in pre_soup.find_all("form"):
@@ -1367,7 +1379,7 @@ def test_password_policy(target_url: str) -> list[Finding]:
                             if "confirm" in nl or "password2" in nl or "re_password" in nl or "retype" in nl:
                                 form_data[n] = test_pw
 
-                    pw_resp = SESSION.post(reg_action, data=form_data, timeout=10, allow_redirects=True)
+                    pw_resp = _S().post(reg_action, data=form_data, timeout=10, allow_redirects=True)
                     body_lower = pw_resp.text.lower()
 
                     was_rejected = any(p in body_lower for p in rejection_phrases)
@@ -1426,7 +1438,7 @@ def test_rate_limiting(login_pages: list[str]) -> list[Finding]:
 
     for page_url in login_pages:
         try:
-            resp = SESSION.get(page_url, timeout=10)
+            resp = _S().get(page_url, timeout=10)
         except requests.RequestException:
             continue
 
@@ -1466,7 +1478,7 @@ def test_rate_limiting(login_pages: list[str]) -> list[Finding]:
             for i in range(NUM_REQUESTS):
                 try:
                     # Refresh hidden fields
-                    pre = SESSION.get(page_url, timeout=8)
+                    pre = _S().get(page_url, timeout=8)
                     pre_soup = BeautifulSoup(pre.text, "html.parser")
                     fresh_hidden = dict(hidden_fields)
                     for f in pre_soup.find_all("form"):
@@ -1479,7 +1491,7 @@ def test_rate_limiting(login_pages: list[str]) -> list[Finding]:
                         form_data[username_field] = "admin"
                     form_data[password_field] = f"WrongPass_{i}!"
 
-                    rapid_resp = SESSION.post(action, data=form_data, timeout=10, allow_redirects=True)
+                    rapid_resp = _S().post(action, data=form_data, timeout=10, allow_redirects=True)
                     statuses.append(rapid_resp.status_code)
                     body_lower = rapid_resp.text.lower()
 

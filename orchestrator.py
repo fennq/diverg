@@ -15,8 +15,10 @@ import argparse
 import asyncio
 import concurrent.futures
 import json
+import os
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -63,6 +65,74 @@ def skill_scan_type_for_scope(scope: str) -> str:
 
 SKILL_TIMEOUT_SECONDS = 20
 MAX_DIRECT_WORKERS = 6
+
+
+def skill_timeout_seconds_for_scope(scope: str) -> int:
+    """Wall-clock per skill; higher for full/attack so internal skill budgets can complete."""
+    s = (scope or "full").lower()
+    if s == "quick":
+        return int(os.environ.get("DIVERG_SKILL_TIMEOUT_QUICK", str(SKILL_TIMEOUT_SECONDS)))
+    if s == "attack":
+        return int(os.environ.get("DIVERG_SKILL_TIMEOUT_ATTACK", "45"))
+    return int(os.environ.get("DIVERG_SKILL_TIMEOUT_FULL", "35"))
+
+
+def _normalize_auth_context(auth: dict | None) -> dict | None:
+    if not auth or not isinstance(auth, dict):
+        return None
+    cookie = (auth.get("cookie_header") or auth.get("cookies") or "").strip()
+    bearer = (auth.get("bearer_token") or auth.get("bearer") or "").strip()
+    if not cookie and not bearer:
+        return None
+    out: dict = {}
+    if cookie:
+        out["cookie_header"] = cookie[:8192]
+    if bearer:
+        out["bearer_token"] = bearer[:4096]
+    return out
+
+
+def _build_authenticated_session(auth: dict | None):
+    """Return a StealthSession with Cookie / Authorization if auth provided; else None."""
+    auth = _normalize_auth_context(auth)
+    if not auth:
+        return None
+    from stealth import get_session
+
+    sess = get_session()
+    if auth.get("cookie_header"):
+        sess.headers["Cookie"] = auth["cookie_header"]
+    if auth.get("bearer_token"):
+        sess.headers["Authorization"] = f"Bearer {auth['bearer_token']}"
+    return sess
+
+
+def _compute_scan_metrics(results: dict[str, dict], summary: dict, duration_sec: float) -> dict:
+    ok = err = timeout = 0
+    for _k, v in results.items():
+        if not isinstance(v, dict):
+            continue
+        if v.get("error"):
+            e = str(v.get("error", "")).lower()
+            if "timed out" in e or "timeout" in e:
+                timeout += 1
+            else:
+                err += 1
+        else:
+            ok += 1
+    return {
+        "scan_duration_sec": round(duration_sec, 3),
+        "skills_scheduled": len(results),
+        "skills_completed_ok": ok,
+        "skills_error": err,
+        "skills_timeout": timeout,
+        "findings_critical": summary.get("critical", 0),
+        "findings_high": summary.get("high", 0),
+        "findings_medium": summary.get("medium", 0),
+        "findings_low": summary.get("low", 0),
+        "findings_info": summary.get("info", 0),
+        "findings_total": summary.get("total_findings", 0),
+    }
 OPENCLAW_AGENT_RETRIES = 2
 OPENCLAW_AGENT_TIMEOUTS = {
     "surface_mapper": 120,
@@ -565,6 +635,8 @@ def run_skill_variant(
     wordlist: str = "medium",
     crawl_depth: int = 2,
     context: dict | None = None,
+    scan_scope: str = "full",
+    auth_context: dict | None = None,
 ) -> dict:
     """Import and execute a skill, returning its parsed JSON output.
 
@@ -577,7 +649,11 @@ def run_skill_variant(
     print(f"{'='*60}")
 
     ctx = context or {}
+    auth_sess = _build_authenticated_session(auth_context)
+    from scan_context import clear_active_http_session, set_active_http_session
 
+    if auth_sess:
+        set_active_http_session(auth_sess)
     try:
         if skill_name == "recon":
             import recon
@@ -614,7 +690,12 @@ def run_skill_variant(
             raw = auth_test.run(target_url, scan_type=scan_type)
         elif skill_name == "api_test":
             import api_test
-            raw = api_test.run(target_url, scan_type=scan_type, wordlist=wordlist)
+            raw = api_test.run(
+                target_url,
+                scan_type=scan_type,
+                wordlist=wordlist,
+                client_surface_json=ctx.get("client_surface_json"),
+            )
         elif skill_name == "osint":
             import osint
             raw = osint.run(target, scan_type=scan_type)
@@ -660,6 +741,9 @@ def run_skill_variant(
     except Exception as exc:
         print(f"  -> ERROR: {exc}")
         return {"error": str(exc), "skill": skill_name}
+    finally:
+        if auth_sess:
+            clear_active_http_session()
 
 
 def run_skill(
@@ -671,11 +755,14 @@ def run_skill(
     scan_type: str = "full",
     wordlist: str = "medium",
     crawl_depth: int = 2,
+    scan_scope: str = "full",
+    auth_context: dict | None = None,
 ) -> dict:
     """Run one skill; scan_type 'quick' triggers lighter work inside supported skills."""
     return run_skill_variant(
         skill_name, target, target_url,
         scan_type=scan_type, wordlist=wordlist, crawl_depth=crawl_depth, context=context,
+        scan_scope=scan_scope, auth_context=auth_context,
     )
 
 
@@ -733,7 +820,10 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
     # RAG: attach citations from content/ (exploit catalog, prevention docs)
     try:
         from rag import build_index, enrich_findings_with_citations
-        build_index()
+
+        if not getattr(aggregate_findings, "_rag_index_built", False):
+            build_index()
+            aggregate_findings._rag_index_built = True
         enrich_findings_with_citations(enriched)
     except Exception:
         pass
@@ -1145,20 +1235,30 @@ def _run_direct_subset(
     """Run a subset of skills in parallel with per-skill hard timeout; cancel on overrun."""
     if not skills_to_run:
         return {}
+    sc = "quick" if scan_type == "quick" else "full"
+    st = skill_timeout_seconds_for_scope(sc)
     results: dict[str, dict] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_to_run))) as pool:
         future_to_skill = {
-            pool.submit(run_skill, skill_name, domain, target_url, None, scan_type=scan_type): skill_name
+            pool.submit(
+                run_skill,
+                skill_name,
+                domain,
+                target_url,
+                None,
+                scan_type=scan_type,
+                scan_scope=sc,
+            ): skill_name
             for skill_name in skills_to_run
         }
         for future in concurrent.futures.as_completed(future_to_skill):
             skill_name = future_to_skill[future]
             try:
-                results[skill_name] = future.result(timeout=SKILL_TIMEOUT_SECONDS)
+                results[skill_name] = future.result(timeout=st)
             except concurrent.futures.TimeoutError:
                 future.cancel()
                 results[skill_name] = {
-                    "error": f"Skill timed out after {SKILL_TIMEOUT_SECONDS}s",
+                    "error": f"Skill timed out after {st}s",
                     "skill": skill_name,
                 }
             except Exception as exc:
@@ -1540,7 +1640,12 @@ def _get_crypto_detection(target_url: str) -> dict:
         return {"is_crypto": False, "confidence": 0.0, "signals": []}
 
 
-def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> dict:
+def run_web_scan(
+    target: str,
+    scope: str = "full",
+    goal: str | None = None,
+    auth_context: dict | None = None,
+) -> dict:
     """
     Run full web-only scan (no blockchain) and return aggregated result for API/extension.
     If goal is provided, run only skills matching the natural-language goal (see intent_skills).
@@ -1584,25 +1689,58 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
             chain_validation_abuse_reason = "auto_crypto"
 
     results: dict[str, dict] = {}
+    auth_context = _normalize_auth_context(auth_context)
+    skill_to = skill_timeout_seconds_for_scope(scope)
+    t_scan0 = time.monotonic()
 
-    # Phase 1: run all skills that do not need context
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_phase1))) as pool:
+    # Phase 1a: skills that do not need peer context (api_test runs after client_surface — see 1b)
+    skills_phase1_early = [s for s in skills_phase1 if s != "api_test"]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, max(len(skills_phase1_early), 1))) as pool:
         future_to_skill = {
-            pool.submit(run_skill, skill_name, domain, target_url, None, scan_type=skill_st): skill_name
-            for skill_name in skills_phase1
+            pool.submit(
+                run_skill,
+                skill_name,
+                domain,
+                target_url,
+                None,
+                scan_type=skill_st,
+                scan_scope=scope,
+                auth_context=auth_context,
+            ): skill_name
+            for skill_name in skills_phase1_early
         }
         for future in concurrent.futures.as_completed(future_to_skill):
             skill_name = future_to_skill[future]
             try:
-                results[skill_name] = future.result(timeout=SKILL_TIMEOUT_SECONDS)
+                results[skill_name] = future.result(timeout=skill_to)
             except concurrent.futures.TimeoutError:
                 future.cancel()
                 results[skill_name] = {
-                    "error": f"Skill timed out after {SKILL_TIMEOUT_SECONDS}s",
+                    "error": f"Skill timed out after {skill_to}s",
                     "skill": skill_name,
                 }
             except Exception as exc:
                 results[skill_name] = {"error": str(exc), "skill": skill_name}
+
+    # Phase 1b: api_test uses client_surface extracted_endpoints when available
+    if "api_test" in skills_phase1:
+        ctx_api: dict[str, str | None] = {}
+        cs = results.get("client_surface")
+        if cs and isinstance(cs, dict) and "error" not in cs:
+            ctx_api["client_surface_json"] = json.dumps(cs)
+        try:
+            results["api_test"] = run_skill(
+                "api_test",
+                domain,
+                target_url,
+                ctx_api if ctx_api else None,
+                scan_type=skill_st,
+                scan_scope=scope,
+                auth_context=auth_context,
+            )
+        except Exception as exc:
+            results["api_test"] = {"error": str(exc), "skill": "api_test"}
 
     # Phase 2: run context-dependent skills with context from phase 1
     if skills_phase2:
@@ -1614,17 +1752,26 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
         }
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_phase2))) as pool:
             future_to_skill = {
-                pool.submit(run_skill, skill_name, domain, target_url, ctx, scan_type=skill_st): skill_name
+                pool.submit(
+                    run_skill,
+                    skill_name,
+                    domain,
+                    target_url,
+                    ctx,
+                    scan_type=skill_st,
+                    scan_scope=scope,
+                    auth_context=auth_context,
+                ): skill_name
                 for skill_name in skills_phase2
             }
             for future in concurrent.futures.as_completed(future_to_skill):
                 skill_name = future_to_skill[future]
                 try:
-                    results[skill_name] = future.result(timeout=SKILL_TIMEOUT_SECONDS)
+                    results[skill_name] = future.result(timeout=skill_to)
                 except concurrent.futures.TimeoutError:
                     future.cancel()
                     results[skill_name] = {
-                        "error": f"Skill timed out after {SKILL_TIMEOUT_SECONDS}s",
+                        "error": f"Skill timed out after {skill_to}s",
                         "skill": skill_name,
                     }
                 except Exception as exc:
@@ -1649,16 +1796,18 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
                     wordlist=wl,
                     crawl_depth=3 if (skill == "web_vulns" and stype == "full") else 2,
                     context=ctx3,
+                    scan_scope=scope,
+                    auth_context=auth_context,
                 ): f"{skill}:{stype}:{wl}"
                 for (skill, stype, wl) in skills_phase3
             }
             for future in concurrent.futures.as_completed(future_to_task):
                 key = future_to_task[future]
                 try:
-                    results[key] = future.result(timeout=SKILL_TIMEOUT_SECONDS)
+                    results[key] = future.result(timeout=skill_to)
                 except concurrent.futures.TimeoutError:
                     future.cancel()
-                    results[key] = {"error": f"Skill timed out after {SKILL_TIMEOUT_SECONDS}s", "skill": key}
+                    results[key] = {"error": f"Skill timed out after {skill_to}s", "skill": key}
                 except Exception as exc:
                     results[key] = {"error": str(exc), "skill": key}
 
@@ -1668,35 +1817,43 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
     evidence_summary = build_evidence_summary(findings)
     phase4 = run_phase4_synthesis(target_url, results, findings)
 
+    summary_block = {
+        "total_findings": len(findings),
+        "critical": sum(1 for f in findings if f.get("severity") == "Critical"),
+        "high": sum(1 for f in findings if f.get("severity") == "High"),
+        "medium": sum(1 for f in findings if f.get("severity") == "Medium"),
+        "low": sum(1 for f in findings if f.get("severity") == "Low"),
+        "info": sum(1 for f in findings if f.get("severity") == "Info"),
+    }
+    scan_metrics = _compute_scan_metrics(results, {**summary_block, "total_findings": len(findings)}, time.monotonic() - t_scan0)
+
     return {
         "target_url": target_url,
         "findings": findings,
         "company_surfaces": company_surfaces,
         "scanned_at": timestamp,
         "skills_run": list(results.keys()),
+        "scan_metrics": scan_metrics,
+        "auth_supplied": bool(auth_context),
         "site_classification": {
             **site_classification,
             "chain_validation_abuse_ran": "chain_validation_abuse" in results,
             "chain_validation_abuse_reason": chain_validation_abuse_reason,
         },
-        "summary": {
-            "total_findings": len(findings),
-            "critical": sum(1 for f in findings if f.get("severity") == "Critical"),
-            "high": sum(1 for f in findings if f.get("severity") == "High"),
-            "medium": sum(1 for f in findings if f.get("severity") == "Medium"),
-            "low": sum(1 for f in findings if f.get("severity") == "Low"),
-            "info": sum(1 for f in findings if f.get("severity") == "Info"),
-        },
+        "summary": summary_block,
         "evidence_summary": evidence_summary,
         **phase4,
     }
 
 
-def _run_skill_phase(skill_name, domain, target_url, eq, ctx=None, *, scan_type: str = "full"):
+def _run_skill_phase(skill_name, domain, target_url, eq, ctx=None, *, scan_type: str = "full", scan_scope: str = "full", auth_context=None):
     """Run a single skill and put start/done events into the queue."""
     eq.put({"event": "skill_start", "skill": skill_name})
     try:
-        out = run_skill(skill_name, domain, target_url, ctx, scan_type=scan_type)
+        out = run_skill(
+            skill_name, domain, target_url, ctx, scan_type=scan_type,
+            scan_scope=scan_scope, auth_context=auth_context,
+        )
         cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
         eq.put({"event": "skill_done", "skill": skill_name, "findings_count": cnt})
         return skill_name, out
@@ -1705,7 +1862,7 @@ def _run_skill_phase(skill_name, domain, target_url, eq, ctx=None, *, scan_type:
         return skill_name, {"error": str(exc), "skill": skill_name}
 
 
-def _run_variant_phase(skill_name, stype, wl, domain, target_url, eq, ctx=None):
+def _run_variant_phase(skill_name, stype, wl, domain, target_url, eq, ctx=None, *, scan_scope: str = "full", auth_context=None):
     """Run a skill variant and put start/done events into the queue."""
     label = f"{skill_name}:{stype}"
     eq.put({"event": "skill_start", "skill": label})
@@ -1715,6 +1872,8 @@ def _run_variant_phase(skill_name, stype, wl, domain, target_url, eq, ctx=None):
             scan_type=stype, wordlist=wl,
             crawl_depth=3 if (skill_name == "web_vulns" and stype == "full") else 2,
             context=ctx,
+            scan_scope=scan_scope,
+            auth_context=auth_context,
         )
         cnt = len(out.get("findings", [])) + len(out.get("header_findings", [])) + len(out.get("ssl_findings", []))
         eq.put({"event": "skill_done", "skill": label, "findings_count": cnt})
@@ -1724,7 +1883,12 @@ def _run_variant_phase(skill_name, stype, wl, domain, target_url, eq, ctx=None):
         return f"{skill_name}:{stype}:{wl}", {"error": str(exc), "skill": skill_name}
 
 
-def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = None):
+def run_web_scan_streaming(
+    target: str,
+    scope: str = "full",
+    goal: str | None = None,
+    auth_context: dict | None = None,
+):
     """
     Generator that runs the same scan as run_web_scan but yields progress events (NDJSON).
     Skills within each phase run in PARALLEL for speed.
@@ -1769,6 +1933,9 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
 
     results: dict[str, dict] = {}
     eq = _queue.Queue()
+    auth_context = _normalize_auth_context(auth_context)
+    skill_to = skill_timeout_seconds_for_scope(scope)
+    t_scan0 = time.monotonic()
 
     def _drain_queue():
         while not eq.empty():
@@ -1777,11 +1944,23 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
             except _queue.Empty:
                 break
 
-    # Phase 1: run all independent skills in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, max(len(skills_phase1), 1))) as pool:
+    skills_phase1_early = [s for s in skills_phase1 if s != "api_test"]
+
+    # Phase 1a: independent skills (excluding api_test — needs client_surface)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, max(len(skills_phase1_early), 1))) as pool:
         futures = {
-            pool.submit(_run_skill_phase, s, domain, target_url, eq, None, scan_type=skill_st): s
-            for s in skills_phase1
+            pool.submit(
+                _run_skill_phase,
+                s,
+                domain,
+                target_url,
+                eq,
+                None,
+                scan_type=skill_st,
+                scan_scope=scope,
+                auth_context=auth_context,
+            ): s
+            for s in skills_phase1_early
         }
         while futures:
             done, _ = concurrent.futures.wait(futures, timeout=0.3, return_when=concurrent.futures.FIRST_COMPLETED)
@@ -1789,10 +1968,43 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
             for f in done:
                 skill_name = futures.pop(f)
                 try:
-                    name, out = f.result(timeout=SKILL_TIMEOUT_SECONDS)
+                    name, out = f.result(timeout=skill_to)
                     results[name] = out
-                except (concurrent.futures.TimeoutError, Exception):
-                    pass
+                except concurrent.futures.TimeoutError:
+                    results[skill_name] = {
+                        "error": f"Skill timed out after {skill_to}s",
+                        "skill": skill_name,
+                    }
+                except Exception as exc:
+                    results[skill_name] = {"error": str(exc), "skill": skill_name}
+        yield from _drain_queue()
+
+    # Phase 1b: api_test after client_surface is available
+    if "api_test" in skills_phase1:
+        ctx_api: dict[str, str | None] = {}
+        cs = results.get("client_surface")
+        if cs and isinstance(cs, dict) and "error" not in cs:
+            ctx_api["client_surface_json"] = json.dumps(cs)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            fut = pool.submit(
+                _run_skill_phase,
+                "api_test",
+                domain,
+                target_url,
+                eq,
+                ctx_api if ctx_api else None,
+                scan_type=skill_st,
+                scan_scope=scope,
+                auth_context=auth_context,
+            )
+            yield from _drain_queue()
+            try:
+                name, out = fut.result(timeout=skill_to)
+                results[name] = out
+            except concurrent.futures.TimeoutError:
+                results["api_test"] = {"error": f"Skill timed out after {skill_to}s", "skill": "api_test"}
+            except Exception as exc:
+                results["api_test"] = {"error": str(exc), "skill": "api_test"}
         yield from _drain_queue()
 
     # Phase 2: context-dependent skills (also parallel)
@@ -1805,7 +2017,17 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
         }
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, max(len(skills_phase2), 1))) as pool:
             futures = {
-                pool.submit(_run_skill_phase, s, domain, target_url, eq, ctx, scan_type=skill_st): s
+                pool.submit(
+                    _run_skill_phase,
+                    s,
+                    domain,
+                    target_url,
+                    eq,
+                    ctx,
+                    scan_type=skill_st,
+                    scan_scope=scope,
+                    auth_context=auth_context,
+                ): s
                 for s in skills_phase2
             }
             while futures:
@@ -1814,10 +2036,15 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
                 for f in done:
                     skill_name = futures.pop(f)
                     try:
-                        name, out = f.result(timeout=SKILL_TIMEOUT_SECONDS)
+                        name, out = f.result(timeout=skill_to)
                         results[name] = out
-                    except (concurrent.futures.TimeoutError, Exception):
-                        pass
+                    except concurrent.futures.TimeoutError:
+                        results[skill_name] = {
+                            "error": f"Skill timed out after {skill_to}s",
+                            "skill": skill_name,
+                        }
+                    except Exception as exc:
+                        results[skill_name] = {"error": str(exc), "skill": skill_name}
             yield from _drain_queue()
 
     # Phase 3: variant probes (also parallel)
@@ -1830,7 +2057,18 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
         }
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, max(len(skills_phase3), 1))) as pool:
             futures = {
-                pool.submit(_run_variant_phase, skill, stype, wl, domain, target_url, eq, ctx3): f"{skill}:{stype}:{wl}"
+                pool.submit(
+                    _run_variant_phase,
+                    skill,
+                    stype,
+                    wl,
+                    domain,
+                    target_url,
+                    eq,
+                    ctx3,
+                    scan_scope=scope,
+                    auth_context=auth_context,
+                ): f"{skill}:{stype}:{wl}"
                 for (skill, stype, wl) in skills_phase3
             }
             while futures:
@@ -1839,10 +2077,15 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
                 for f in done:
                     key = futures.pop(f)
                     try:
-                        name, out = f.result(timeout=SKILL_TIMEOUT_SECONDS)
+                        name, out = f.result(timeout=skill_to)
                         results[name] = out
-                    except (concurrent.futures.TimeoutError, Exception):
-                        pass
+                    except concurrent.futures.TimeoutError:
+                        results[key] = {
+                            "error": f"Skill timed out after {skill_to}s",
+                            "skill": key,
+                        }
+                    except Exception as exc:
+                        results[key] = {"error": str(exc), "skill": key}
             yield from _drain_queue()
 
     findings = aggregate_findings(results)
@@ -1850,25 +2093,33 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
     timestamp = datetime.now(timezone.utc).isoformat()
     evidence_summary = build_evidence_summary(findings)
     phase4 = run_phase4_synthesis(target_url, results, findings)
+    summary_block = {
+        "total_findings": len(findings),
+        "critical": sum(1 for f in findings if f.get("severity") == "Critical"),
+        "high": sum(1 for f in findings if f.get("severity") == "High"),
+        "medium": sum(1 for f in findings if f.get("severity") == "Medium"),
+        "low": sum(1 for f in findings if f.get("severity") == "Low"),
+        "info": sum(1 for f in findings if f.get("severity") == "Info"),
+    }
+    scan_metrics = _compute_scan_metrics(
+        results,
+        {**summary_block, "total_findings": len(findings)},
+        time.monotonic() - t_scan0,
+    )
     report = {
         "target_url": target_url,
         "findings": findings,
         "company_surfaces": company_surfaces,
         "scanned_at": timestamp,
         "skills_run": list(results.keys()),
+        "scan_metrics": scan_metrics,
+        "auth_supplied": bool(auth_context),
         "site_classification": {
             **site_classification,
             "chain_validation_abuse_ran": "chain_validation_abuse" in results,
             "chain_validation_abuse_reason": chain_validation_abuse_reason,
         },
-        "summary": {
-            "total_findings": len(findings),
-            "critical": sum(1 for f in findings if f.get("severity") == "Critical"),
-            "high": sum(1 for f in findings if f.get("severity") == "High"),
-            "medium": sum(1 for f in findings if f.get("severity") == "Medium"),
-            "low": sum(1 for f in findings if f.get("severity") == "Low"),
-            "info": sum(1 for f in findings if f.get("severity") == "Info"),
-        },
+        "summary": summary_block,
         "evidence_summary": evidence_summary,
         **phase4,
     }
@@ -1885,20 +2136,29 @@ def run_direct(target: str, scope: str, report_type: str) -> None:
     print(f"  Engagement mode: {infer_engagement_mode(target, scope)}")
     print(f"  Priority tracks: {', '.join(infer_priority_tracks(target, scope))}")
 
+    skill_to = skill_timeout_seconds_for_scope(scope)
     results: dict[str, dict] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(MAX_DIRECT_WORKERS, len(skills_to_run))) as pool:
         future_to_skill = {
-            pool.submit(run_skill, skill_name, domain, target_url, None, scan_type=skill_st): skill_name
+            pool.submit(
+                run_skill,
+                skill_name,
+                domain,
+                target_url,
+                None,
+                scan_type=skill_st,
+                scan_scope=scope,
+            ): skill_name
             for skill_name in skills_to_run
         }
         for future in concurrent.futures.as_completed(future_to_skill):
             skill_name = future_to_skill[future]
             try:
-                results[skill_name] = future.result(timeout=SKILL_TIMEOUT_SECONDS)
+                results[skill_name] = future.result(timeout=skill_to)
             except concurrent.futures.TimeoutError:
                 future.cancel()
                 results[skill_name] = {
-                    "error": f"Skill timed out after {SKILL_TIMEOUT_SECONDS}s",
+                    "error": f"Skill timed out after {skill_to}s",
                     "skill": skill_name,
                 }
             except Exception as exc:

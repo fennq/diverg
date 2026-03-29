@@ -22,6 +22,20 @@ sys.path.insert(0, str(Path(__file__).parent))
 from stealth import get_session, randomize_order
 
 SESSION = get_session()
+
+
+def _S():
+    try:
+        from scan_context import get_active_http_session
+
+        s = get_active_http_session()
+        if s is not None:
+            return s
+    except Exception:
+        pass
+    return SESSION
+
+
 TIMEOUT = 6
 RUN_BUDGET_SEC = 25
 
@@ -83,7 +97,7 @@ def scan_secrets_in_assets(base_url: str, run_start: float) -> list[Finding]:
     """Scan main page and linked JS/CSS for leaked secrets and internal URLs."""
     findings: list[Finding] = []
     try:
-        resp = SESSION.get(base_url, timeout=TIMEOUT, allow_redirects=True)
+        resp = _S().get(base_url, timeout=TIMEOUT, allow_redirects=True)
         if _over_budget(run_start):
             return findings
         text = resp.text
@@ -108,7 +122,7 @@ def scan_secrets_in_assets(base_url: str, run_start: float) -> list[Finding]:
                     if urlparse(abs_url).netloc != domain:
                         continue
                     try:
-                        r2 = SESSION.get(abs_url, timeout=TIMEOUT, allow_redirects=True)
+                        r2 = _S().get(abs_url, timeout=TIMEOUT, allow_redirects=True)
                         if _over_budget(run_start):
                             return findings
                         urls_to_scan.append((attr, abs_url, r2.text[:50000]))
@@ -214,7 +228,7 @@ def probe_idor(url: str, run_start: float) -> list[Finding]:
 
     # Build baseline
     try:
-        baseline = SESSION.get(url, timeout=TIMEOUT, allow_redirects=False)
+        baseline = _S().get(url, timeout=TIMEOUT, allow_redirects=False)
         base_status = baseline.status_code
         base_len = len(baseline.text)
     except requests.RequestException:
@@ -228,7 +242,7 @@ def probe_idor(url: str, run_start: float) -> list[Finding]:
             new_id = str(int(id_val) + 1) if id_val.isdigit() else id_val
             new_path = re.sub(r"/" + re.escape(id_val) + r"(?=/|$)", f"/{new_id}", path, count=1)
             test_url = urlunparse(parsed._replace(path=new_path))
-            r = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+            r = _S().get(test_url, timeout=TIMEOUT, allow_redirects=False)
             if r.status_code == 200 and base_status in (401, 403) and len(r.text) > 100:
                 findings.append(Finding(
                     title="Possible IDOR via path segment [UNCONFIRMED]",
@@ -277,7 +291,7 @@ def probe_idor(url: str, run_start: float) -> list[Finding]:
             new_val = str(int(val) + 1) if val.isdigit() else val
             new_params = {k: (v if k != pname else [new_val]) for k, v in params.items()}
             test_url = urlunparse(parsed._replace(query=urlencode(new_params, doseq=True)))
-            r = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+            r = _S().get(test_url, timeout=TIMEOUT, allow_redirects=False)
             if r.status_code == 200 and base_status in (401, 403):
                 findings.append(Finding(
                     title=f"Possible IDOR via parameter '{pname}' [UNCONFIRMED]",
@@ -311,7 +325,7 @@ def scan_idor(base_url: str, run_start: float) -> list[Finding]:
     """Discover ID-like URLs from page and probe for IDOR."""
     findings: list[Finding] = []
     try:
-        resp = SESSION.get(base_url, timeout=TIMEOUT, allow_redirects=True)
+        resp = _S().get(base_url, timeout=TIMEOUT, allow_redirects=True)
         if _over_budget(run_start):
             return findings
         # Collect links that look like they have IDs
@@ -361,7 +375,7 @@ def scan_business_logic(base_url: str, run_start: float) -> list[Finding]:
     """Probe endpoints that look like order/payment for logic flaws."""
     findings: list[Finding] = []
     try:
-        resp = SESSION.get(base_url, timeout=TIMEOUT, allow_redirects=True)
+        resp = _S().get(base_url, timeout=TIMEOUT, allow_redirects=True)
         if _over_budget(run_start):
             return findings
         path_lower = urlparse(base_url).path.lower()
@@ -376,7 +390,7 @@ def scan_business_logic(base_url: str, run_start: float) -> list[Finding]:
             new_params[param_name] = [probe_value]
             test_url = urlunparse(parsed._replace(query=urlencode(new_params, doseq=True)))
             try:
-                r = SESSION.get(test_url, timeout=TIMEOUT, allow_redirects=False)
+                r = _S().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                 if r.status_code != 200:
                     continue
                 body_lower = (r.text or "").lower()
