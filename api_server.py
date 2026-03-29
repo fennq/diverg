@@ -1119,6 +1119,15 @@ def investigation_solana_bundle():
             if x and str(x).strip()
         ] or None
 
+    include_x_intel = None
+    x_raw = data.get("include_x_intel")
+    if x_raw is True or x_raw is False:
+        include_x_intel = bool(x_raw)
+    elif isinstance(x_raw, str) and x_raw.strip().lower() in ("true", "1", "yes"):
+        include_x_intel = True
+    elif isinstance(x_raw, str) and x_raw.strip().lower() in ("false", "0", "no"):
+        include_x_intel = False
+
     inv_dir = ROOT / "investigation"
     inv_path = str(inv_dir)
     if inv_path not in sys.path:
@@ -1140,6 +1149,7 @@ def investigation_solana_bundle():
                 max_holders=120,
                 max_funded_by_lookups=120,
                 exclude_wallets=exclude_wallets,
+                include_x_intel=include_x_intel,
             )
         finally:
             oc.HELIUS_KEY = old_key

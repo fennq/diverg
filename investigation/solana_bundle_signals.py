@@ -377,14 +377,70 @@ def fetch_funder_identities(funders: list[str]) -> dict[str, Optional[dict]]:
     return out
 
 
-def is_cex_identity(ident: Optional[dict]) -> bool:
+def _identity_text_blob(ident: Optional[dict]) -> str:
+    """Flatten Helius identity (single-wallet or batch-normalized row) for keyword checks."""
     if not ident or not isinstance(ident, dict):
+        return ""
+    parts: list[str] = []
+    for k in ("name", "displayName", "label", "category", "type", "primary_label"):
+        v = ident.get(k)
+        if isinstance(v, str) and v.strip():
+            parts.append(v.lower())
+    tags = ident.get("tags")
+    if isinstance(tags, list):
+        for t in tags:
+            if t is not None and str(t).strip():
+                parts.append(str(t).lower())
+    return " ".join(parts)
+
+
+def is_cex_identity(ident: Optional[dict]) -> bool:
+    blob = _identity_text_blob(ident)
+    if not blob:
         return False
-    cat = str(ident.get("category") or "").lower()
-    name = str(ident.get("name") or "").lower()
-    if "exchange" in cat or "cex" in cat:
+    if "exchange" in blob or re.search(r"\bcex\b", blob) or "custody" in blob:
         return True
-    if any(x in name for x in ("exchange", "binance", "coinbase", "kraken", "okx", "bybit", "kucoin")):
+    # Major venues + generic patterns (Helius naming varies)
+    venues = (
+        "binance",
+        "coinbase",
+        "kraken",
+        "okx",
+        "bybit",
+        "kucoin",
+        "gate.io",
+        "gate io",
+        "gemini",
+        "bitfinex",
+        "mexc",
+        "htx",
+        "huobi",
+        "crypto.com",
+        "bitstamp",
+        "upbit",
+        "bitget",
+        "deribit",
+        "bingx",
+        "withdraw",
+        "deposit wallet",
+        "hot wallet",
+        "cold wallet",
+    )
+    return any(v in blob for v in venues)
+
+
+def is_mixer_privacy_identity(ident: Optional[dict]) -> bool:
+    """Privacy pools, mixers, tumblers, obfuscation services (best-effort from labels)."""
+    blob = _identity_text_blob(ident)
+    if not blob:
+        return False
+    if re.search(r"\bmixer\b", blob) or "tumbler" in blob or "tornado" in blob:
+        return True
+    if "privacy" in blob and any(x in blob for x in ("pool", "cash", "protocol", "bridge", "service")):
+        return True
+    if any(x in blob for x in ("obfuscat", "blender", "sanction", "laundr", "anon surf")):
+        return True
+    if "relayer" in blob and "privacy" in blob:
         return True
     return False
 
@@ -538,6 +594,30 @@ def compute_coordination_bundle(
     funders = sorted({meta_by_wallet[w]["funder"] for w in lookup_wallets if meta_by_wallet[w].get("funder")})
     funder_idents = fetch_funder_identities(funders)
     cex_funders = {f: is_cex_identity(funder_idents.get(f)) for f in funders}
+    funder_mixer_flags = {f: is_mixer_privacy_identity(funder_idents.get(f)) for f in funders}
+
+    cex_funder_to_wallets: dict[str, list[str]] = defaultdict(list)
+    mixer_funder_to_wallets: dict[str, list[str]] = defaultdict(list)
+    for w in lookup_wallets:
+        f = meta_by_wallet[w].get("funder")
+        if not isinstance(f, str):
+            continue
+        if cex_funders.get(f):
+            cex_funder_to_wallets[f].append(w)
+        if funder_mixer_flags.get(f):
+            mixer_funder_to_wallets[f].append(w)
+
+    def _funder_groups(counter: dict[str, list[str]]) -> list[dict[str, Any]]:
+        groups: list[dict[str, Any]] = []
+        for fnd, ws in counter.items():
+            u = sorted(set(ws))
+            if len(u) >= 2:
+                groups.append({"funder": fnd, "wallet_count": len(u), "wallets": u[:40]})
+        groups.sort(key=lambda x: -x["wallet_count"])
+        return groups
+
+    parallel_cex_funding = _funder_groups(cex_funder_to_wallets)
+    privacy_mixer_funding = _funder_groups(mixer_funder_to_wallets)
 
     shared_inc = shared_inbound_senders(meta_by_wallet)
     shared_out = shared_outbound_receivers(lookup_wallets, transfers_cache)
@@ -594,6 +674,14 @@ def compute_coordination_bundle(
     if any(cex_funders.values()):
         score += 12
         reasons.append("cex_tagged_funder_present")
+    if parallel_cex_funding:
+        top_n = parallel_cex_funding[0]["wallet_count"]
+        score += min(16, 6 + max(0, top_n - 2) * 3)
+        reasons.append("parallel_cex_funder_cluster")
+    if privacy_mixer_funding:
+        top_m = privacy_mixer_funding[0]["wallet_count"]
+        score += min(14, 5 + max(0, top_m - 2) * 2)
+        reasons.append("privacy_mixer_shared_funder")
     if shared_inc.get("top_shared"):
         score += min(15, 5 + len(shared_inc["top_shared"]) * 2)
         reasons.append("shared_inbound_counterparty")
@@ -609,11 +697,25 @@ def compute_coordination_bundle(
 
     score = round(min(100.0, score), 2)
 
+    archetype_hints: list[str] = []
+    if parallel_cex_funding:
+        archetype_hints.append(
+            "Parallel CEX pattern: two or more sampled wallets share a CEX-tagged first funder (common withdrawal routing)."
+        )
+    if privacy_mixer_funding:
+        archetype_hints.append(
+            "Privacy / mixer pattern: multiple sampled wallets share a mixer- or privacy-tagged funder path."
+        )
+
     return {
         "funding_metadata_by_wallet": meta_by_wallet,
         "funding_time_clusters": time_clusters,
         "funding_same_amount_clusters": amount_clusters,
         "funder_cex_flags": cex_funders,
+        "funder_mixer_flags": funder_mixer_flags,
+        "parallel_cex_funding": parallel_cex_funding[:12],
+        "privacy_mixer_funding": privacy_mixer_funding[:12],
+        "bundle_archetype_hints": archetype_hints,
         "shared_inbound_senders": shared_inc,
         "shared_outbound_receivers": shared_out,
         "mint_co_movement": {"same_slot_groups": co_move_pairs[:15], "enhanced": enhanced_sample},

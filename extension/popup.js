@@ -542,6 +542,11 @@
       if (bs.error) {
         parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(String(bs.error))}</p>`);
       }
+      if (Array.isArray(bs.bundle_archetype_hints) && bs.bundle_archetype_hints.length) {
+        bs.bundle_archetype_hints.forEach((hint) => {
+          parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(hint)}</p>`);
+        });
+      }
     }
     const p = data.params || {};
     if (p.holder_fetch_source || p.unique_holders_sampled != null) {
@@ -559,7 +564,14 @@
       parts.push('<div class="sol-h3-mini">Top holders</div><ul class="sol-list-mini">');
       data.top_holders.slice(0, 6).forEach((h) => {
         const tag = h.in_focus_cluster ? ' <span style="color:var(--primary)">●</span>' : '';
-        const idLab = h.identity && h.identity.label ? ` · ${escapeHtml(h.identity.label)}` : '';
+        let idLab = h.identity && h.identity.label ? ` · ${escapeHtml(h.identity.label)}` : '';
+        const ifl = (h.identity && h.identity.intel_flags) || {};
+        if (ifl.cex_tagged || ifl.privacy_mixer_tagged) {
+          const bits = [];
+          if (ifl.cex_tagged) bits.push('CEX');
+          if (ifl.privacy_mixer_tagged) bits.push('mix/priv');
+          idLab += ` · ${escapeHtml(bits.join('/'))}`;
+        }
         let fund = '';
         if (h.funder) {
           fund = ` · ${escapeHtml(h.funder.slice(0, 6))}…`;

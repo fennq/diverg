@@ -26,10 +26,34 @@ from onchain_clients import (
     normalize_batch_identity_map,
     token_metadata_from_das_asset,
 )
-from solana_bundle_signals import compute_coordination_bundle, effective_funder_address
+from solana_bundle_signals import (
+    compute_coordination_bundle,
+    effective_funder_address,
+    is_cex_identity,
+    is_mixer_privacy_identity,
+)
 
 # Base58 Solana address (rough)
 _ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+
+
+def _should_fetch_x_intel(include_x_intel: Optional[bool]) -> bool:
+    """True when X/Nitter is configured and caller/env allow lookup."""
+    if include_x_intel is False:
+        return False
+    v = (os.environ.get("SOLANA_BUNDLE_X_INTEL") or "auto").strip().lower()
+    if include_x_intel is None and v in ("0", "false", "no", "off"):
+        return False
+    try:
+        from x_bundle_intel import x_search_configured
+    except ImportError:
+        return False
+    if not x_search_configured():
+        return False
+    if include_x_intel is True:
+        return True
+    # auto (default): run when X or Nitter is configured
+    return True
 
 
 def normalize_solana_address(s: str) -> Optional[str]:
@@ -253,6 +277,7 @@ def run_bundle_snapshot(
     funded_by_delay_sec: float = 0.05,
     exclude_wallets: Optional[list[str]] = None,
     skip_liquidity_wallet: bool = True,
+    include_x_intel: Optional[bool] = None,
 ) -> dict[str, Any]:
     """
     Fetch token supply, holder token accounts (Helius DAS getTokenAccounts, paginated), cluster by funder.
@@ -264,6 +289,8 @@ def run_bundle_snapshot(
     - exclude_wallets: optional owner addresses to skip in fund-by scan (e.g. known LP).
     - skip_liquidity_wallet: if True, drop the #1 holder from scans when they hold >= SOLANA_BUNDLE_LP_SKIP_MIN_PCT
       of supply (heuristic for pool/vault wallet).
+    - include_x_intel: if True, search X for wallet mentions when X_API_BEARER_TOKEN or NITTER_BASE_URL is set.
+      False disables; None uses env SOLANA_BUNDLE_X_INTEL (default auto = on when configured).
     """
     mint = normalize_solana_address(mint) or ""
     if not mint:
@@ -567,6 +594,22 @@ def run_bundle_snapshot(
                 "tags": idrow.get("tags") or [],
                 "domain_names": idrow.get("domain_names") or [],
             }
+        if idrow:
+            fl = {
+                "cex_tagged": is_cex_identity(idrow),
+                "privacy_mixer_tagged": is_mixer_privacy_identity(idrow),
+            }
+            if ident_payload is not None:
+                ident_payload = {**ident_payload, "intel_flags": fl}
+            elif fl["cex_tagged"] or fl["privacy_mixer_tagged"]:
+                ident_payload = {
+                    "label": None,
+                    "type": idrow.get("type"),
+                    "category": idrow.get("category"),
+                    "tags": idrow.get("tags") or [],
+                    "domain_names": idrow.get("domain_names") or [],
+                    "intel_flags": fl,
+                }
         holders_out.append(
             {
                 "wallet": w,
@@ -578,6 +621,34 @@ def run_bundle_snapshot(
                 "identity": ident_payload,
             }
         )
+
+    x_intel_by_wallet: dict[str, dict[str, Any]] = {}
+    if _should_fetch_x_intel(include_x_intel):
+        try:
+            from x_bundle_intel import enrich_wallets_x_intel
+
+            max_x = max(1, min(int(os.environ.get("SOLANA_BUNDLE_X_INTEL_MAX", "12")), 25))
+            delay_x = float(os.environ.get("SOLANA_BUNDLE_X_INTEL_DELAY_SEC", "0.45"))
+            per_w = max(5, min(int(os.environ.get("SOLANA_BUNDLE_X_INTEL_RESULTS", "10")), 30))
+            x_targets: list[str] = []
+            for row in holders_out[:15]:
+                wa = row.get("wallet")
+                if isinstance(wa, str) and _ADDR_RE.match(wa):
+                    x_targets.append(wa)
+            if sw and sw not in x_targets:
+                x_targets.insert(0, sw)
+            x_intel_by_wallet = enrich_wallets_x_intel(
+                x_targets,
+                max_wallets=max_x,
+                max_results_per_wallet=per_w,
+                delay_sec=delay_x,
+            )
+            for row in holders_out:
+                wa = row.get("wallet")
+                if isinstance(wa, str) and wa in x_intel_by_wallet:
+                    row["x_intel"] = x_intel_by_wallet[wa]
+        except Exception:
+            pass
 
     disclaimer = (
         "Heuristic only: clusters prefer a shared *2-hop* ultimate funder when Helius returns funding data "
@@ -637,6 +708,8 @@ def run_bundle_snapshot(
             "funder_hop2_max": hop_max,
             "funder_hop2_wallets_fetched": len(hop_targets),
             "deep_bundle_scan": True,
+            "include_x_intel": include_x_intel,
+            "x_intel_wallets_with_hits": len(x_intel_by_wallet),
         },
         "disclaimer": disclaimer,
         "pnl_note": "PnL not computed here; use an explorer or portfolio tool for full buy/sell history.",

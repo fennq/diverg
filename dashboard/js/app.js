@@ -706,14 +706,25 @@ function _invTokenBundleSummaryHtml(d) {
   if (bs.error) {
     coordLine += `<p class="inv-err" style="margin-top:0.35rem">${esc(String(bs.error))}</p>`;
   }
+  const arch = Array.isArray(bs.bundle_archetype_hints) ? bs.bundle_archetype_hints : [];
+  if (arch.length) {
+    coordLine += `<ul class="inv-bundle-archetype">${arch.map((t) => `<li class="inv-muted">${esc(t)}</li>`).join('')}</ul>`;
+  }
 
   const topH = (d.top_holders || [])[0];
   let ownershipStrip = '';
   if (topH) {
     const id = topH.identity || {};
-    const idPart = id.label
+    let idPart = id.label
       ? `<span class="inv-id-chip" title="Helius wallet identity">${esc(id.label)}</span>`
       : '<span class="inv-muted">no Helius label</span>';
+    const ifl = id.intel_flags || {};
+    if (ifl.cex_tagged || ifl.privacy_mixer_tagged) {
+      const bits = [];
+      if (ifl.cex_tagged) bits.push('CEX-tagged');
+      if (ifl.privacy_mixer_tagged) bits.push('privacy/mixer-tagged');
+      idPart += ` <span class="inv-id-chip inv-id-chip--sub" title="Helius-derived flags">${esc(bits.join(' · '))}</span>`;
+    }
     const clPart = topH.in_focus_cluster
       ? '<span class="inv-muted">Same-funder cluster: yes</span>'
       : '<span class="inv-muted">Same-funder cluster: no</span>';
@@ -737,9 +748,15 @@ function _invTokenBundleSummaryHtml(d) {
       const w = h.wallet || '';
       const short = w.length > 10 ? w.slice(0, 8) + '…' : w;
       const id = h.identity || {};
-      const lab = id.label
-        ? `<span class="inv-id-chip">${esc(id.label)}</span>`
-        : '—';
+      const iflags = id.intel_flags || {};
+      let lab = id.label ? `<span class="inv-id-chip">${esc(id.label)}</span>` : '';
+      if (iflags.cex_tagged || iflags.privacy_mixer_tagged) {
+        const bits = [];
+        if (iflags.cex_tagged) bits.push('CEX');
+        if (iflags.privacy_mixer_tagged) bits.push('privacy/mixer');
+        lab += (lab ? ' ' : '') + `<span class="inv-id-chip inv-id-chip--sub">${esc(bits.join(' · '))}</span>`;
+      }
+      if (!lab) lab = '—';
       const cat = id.category
         ? esc(id.category)
         : (id.type ? esc(id.type) : '—');
@@ -753,9 +770,20 @@ function _invTokenBundleSummaryHtml(d) {
         }
       }
       const cl = h.in_focus_cluster ? '<span class="inv-cluster-dot" title="In same-funder cluster">●</span>' : '';
-      return `<tr><td class="mono"><span title="${esc(w)}">${esc(short)}</span></td><td>${esc(String(h.pct_supply != null ? h.pct_supply : '—'))}%</td><td>${lab}</td><td>${cat}</td><td>${cl}</td><td class="mono inv-funder-cell" title="Direct funder → 2-hop root">${esc(fund)}</td></tr>`;
+      const xi = h.x_intel;
+      let xcell = '—';
+      if (xi && xi.tweet_count) {
+        const authors = Array.isArray(xi.posting_authors) ? xi.posting_authors.slice(0, 2) : [];
+        const au = authors.map((a) => '@' + esc(String(a))).join(', ');
+        const firstUrl = (xi.tweets && xi.tweets[0] && xi.tweets[0].url) ? xi.tweets[0].url : '';
+        const inner = firstUrl
+          ? `<a href="${esc(firstUrl)}" target="_blank" rel="noopener noreferrer">${esc(String(xi.tweet_count))} posts</a>`
+          : esc(String(xi.tweet_count)) + ' posts';
+        xcell = au ? `${au} · ${inner}` : inner;
+      }
+      return `<tr><td class="mono"><span title="${esc(w)}">${esc(short)}</span></td><td>${esc(String(h.pct_supply != null ? h.pct_supply : '—'))}%</td><td>${lab}</td><td>${cat}</td><td>${cl}</td><td class="mono inv-funder-cell" title="Direct funder → 2-hop root">${esc(fund)}</td><td class="inv-x-cell" title="X search: only shown when posts mention this address">${xcell}</td></tr>`;
     }).join('');
-    holders = `<div class="inv-holders"><div class="inv-subhead" style="margin-top:0.75rem">Top holders</div><table class="inv-holders-table"><thead><tr><th>Wallet</th><th>%</th><th>Label</th><th>Category</th><th title="Same-funder cluster">Cl.</th><th>Funder / root</th></tr></thead><tbody>${rows}</tbody></table><p class="inv-muted" style="font-size:0.65rem;margin-top:0.35rem">Hover wallet for full address. Labels from Helius batch-identity when available.</p></div>`;
+    holders = `<div class="inv-holders"><div class="inv-subhead" style="margin-top:0.75rem">Top holders</div><table class="inv-holders-table"><thead><tr><th>Wallet</th><th>%</th><th>Label</th><th>Category</th><th title="Same-funder cluster">Cl.</th><th>Funder / root</th><th>X (if mentioned)</th></tr></thead><tbody>${rows}</tbody></table><p class="inv-muted" style="font-size:0.65rem;margin-top:0.35rem">Hover wallet for full address. Helius labels; X column only when server search finds posts mentioning the address (set X_API_BEARER_TOKEN or NITTER_BASE_URL).</p></div>`;
   }
   const p = d.params || {};
   let scanMeta = '';

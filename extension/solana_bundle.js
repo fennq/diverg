@@ -190,22 +190,36 @@
   function identityPayloadFromMap(map, w) {
     var idrow = map[w];
     if (!idrow) return null;
+    var fl = { cex_tagged: isCexIdentity(idrow), privacy_mixer_tagged: isMixerPrivacyIdentity(idrow) };
+    var base = null;
     if (idrow.primary_label) {
-      return {
+      base = {
         label: idrow.primary_label,
         type: idrow.type,
         category: idrow.category,
         tags: idrow.tags || [],
         domain_names: idrow.domain_names || [],
+        intel_flags: fl,
       };
-    }
-    if (idrow.category || idrow.type) {
-      return {
+    } else if (idrow.category || idrow.type) {
+      base = {
         label: String(idrow.category || idrow.type || '').slice(0, 120),
         type: idrow.type,
         category: idrow.category,
         tags: idrow.tags || [],
         domain_names: idrow.domain_names || [],
+        intel_flags: fl,
+      };
+    }
+    if (base) return base;
+    if (fl.cex_tagged || fl.privacy_mixer_tagged) {
+      return {
+        label: null,
+        type: idrow.type,
+        category: idrow.category,
+        tags: idrow.tags || [],
+        domain_names: idrow.domain_names || [],
+        intel_flags: fl,
       };
     }
     return null;
@@ -795,15 +809,66 @@
     return out;
   }
 
-  function isCexIdentity(ident) {
-    if (!ident || typeof ident !== 'object') return false;
-    var cat = String(ident.category || '').toLowerCase();
-    var name = String(ident.name || '').toLowerCase();
-    if (cat.indexOf('exchange') >= 0 || cat.indexOf('cex') >= 0) return true;
-    var tags = ['exchange', 'binance', 'coinbase', 'kraken', 'okx', 'bybit', 'kucoin'];
-    for (var i = 0; i < tags.length; i++) {
-      if (name.indexOf(tags[i]) >= 0) return true;
+  function identityTextBlob(o) {
+    if (!o || typeof o !== 'object') return '';
+    var parts = [];
+    var cands = [o.primary_label, o.name, o.displayName, o.label, o.category, o.type, o.entityType];
+    for (var ci = 0; ci < cands.length; ci++) {
+      if (typeof cands[ci] === 'string' && cands[ci].trim()) parts.push(cands[ci].toLowerCase());
     }
+    var tags = o.tags;
+    if (Array.isArray(tags)) {
+      for (var ti = 0; ti < tags.length; ti++) {
+        if (tags[ti] != null && String(tags[ti]).trim()) parts.push(String(tags[ti]).toLowerCase());
+      }
+    }
+    return parts.join(' ');
+  }
+
+  function isCexIdentity(ident) {
+    var blob = identityTextBlob(ident);
+    if (!blob) return false;
+    if (blob.indexOf('exchange') >= 0) return true;
+    if (/\bcex\b/.test(blob)) return true;
+    if (blob.indexOf('custody') >= 0) return true;
+    var venues = [
+      'binance',
+      'coinbase',
+      'kraken',
+      'okx',
+      'bybit',
+      'kucoin',
+      'gate.io',
+      'gate io',
+      'gemini',
+      'bitfinex',
+      'mexc',
+      'htx',
+      'huobi',
+      'crypto.com',
+      'bitstamp',
+      'upbit',
+      'bitget',
+      'deribit',
+      'bingx',
+      'withdraw',
+      'deposit wallet',
+      'hot wallet',
+      'cold wallet',
+    ];
+    for (var vi = 0; vi < venues.length; vi++) {
+      if (blob.indexOf(venues[vi]) >= 0) return true;
+    }
+    return false;
+  }
+
+  function isMixerPrivacyIdentity(ident) {
+    var blob = identityTextBlob(ident);
+    if (!blob) return false;
+    if (/\bmixer\b/.test(blob) || blob.indexOf('tumbler') >= 0 || blob.indexOf('tornado') >= 0) return true;
+    if (blob.indexOf('privacy') >= 0 && /pool|cash|protocol|bridge|service/.test(blob)) return true;
+    if (/obfuscat|blender|sanction|laundr|anon surf/.test(blob)) return true;
+    if (blob.indexOf('relayer') >= 0 && blob.indexOf('privacy') >= 0) return true;
     return false;
   }
 
@@ -1024,10 +1089,46 @@
     }
 
     var cexFunders = {};
+    var mixerFunders = {};
     for (var ci = 0; ci < funders.length; ci++) {
       var cf = funders[ci];
       cexFunders[cf] = isCexIdentity(funderIdents[cf]);
+      mixerFunders[cf] = isMixerPrivacyIdentity(funderIdents[cf]);
     }
+
+    var cexFunderToWallets = {};
+    var mixerFunderToWallets = {};
+    for (var wi = 0; wi < lookupOrder.length; wi++) {
+      var wf2 = lookupOrder[wi];
+      var fu2 = metaByWallet[wf2] && metaByWallet[wf2].funder;
+      if (typeof fu2 !== 'string') continue;
+      if (cexFunders[fu2]) {
+        if (!cexFunderToWallets[fu2]) cexFunderToWallets[fu2] = [];
+        cexFunderToWallets[fu2].push(wf2);
+      }
+      if (mixerFunders[fu2]) {
+        if (!mixerFunderToWallets[fu2]) mixerFunderToWallets[fu2] = [];
+        mixerFunderToWallets[fu2].push(wf2);
+      }
+    }
+    function funderGroups(counter) {
+      var groups = [];
+      Object.keys(counter).forEach(function (fnd) {
+        var ws = counter[fnd];
+        var u = {};
+        ws.forEach(function (x) {
+          u[x] = true;
+        });
+        var ul = Object.keys(u).sort();
+        if (ul.length >= 2) groups.push({ funder: fnd, wallet_count: ul.length, wallets: ul.slice(0, 40) });
+      });
+      groups.sort(function (a, b) {
+        return b.wallet_count - a.wallet_count;
+      });
+      return groups;
+    }
+    var parallelCexFunding = funderGroups(cexFunderToWallets).slice(0, 12);
+    var privacyMixerFunding = funderGroups(mixerFunderToWallets).slice(0, 12);
 
     var sharedInc = sharedInboundSenders(metaByWallet);
     var sharedOut = sharedOutboundReceivers(lookupOrder, transfersCache);
@@ -1112,6 +1213,16 @@
       score += 12;
       reasons.push('cex_tagged_funder_present');
     }
+    if (parallelCexFunding.length) {
+      var topN = parallelCexFunding[0].wallet_count;
+      score += Math.min(16, 6 + Math.max(0, topN - 2) * 3);
+      reasons.push('parallel_cex_funder_cluster');
+    }
+    if (privacyMixerFunding.length) {
+      var topM = privacyMixerFunding[0].wallet_count;
+      score += Math.min(14, 5 + Math.max(0, topM - 2) * 2);
+      reasons.push('privacy_mixer_shared_funder');
+    }
     if (sharedInc.top_shared && sharedInc.top_shared.length) {
       score += Math.min(15, 5 + sharedInc.top_shared.length * 2);
       reasons.push('shared_inbound_counterparty');
@@ -1131,11 +1242,27 @@
 
     score = Math.round(Math.min(100, score) * 100) / 100;
 
+    var archetypeHints = [];
+    if (parallelCexFunding.length) {
+      archetypeHints.push(
+        'Parallel CEX pattern: two or more sampled wallets share a CEX-tagged first funder (common withdrawal routing).'
+      );
+    }
+    if (privacyMixerFunding.length) {
+      archetypeHints.push(
+        'Privacy / mixer pattern: multiple sampled wallets share a mixer- or privacy-tagged funder path.'
+      );
+    }
+
     return {
       funding_metadata_by_wallet: metaByWallet,
       funding_time_clusters: timeClusters,
       funding_same_amount_clusters: amountClusters,
       funder_cex_flags: cexFunders,
+      funder_mixer_flags: mixerFunders,
+      parallel_cex_funding: parallelCexFunding,
+      privacy_mixer_funding: privacyMixerFunding,
+      bundle_archetype_hints: archetypeHints,
       shared_inbound_senders: sharedInc,
       shared_outbound_receivers: sharedOut,
       mint_co_movement: { same_slot_groups: coMovePairs.slice(0, 15), enhanced: enhancedSample },

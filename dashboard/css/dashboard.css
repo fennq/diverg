@@ -854,6 +854,32 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
   word-break: break-word;
 }
 
+.inv-id-chip--sub {
+  background: rgba(120, 120, 140, 0.14);
+  border-color: rgba(120, 120, 140, 0.28);
+  font-weight: 400;
+}
+
+.inv-bundle-archetype {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.inv-x-cell {
+  font-size: 0.65rem;
+  max-width: 10rem;
+  word-break: break-word;
+  vertical-align: top;
+}
+
+.inv-x-cell a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .settings-help {
   font-size: 0.75rem;
   color: var(--muted);
