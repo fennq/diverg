@@ -1129,6 +1129,12 @@ def _enrich_solana_bundle_payload(raw: dict) -> dict:
         f"cluster {raw['cluster_wallet_count']} wallets hold ~{cp}% of sampled supply. "
         f"Signals: {sig_txt}."
     )
+    ccb = raw.get("cross_chain_bundle")
+    if isinstance(ccb, dict) and ccb.get("combined_escalation"):
+        raw["risk_summary"] = (
+            raw["risk_summary"]
+            + " Cross-chain token mapping plus bridge- and mixer-style funding signals overlap — see cross_chain_bundle in JSON for notes."
+        )
     return raw
 
 

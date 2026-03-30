@@ -29,6 +29,11 @@ class TestHeliusSolanaBundleSmoke(unittest.TestCase):
         cc = out.get("cross_chain") or {}
         self.assertIn("summary", cc)
         self.assertEqual(cc["summary"].get("kind"), "solana_bundle")
+        self.assertIn("cross_chain_bundle", out)
+        ccb = out.get("cross_chain_bundle")
+        if isinstance(ccb, dict):
+            self.assertIn("investigator_notes", ccb)
+            self.assertIn("disclaimer", ccb)
 
 
 if __name__ == "__main__":

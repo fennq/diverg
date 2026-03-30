@@ -48,6 +48,10 @@ MAX_ENHANCED_FETCH = int(os.environ.get("SOLANA_BUNDLE_MAX_ENHANCED_FETCH", "32"
 MAX_FUNDER_IDENTITY = int(os.environ.get("SOLANA_BUNDLE_MAX_FUNDER_IDENTITY", "56"))
 # Extra identity lookups for 2-hop root funders (CEX/mixer path when direct funder is unlabeled)
 MAX_FUNDER_ROOT_IDENTITY = int(os.environ.get("SOLANA_BUNDLE_FUNDER_ROOT_IDENTITY_MAX", "24"))
+# Enhanced tx samples for *funder/root* addresses: detect bridge programs on funding path (0 = off).
+SOLANA_BUNDLE_FUNDER_BRIDGE_ENHANCED_MAX = max(
+    0, min(int(os.environ.get("SOLANA_BUNDLE_FUNDER_BRIDGE_ENHANCED_MAX", "6")), 32)
+)
 # Helius enhanced txs per wallet when sampling mint co-movement / program overlap
 ENHANCED_TX_LIMIT = int(os.environ.get("SOLANA_BUNDLE_ENHANCED_TX_LIMIT", "55"))
 # Extra /transfers fetch during coordination pass (Helius max 100)
@@ -931,6 +935,9 @@ def build_funding_cluster_bridge_mixer(
     privacy_mixer_funding_strict: list[dict[str, Any]],
     funder_mixer_flags: dict[str, bool],
     bridge_count_eligible_wallets: Optional[list[str]] = None,
+    funder_program_sets: Optional[dict[str, set[str]]] = None,
+    meta_by_wallet: Optional[dict[str, dict[str, Any]]] = None,
+    root_map: Optional[dict[str, Optional[str]]] = None,
 ) -> dict[str, Any]:
     """
     bridge_count_eligible_wallets: when non-empty, only these wallets count toward bridge_adjacent_* and
@@ -1000,6 +1007,51 @@ def build_funding_cluster_bridge_mixer(
         bridge_mixer_confidence_tier = "medium"
     elif bridge_touch_wallets:
         bridge_mixer_confidence_tier = "low"
+
+    # --- Funder / root path: bridge programs in sampled enhanced txs (cross-chain on-ramp hint) ---
+    funder_bridge_hits: list[dict[str, Any]] = []
+    bridge_program_funder_count = 0
+    wallets_with_bridge_touching_funder: list[str] = []
+    allow_keys = set(allow.keys())
+    if funder_program_sets:
+        for addr, progs in funder_program_sets.items():
+            if not isinstance(addr, str) or not progs:
+                continue
+            hits = [{"program_id": pid, "label": allow[pid]} for pid in progs if pid in allow]
+            if hits:
+                bridge_program_funder_count += 1
+                funder_bridge_hits.append(
+                    {"funder": addr, "bridge_program_hits": hits[:8], "note": "Bridge program in funder/root tx sample."}
+                )
+    bridge_funder_addrs = {h["funder"] for h in funder_bridge_hits if isinstance(h.get("funder"), str)}
+    if bridge_funder_addrs and meta_by_wallet is not None and root_map is not None:
+        rm = root_map
+        for w in lookup_wallets:
+            if eligible is not None and w not in eligible:
+                continue
+            meta = meta_by_wallet.get(w) or {}
+            fund = meta.get("funder")
+            root = rm.get(w)
+            matched = False
+            if isinstance(fund, str) and fund in bridge_funder_addrs:
+                matched = True
+            if isinstance(root, str) and root in bridge_funder_addrs:
+                matched = True
+            if matched:
+                wallets_with_bridge_touching_funder.append(w)
+    w_bf = sorted(set(wallets_with_bridge_touching_funder))[:40]
+    w_bf_n = len(w_bf)
+    if w_bf_n >= 2:
+        risk_lines.append(
+            f"{w_bf_n} focus-path wallet(s) funded (direct or 2-hop root) by address(es) with bridge-program hits in sample."
+        )
+        if bridge_mixer_confidence_tier == "low":
+            bridge_mixer_confidence_tier = "medium"
+    elif w_bf_n == 1 and bridge_program_funder_count:
+        risk_lines.append(
+            "One sampled wallet’s funder path shows bridge-program activity in enhanced tx sample."
+        )
+
     return {
         "bridge_adjacent_wallet_count": len(set(bridge_touch_wallets)),
         "bridge_adjacent_wallets": sorted(set(bridge_touch_wallets))[:40],
@@ -1010,6 +1062,10 @@ def build_funding_cluster_bridge_mixer(
         "risk_lines": risk_lines,
         "bridge_mixer_confidence_tier": bridge_mixer_confidence_tier,
         "bridge_signal_scope": "focus_cluster" if eligible else "all_sampled_wallets",
+        "bridge_program_funder_count": bridge_program_funder_count,
+        "funder_bridge_hits": funder_bridge_hits[:20],
+        "wallets_with_bridge_touching_funder": w_bf_n,
+        "wallets_with_bridge_touching_funder_sample": w_bf,
     }
 
 
@@ -1257,6 +1313,24 @@ def compute_coordination_bundle(
         return s
 
     sample_addrs = _sample_funder_addrs()
+    funder_program_sets: dict[str, set[str]] = {}
+    _fb_max = SOLANA_BUNDLE_FUNDER_BRIDGE_ENHANCED_MAX
+    if _fb_max > 0:
+        fund_pool = sorted(
+            a for a in sample_addrs if isinstance(a, str) and _ADDR_RE.match(a)
+        )[:_fb_max]
+        for i, fa in enumerate(fund_pool):
+            txs = helius_enhanced_transactions(fa, limit=min(28, ENHANCED_TX_LIMIT))
+            if isinstance(txs, list):
+                acc: set[str] = set()
+                for tx in txs:
+                    if isinstance(tx, dict):
+                        acc |= _programs_from_enhanced(tx)
+                if acc:
+                    funder_program_sets[fa] = acc
+            if i < len(fund_pool) - 1:
+                time.sleep(0.06)
+
     any_strong_cex = any(funder_cex_tier.get(a) == "strong" for a in sample_addrs)
     any_cex = any(funder_cex_tier.get(a) in ("weak", "strong") for a in sample_addrs)
 
@@ -1324,6 +1398,9 @@ def compute_coordination_bundle(
         privacy_mixer_funding_strict=privacy_mixer_funding[:12],
         funder_mixer_flags=funder_mixer_flags,
         bridge_count_eligible_wallets=_bridge_eligible,
+        funder_program_sets=funder_program_sets,
+        meta_by_wallet=meta_by_wallet,
+        root_map=root_map,
     )
     if funding_cluster_bridge_mixer.get("shared_bridge_programs_multi_wallet"):
         score += min(8.0, 3.0 + 2.0 * len(funding_cluster_bridge_mixer["shared_bridge_programs_multi_wallet"]))
@@ -1331,6 +1408,10 @@ def compute_coordination_bundle(
     elif funding_cluster_bridge_mixer.get("bridge_adjacent_wallet_count", 0) >= 2:
         score += min(5.0, 2.0 + 0.5 * funding_cluster_bridge_mixer["bridge_adjacent_wallet_count"])
         reasons.append("bridge_program_touched_multiple_holders")
+    _w_bf = int(funding_cluster_bridge_mixer.get("wallets_with_bridge_touching_funder") or 0)
+    if _w_bf >= 2:
+        score += min(6.0, 2.0 + 0.5 * _w_bf)
+        reasons.append("bridge_program_on_shared_funder_path")
 
     score = round(min(100.0, score), 2)
 
@@ -1403,5 +1484,7 @@ def compute_coordination_bundle(
             "funding_max_spread_sec": _spread,
             "enhanced_type_overlap_min": ENHANCED_TYPE_OVERLAP_MIN,
             "intel_overrides_loaded": bool((os.environ.get("SOLANA_BUNDLE_INTEL_OVERRIDES_PATH") or "").strip()),
+            "funder_bridge_enhanced_max": SOLANA_BUNDLE_FUNDER_BRIDGE_ENHANCED_MAX,
+            "funder_bridge_wallets_sampled": len(funder_program_sets),
         },
     }
