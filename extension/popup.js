@@ -591,6 +591,30 @@
         `<p class="sol-disclaimer-mini">Top holder ~${escapeHtml(String(th.pct_supply))}% · Helius: ${idPart}${th.in_focus_cluster ? ' · in cluster' : ''}</p>`
       );
     }
+    const ccb = data.cross_chain_bundle;
+    if (ccb && typeof ccb === 'object') {
+      const bridgeN = ccb.bridge_adjacent_holder_wallet_count || 0;
+      const sharedN = (ccb.shared_bridge_program_groups || []).length;
+      const tier = ccb.bridge_mixer_tier || 'low';
+      const notes = Array.isArray(ccb.investigator_notes) ? ccb.investigator_notes : [];
+      const hasBridge = bridgeN > 0 || sharedN > 0;
+      const hasMixer = ccb.strict_mixer_cluster_max_wallets >= 2 || ccb.any_mixer_tagged_funder;
+      if (hasBridge || hasMixer || notes.length) {
+        parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">Cross-chain / bridge signals</div>`);
+        parts.push(`<div class="sol-v-mini" style="font-size:11px">Tier: <strong>${escapeHtml(tier)}</strong> · bridge-adjacent holders: ${escapeHtml(String(bridgeN))}${sharedN ? ` · shared bridge programs: ${escapeHtml(String(sharedN))}` : ''}</div>`);
+        if (hasMixer) {
+          const mixerBits = [];
+          if (ccb.strict_mixer_cluster_max_wallets >= 2) mixerBits.push(`mixer cluster: ${escapeHtml(String(ccb.strict_mixer_cluster_max_wallets))} wallets`);
+          if (ccb.any_mixer_tagged_funder) mixerBits.push('mixer-tagged funder');
+          parts.push(`<div class="sol-v-mini" style="font-size:11px">${escapeHtml(mixerBits.join(' · '))}</div>`);
+        }
+        notes.forEach(function (n) {
+          parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(n)}</p>`);
+        });
+        if (ccb.disclaimer) parts.push(`<p class="sol-disclaimer-mini" style="opacity:0.6">${escapeHtml(ccb.disclaimer)}</p>`);
+        parts.push('</div>');
+      }
+    }
     if (data.disclaimer) parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(data.disclaimer)}</p>`);
     if (data.pnl_note) parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(data.pnl_note)}</p>`);
     if (data.focus_cluster_note) parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(data.focus_cluster_note)}</p>`);
