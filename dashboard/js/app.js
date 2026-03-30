@@ -1126,6 +1126,221 @@ async function clearHistory() {
   } catch (e) { toast('Failed: ' + (e?.message || 'unknown error'), 'err'); }
 }
 
+/** Strip control chars for PDF standard fonts (Helvetica). */
+function pdfSanitizeText(t) {
+  if (t == null || t === '') return '';
+  return String(t)
+    .replace(/\r\n/g, '\n')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+    .trim();
+}
+
+/** Plain-language labels so non-technical readers understand priority. */
+function pdfFriendlySeverity(sevRaw) {
+  const s = sevClass(sevRaw);
+  const map = {
+    Critical: 'Critical — treat as urgent; fix as soon as you can.',
+    High: 'High — important; plan a fix soon.',
+    Medium: 'Medium — worth fixing in your next regular update.',
+    Low: 'Low — smaller risk; review when you have time.',
+    Info: 'Informational — for awareness; usually no immediate action.',
+  };
+  return map[s] || 'Review the details below and decide with your team.';
+}
+
+function exportReportPdf() {
+  if (!State.report) {
+    toast('No report loaded', 'err');
+    return;
+  }
+  const mod = window.jspdf;
+  if (!mod || typeof mod.jsPDF !== 'function') {
+    toast('PDF helper did not load. Refresh the page and try again.', 'err');
+    return;
+  }
+
+  const doc = new mod.jsPDF({ unit: 'pt', format: 'a4' });
+  const margin = 48;
+  const bottom = 56;
+  const pageH = doc.internal.pageSize.getHeight();
+  const pageW = doc.internal.pageSize.getWidth();
+  const maxW = pageW - margin * 2;
+  let y = 56;
+
+  function newPage() {
+    doc.addPage();
+    y = 56;
+  }
+
+  function ensureSpace(lineHeight) {
+    if (y + lineHeight > pageH - bottom) newPage();
+  }
+
+  function addTitle(text) {
+    const raw = pdfSanitizeText(text);
+    if (!raw) return;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    const lines = doc.splitTextToSize(raw, maxW);
+    for (let i = 0; i < lines.length; i++) {
+      ensureSpace(20);
+      doc.text(lines[i], margin, y);
+      y += 20;
+    }
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    y += 8;
+  }
+
+  function addHeading(text) {
+    const raw = pdfSanitizeText(text);
+    if (!raw) return;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    const lines = doc.splitTextToSize(raw, maxW);
+    for (let i = 0; i < lines.length; i++) {
+      ensureSpace(15);
+      doc.text(lines[i], margin, y);
+      y += 15;
+    }
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    y += 6;
+  }
+
+  function addBody(text) {
+    const raw = pdfSanitizeText(text);
+    if (!raw) return;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    const parts = raw.split(/\n\n+/);
+    for (const part of parts) {
+      const line = part.replace(/\n/g, ' ');
+      const wrapped = doc.splitTextToSize(line, maxW);
+      for (let i = 0; i < wrapped.length; i++) {
+        ensureSpace(13);
+        doc.text(wrapped[i], margin, y);
+        y += 13;
+      }
+      y += 5;
+    }
+  }
+
+  const rep = State.report;
+  const findings = [...(rep.findings || [])].sort((a, b) => {
+    const o = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
+    return (o[sevClass(a.severity)] ?? 5) - (o[sevClass(b.severity)] ?? 5);
+  });
+
+  addTitle('Security scan — plain-language summary');
+  addBody(
+    'This document explains your scan results in everyday words. It is meant for managers, product owners, and anyone who is not a security specialist. Use the technical view in Diverg and the JSON export for full detail. This summary is not legal or insurance advice.'
+  );
+
+  addHeading('What was scanned');
+  addBody(`Target: ${pdfSanitizeText(rep.target_url) || 'Not recorded'}`);
+  if (rep.scanned_at) addBody(`When: ${pdfSanitizeText(rep.scanned_at)}`);
+  if (rep.id) addBody(`Report ID: ${pdfSanitizeText(rep.id)}`);
+
+  addHeading('Overall picture');
+  const verdict = pdfSanitizeText(rep.risk_verdict) || 'Not rated';
+  const score =
+    rep.risk_score != null && rep.risk_score !== ''
+      ? ` Safety score: ${pdfSanitizeText(rep.risk_score)} (higher usually means safer in our model).`
+      : '';
+  addBody(`Result label: ${verdict}.${score}`);
+  if (rep.risk_summary) addBody(String(rep.risk_summary));
+
+  const counts = { Critical: 0, High: 0, Medium: 0, Low: 0, Info: 0 };
+  for (const f of findings) {
+    const k = sevClass(f.severity);
+    if (counts[k] !== undefined) counts[k] += 1;
+  }
+  const breakdown = Object.entries(counts)
+    .filter(([, n]) => n > 0)
+    .map(([k, n]) => `${n} ${k}`)
+    .join(', ');
+
+  addHeading('Findings at a glance');
+  if (!findings.length) {
+    addBody('No individual findings were listed for this scan. That may mean a clean result for the checks we ran, or that details are only in the raw data.');
+  } else {
+    addBody(
+      `We reported ${findings.length} item(s). ${breakdown ? `Breakdown: ${breakdown}.` : ''} The next section walks through each one in simple language.`
+    );
+  }
+
+  if (findings.length) {
+    addHeading('Each finding — explained simply');
+    findings.forEach((f, i) => {
+      addHeading(`Finding ${i + 1}: ${pdfSanitizeText(f.title) || 'Untitled'}`);
+      addBody(`Priority: ${pdfFriendlySeverity(f.severity)}`);
+      if (f.category) addBody(`Topic area: ${pdfSanitizeText(f.category)}`);
+      if (f.description) {
+        addHeading('What it means');
+        addBody(f.description);
+      }
+      if (f.impact) {
+        addHeading('Why it matters');
+        addBody(f.impact);
+      }
+      if (f.remediation) {
+        addHeading('What to do next');
+        addBody(f.remediation);
+      }
+      if (f.evidence) {
+        const ev = String(f.evidence);
+        const short = ev.length > 550 ? `${ev.slice(0, 550)}…` : ev;
+        addHeading('Evidence (short excerpt)');
+        addBody(short);
+      }
+      y += 12;
+      ensureSpace(24);
+    });
+  }
+
+  const aps = rep.attack_paths;
+  if (Array.isArray(aps) && aps.length) {
+    addHeading('Possible combined attack paths');
+    addBody(
+      'These describe ways several issues could be chained together. Share this section with whoever fixes security in your stack.'
+    );
+    aps.slice(0, 25).forEach((p, idx) => {
+      const ap = p.attack_path || p;
+      const title = pdfSanitizeText(ap.title || ap.name || `Chain ${idx + 1}`);
+      addHeading(title);
+      const steps = Array.isArray(ap.steps) ? ap.steps : ap.chain || ap.path || [];
+      if (steps.length) {
+        addBody(steps.map(s => pdfSanitizeText(s)).filter(Boolean).join(' → '));
+      }
+      if (ap.impact) addBody(ap.impact);
+    });
+  }
+
+  if (rep.attack_paths_note) {
+    addHeading('Note on attack paths');
+    addBody(String(rep.attack_paths_note));
+  }
+
+  if (rep.remediation_plan) {
+    addHeading('Remediation plan (from scan)');
+    const plan =
+      typeof rep.remediation_plan === 'string'
+        ? rep.remediation_plan
+        : JSON.stringify(rep.remediation_plan, null, 2);
+    addBody(plan.length > 6000 ? `${plan.slice(0, 6000)}…` : plan);
+  }
+
+  if (rep.safe_to_run != null && rep.safe_to_run !== '') {
+    addHeading('Automated testing');
+    addBody(String(rep.safe_to_run));
+  }
+
+  const slug = (pdfSanitizeText(rep.target_url) || 'scan').replace(/[^\w.-]+/g, '_').slice(0, 60);
+  doc.save(`diverg-summary-${slug}-${Date.now()}.pdf`);
+  toast('PDF downloaded', 'ok');
+}
+
 function exportReport() {
   if (!State.report) return;
   const blob = new Blob([JSON.stringify(State.report, null, 2)], { type: 'application/json' });

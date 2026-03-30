@@ -334,7 +334,10 @@
       <div class="page" id="page-results">
         <div class="section-h">
           <span class="section-title" id="resultsTarget">Results</span>
-          <span class="section-action" onclick="exportReport()">Export JSON</span>
+          <span class="section-action-row">
+            <span class="section-action" onclick="exportReportPdf()" title="Easy-to-read summary you can save or print">Download PDF summary</span>
+            <span class="section-action" onclick="exportReport()">Export JSON</span>
+          </span>
         </div>
 
         <div id="resultsBadges" style="display:flex; gap:0.5rem; margin-bottom:1.5rem; flex-wrap:wrap"></div>
@@ -612,6 +615,7 @@
 </div>
 
 <div class="toast-container" id="toastContainer"></div>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" crossorigin="anonymous"></script>
 <script src="/dashboard/js/app.js"></script>
 </body>
 </html>

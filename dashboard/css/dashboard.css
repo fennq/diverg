@@ -298,6 +298,7 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
   margin-right: auto;
 }
 .section-title { font-size: 0.8125rem; font-weight: 500; color: var(--dim); }
+.section-action-row { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; align-items: center; justify-content: flex-end; }
 .section-action { font-size: 0.75rem; color: var(--dim); cursor: pointer; }
 .section-action:hover { color: var(--text); }
 

@@ -422,7 +422,7 @@ def _security_headers(resp):
     if not IS_PRODUCTION:
         connect_src += " http://127.0.0.1:*"
     # Cloudflare Web Analytics injects beacon on proxied pages; allow or browser console shows CSP noise.
-    script_src = "'self' 'unsafe-inline'"
+    script_src = "'self' 'unsafe-inline' https://cdn.jsdelivr.net"
     if IS_PRODUCTION:
         script_src += " https://static.cloudflareinsights.com"
     csp = (
