@@ -998,6 +998,20 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
 .inv-muted { color: var(--dim); font-size: 0.75rem; }
 .inv-kv { margin: 0.25rem 0; font-family: var(--mono); font-size: 0.6875rem; color: var(--dim); }
 .inv-kv span { color: var(--muted); }
+.inv-escalation-alert {
+  background: rgba(239,68,68,0.08);
+  border-left: 3px solid var(--red);
+  border-radius: 0 6px 6px 0;
+  padding: 0.55rem 0.75rem;
+  margin: 0.5rem 0 0.6rem;
+  font-size: 0.75rem;
+  color: #fca5a5;
+  line-height: 1.5;
+}
+.inv-cross-chain-bundle { margin-top: 0.5rem; }
+.inv-details-block { font-size: 0.74rem; color: var(--dim); }
+.inv-details-block summary { font-size: 0.74rem; color: var(--dim); user-select: none; }
+.inv-details-block summary:hover { color: var(--text); }
 
 /* Responsive */
 @media (max-width: 900px) {

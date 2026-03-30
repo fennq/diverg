@@ -12,10 +12,12 @@ def build_cross_chain_bundle_intel(
     mint: str,
     cross_chain: Optional[dict[str, Any]],
     funding_cluster_bridge_mixer: Optional[dict[str, Any]],
+    bridge_transfers: Optional[dict[str, list[dict[str, Any]]]] = None,
 ) -> dict[str, Any]:
     cc = cross_chain if isinstance(cross_chain, dict) else {}
     summary = cc.get("summary") if isinstance(cc.get("summary"), dict) else {}
     fc = funding_cluster_bridge_mixer if isinstance(funding_cluster_bridge_mixer, dict) else {}
+    bt = bridge_transfers if isinstance(bridge_transfers, dict) else {}
 
     explorer_links = summary.get("explorer_links") if isinstance(summary.get("explorer_links"), list) else []
     candidate_count = int(summary.get("candidate_count") or 0)
@@ -31,6 +33,18 @@ def build_cross_chain_bundle_intel(
     any_mixer_funder = bool(fc.get("any_mixer_tagged_funder"))
     funder_bridge_w = int(fc.get("wallets_with_bridge_touching_funder") or 0)
     bridge_funders_n = int(fc.get("bridge_program_funder_count") or 0)
+
+    # EVM counterparty addresses from live Wormhole Scan bridge history
+    try:
+        from wormhole_scan_client import extract_counterparty_evm_addresses
+        counterparty_evm_addrs = extract_counterparty_evm_addresses(bt) if bt else []
+    except Exception:
+        counterparty_evm_addrs = []
+
+    # bridge transfer ops trimmed to 5 per wallet to keep response lean
+    bridge_transfers_by_wallet: dict[str, list[dict[str, Any]]] = {
+        addr: ops[:5] for addr, ops in bt.items() if isinstance(ops, list)
+    }
 
     investigator_notes: list[str] = []
     if has_foreign:
@@ -61,6 +75,12 @@ def build_cross_chain_bundle_intel(
             "Mixer- or privacy-tagged funding appears in the sample — combine with bridge context carefully; "
             "these are independent heuristics."
         )
+    if counterparty_evm_addrs:
+        investigator_notes.append(
+            f"Bridge transfers found: wallets in this sample sent/received funds to "
+            f"{len(counterparty_evm_addrs)} distinct EVM address(es) via Wormhole — "
+            "inspect each on Etherscan."
+        )
     if has_foreign and (bridge_n >= 1 or funder_bridge_w >= 1) and (mixer_strict >= 2 or any_mixer_funder):
         investigator_notes.append(
             "Stacked signals: foreign token mapping + bridge-adjacent wallets + mixer-tagged paths — "
@@ -68,9 +88,16 @@ def build_cross_chain_bundle_intel(
         )
 
     combined_escalation = (
-        has_foreign
-        and (bridge_n >= 2 or n_shared_bridge > 0 or funder_bridge_w >= 2)
-        and (mixer_strict >= 2 or any_mixer_funder)
+        (
+            has_foreign
+            and (bridge_n >= 2 or n_shared_bridge > 0 or funder_bridge_w >= 2)
+            and (mixer_strict >= 2 or any_mixer_funder)
+        )
+        or (
+            bool(counterparty_evm_addrs)
+            and (bridge_n >= 1 or funder_bridge_w >= 1)
+            and (mixer_strict >= 2 or any_mixer_funder)
+        )
     )
 
     return {
@@ -87,10 +114,12 @@ def build_cross_chain_bundle_intel(
         "bridge_program_funder_count": bridge_funders_n,
         "wallets_with_bridge_touching_funder": funder_bridge_w,
         "funder_bridge_hits": fc.get("funder_bridge_hits") if isinstance(fc.get("funder_bridge_hits"), list) else [],
+        "bridge_transfers_by_wallet": bridge_transfers_by_wallet,
+        "counterparty_evm_addresses": counterparty_evm_addrs[:20],
         "investigator_notes": investigator_notes[:8],
         "combined_escalation": combined_escalation,
         "disclaimer": (
-            "Hints only: registry rows and program IDs do not prove shared control, laundering, or bundle coordination "
-            "across chains."
+            "Hints only: registry rows, program IDs, and Wormhole transfer records do not prove shared control, "
+            "laundering, or bundle coordination across chains."
         ),
     }

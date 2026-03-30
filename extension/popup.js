@@ -594,20 +594,49 @@
     const ccb = data.cross_chain_bundle;
     if (ccb && typeof ccb === 'object') {
       const bridgeN = ccb.bridge_adjacent_holder_wallet_count || 0;
-      const sharedN = (ccb.shared_bridge_program_groups || []).length;
+      const sharedGroups = Array.isArray(ccb.shared_bridge_program_groups) ? ccb.shared_bridge_program_groups : [];
+      const sharedN = sharedGroups.length;
       const tier = ccb.bridge_mixer_tier || 'low';
       const notes = Array.isArray(ccb.investigator_notes) ? ccb.investigator_notes : [];
+      const evmCounterparties = Array.isArray(ccb.counterparty_evm_addresses) ? ccb.counterparty_evm_addresses : [];
       const hasBridge = bridgeN > 0 || sharedN > 0;
       const hasMixer = ccb.strict_mixer_cluster_max_wallets >= 2 || ccb.any_mixer_tagged_funder;
-      if (hasBridge || hasMixer || notes.length) {
+      const hasEvm = evmCounterparties.length > 0;
+      if (hasBridge || hasMixer || notes.length || hasEvm || ccb.combined_escalation) {
         parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">Cross-chain / bridge signals</div>`);
+
+        // Combined escalation flag
+        if (ccb.combined_escalation) {
+          parts.push(`<div class="sol-v-mini" style="font-size:11px;color:#fca5a5;border-left:2px solid #ef4444;padding-left:6px;margin-bottom:4px">⚠ Stacked signals — cross-chain + bridge + mixer. Manual review required.</div>`);
+        }
+
         parts.push(`<div class="sol-v-mini" style="font-size:11px">Tier: <strong>${escapeHtml(tier)}</strong> · bridge-adjacent holders: ${escapeHtml(String(bridgeN))}${sharedN ? ` · shared bridge programs: ${escapeHtml(String(sharedN))}` : ''}</div>`);
+
         if (hasMixer) {
           const mixerBits = [];
           if (ccb.strict_mixer_cluster_max_wallets >= 2) mixerBits.push(`mixer cluster: ${escapeHtml(String(ccb.strict_mixer_cluster_max_wallets))} wallets`);
           if (ccb.any_mixer_tagged_funder) mixerBits.push('mixer-tagged funder');
           parts.push(`<div class="sol-v-mini" style="font-size:11px">${escapeHtml(mixerBits.join(' · '))}</div>`);
         }
+
+        // Shared bridge program groups
+        if (sharedN > 0) {
+          sharedGroups.slice(0, 4).forEach(function (g) {
+            const prog = String(g.program_label || g.program_id || g.program || '');
+            const cnt = String(g.wallet_count || g.count || '?');
+            parts.push(`<div class="sol-v-mini" style="font-size:10px">Shared program: ${escapeHtml(prog)} (${escapeHtml(cnt)} wallets)</div>`);
+          });
+        }
+
+        // EVM counterparty addresses from Wormhole bridge history
+        if (hasEvm) {
+          parts.push(`<div class="sol-v-mini" style="font-size:10px">Bridge destinations (EVM via Wormhole): ${escapeHtml(String(evmCounterparties.length))}</div>`);
+          evmCounterparties.slice(0, 3).forEach(function (addr) {
+            const addrStr = String(addr);
+            parts.push(`<div class="sol-v-mini" style="font-size:10px;font-family:monospace">${escapeHtml(addrStr.slice(0, 18))}…</div>`);
+          });
+        }
+
         notes.forEach(function (n) {
           parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(n)}</p>`);
         });

@@ -173,6 +173,171 @@ class TestCrossChainHints(unittest.TestCase):
         self.assertGreater(len(out["investigator_notes"]), 0)
         self.assertIn("foreign_explorer_links", out)
 
+    def test_cross_chain_bundle_intel_with_bridge_transfers(self):
+        """bridge_transfers param populates counterparty_evm_addresses and notes."""
+        from cross_chain_bundle_intel import build_cross_chain_bundle_intel
+
+        bridge_transfers = {
+            "FunderWallet1111111111111111111111111111111": [
+                {
+                    "vaa_id": "1/abc/1",
+                    "source_chain": "solana",
+                    "source_address": "FunderWallet1111111111111111111111111111111",
+                    "dest_chain": "ethereum",
+                    "dest_address": "0xbf5f3f65102ae745a48bd521d10bab5bf02a9ef4",
+                    "amount": "10.0",
+                    "token_symbol": "WETH",
+                    "timestamp_unix": 1700000000,
+                    "source_tx_hash": "tx1",
+                    "explorer_url": "https://etherscan.io/address/0xbf5f3f65102ae745a48bd521d10bab5bf02a9ef4",
+                }
+            ],
+        }
+        fc = {
+            "bridge_adjacent_wallet_count": 1,
+            "bridge_mixer_confidence_tier": "medium",
+            "shared_bridge_programs_multi_wallet": [],
+            "strict_mixer_cluster_max_wallets": 2,
+            "any_mixer_tagged_funder": True,
+            "bridge_program_funder_count": 1,
+            "wallets_with_bridge_touching_funder": 1,
+            "funder_bridge_hits": [],
+        }
+        out = build_cross_chain_bundle_intel(
+            mint="So11111111111111111111111111111111111111112",
+            cross_chain=None,
+            funding_cluster_bridge_mixer=fc,
+            bridge_transfers=bridge_transfers,
+        )
+        self.assertIn("counterparty_evm_addresses", out)
+        self.assertEqual(len(out["counterparty_evm_addresses"]), 1)
+        self.assertEqual(out["counterparty_evm_addresses"][0], "0xbf5f3f65102ae745a48bd521d10bab5bf02a9ef4")
+        # Should have bridge-transfer note
+        notes_joined = " ".join(out["investigator_notes"])
+        self.assertIn("Bridge transfers found", notes_joined)
+        # combined_escalation should be True (bridge transfer + bridge/mixer signals)
+        self.assertTrue(out["combined_escalation"])
+        # bridge_transfers_by_wallet should be trimmed
+        self.assertIn("FunderWallet1111111111111111111111111111111", out["bridge_transfers_by_wallet"])
+
+
+class TestWormholeScanClient(unittest.TestCase):
+    """Unit tests for wormhole_scan_client using mocked HTTP."""
+
+    def setUp(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "investigation"))
+
+    def test_normalise_operation_extracts_fields(self):
+        from wormhole_scan_client import _normalise_operation
+
+        raw = {
+            "id": "1/emitter/42",
+            "emitterChain": 1,
+            "content": {
+                "payload": {"toChain": 2},
+                "standarizedProperties": {
+                    "fromChain": 1,
+                    "fromAddress": "7dm9am6Qx7cH64RB99Mzf7ZsLbEfmXM7ihXXCvMiT2X1",
+                    "toChain": 2,
+                    "toAddress": "0x000000000000000000000000bf5f3f65102ae745a48bd521d10bab5bf02a9ef4",
+                },
+            },
+            "sourceChain": {
+                "timestamp": "2025-01-01T00:00:00Z",
+                "transaction": {"txHash": "abc123"},
+                "from": "7dm9am6Qx7cH64RB99Mzf7ZsLbEfmXM7ihXXCvMiT2X1",
+            },
+            "data": {"symbol": "WETH", "tokenAmount": "1.0", "usdAmount": "2500.0"},
+        }
+        out = _normalise_operation(raw)
+        self.assertIsNotNone(out)
+        self.assertEqual(out["vaa_id"], "1/emitter/42")
+        self.assertEqual(out["source_chain"], "solana")
+        self.assertEqual(out["dest_chain"], "ethereum")
+        self.assertEqual(out["dest_address"], "0xbf5f3f65102ae745a48bd521d10bab5bf02a9ef4")
+        self.assertEqual(out["token_symbol"], "WETH")
+        self.assertIsNotNone(out["timestamp_unix"])
+
+    def test_normalise_drops_empty(self):
+        from wormhole_scan_client import _normalise_operation
+
+        self.assertIsNone(_normalise_operation({}))
+        self.assertIsNone(_normalise_operation({"content": {}}))
+
+    def test_extract_counterparty_evm_addresses(self):
+        from wormhole_scan_client import extract_counterparty_evm_addresses
+
+        transfers = {
+            "wallet1": [
+                {"dest_address": "0xbf5f3f65102ae745a48bd521d10bab5bf02a9ef4", "dest_chain": "ethereum"},
+                {"dest_address": "0xbf5f3f65102ae745a48bd521d10bab5bf02a9ef4", "dest_chain": "ethereum"},
+            ],
+            "wallet2": [
+                {"dest_address": "0x6b175474e89094c44da98b954eedeac495271d0f", "dest_chain": "ethereum"},
+                {"dest_address": "not-an-evm-addr", "dest_chain": "solana"},
+            ],
+        }
+        result = extract_counterparty_evm_addresses(transfers)
+        self.assertEqual(len(result), 2)
+        self.assertIn("0xbf5f3f65102ae745a48bd521d10bab5bf02a9ef4", result)
+        self.assertIn("0x6b175474e89094c44da98b954eedeac495271d0f", result)
+
+    def test_fetch_bridge_operations_mocked(self):
+        from unittest.mock import MagicMock, patch
+
+        sample_response = json.dumps({
+            "operations": [
+                {
+                    "id": "1/emitter/1",
+                    "emitterChain": 1,
+                    "content": {
+                        "standarizedProperties": {
+                            "fromChain": 1,
+                            "fromAddress": "SolanaWallet111111111111111111111111111111",
+                            "toChain": 2,
+                            "toAddress": "0x000000000000000000000000bf5f3f65102ae745a48bd521d10bab5bf02a9ef4",
+                        }
+                    },
+                    "sourceChain": {
+                        "timestamp": "2025-06-01T12:00:00Z",
+                        "transaction": {"txHash": "abc"},
+                    },
+                    "data": {"symbol": "SOL", "tokenAmount": "5.0"},
+                }
+            ]
+        }).encode()
+
+        mock_response = MagicMock()
+        mock_response.read.return_value = sample_response
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=mock_response):
+            from wormhole_scan_client import fetch_bridge_operations
+            ops = fetch_bridge_operations("SolanaWallet111111111111111111111111111111", use_cache=False)
+
+        self.assertEqual(len(ops), 1)
+        self.assertEqual(ops[0]["dest_chain"], "ethereum")
+        self.assertEqual(ops[0]["dest_address"], "0xbf5f3f65102ae745a48bd521d10bab5bf02a9ef4")
+
+    def test_resolve_counterparties_respects_max(self):
+        """When SOLANA_BUNDLE_WORMHOLE_SCAN_MAX=0, returns empty dict without network call."""
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"SOLANA_BUNDLE_WORMHOLE_SCAN_MAX": "0"}):
+            from wormhole_scan_client import resolve_counterparties
+            result = resolve_counterparties(["addr1", "addr2"])
+        self.assertEqual(result, {})
+
+    def test_bridge_allowlist_expanded(self):
+        """bridge_programs_solana.json now includes Mayan Swift and LayerZero v2."""
+        from solana_bundle_signals import load_bridge_program_allowlist
+
+        m = load_bridge_program_allowlist()
+        self.assertIn("BLZRi6frs4X4DNLw56V4EXai1b6QVESN1BhHBTYM9VcY", m, "Mayan Swift should be in allowlist")
+        self.assertIn("76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6", m, "LayerZero v2 endpoint should be in allowlist")
+
 
 if __name__ == "__main__":
     unittest.main()
