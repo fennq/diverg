@@ -804,25 +804,38 @@ function _invTokenBundleSummaryHtml(d) {
     const sharedGroups = Array.isArray(ccb.shared_bridge_program_groups) ? ccb.shared_bridge_program_groups : [];
     const evmCounterparties = Array.isArray(ccb.counterparty_evm_addresses) ? ccb.counterparty_evm_addresses : [];
 
-    // Combined escalation banner
+    // Divider to visually separate from bundle-signals block above
+    const divider = '<hr class="inv-divider">';
+
+    // Escalation banner — condensed
     let escalationBanner = '';
     if (ccb.combined_escalation) {
-      escalationBanner = `<div class="inv-escalation-alert">
-        <strong>Stacked cross-chain signals detected</strong> — token found on other chains + bridge-adjacent holders + mixer-tagged paths.
-        Manual correlation strongly recommended before drawing any conclusions.
-      </div>`;
+      escalationBanner = `<div class="inv-escalation-alert"><strong>Stacked signals:</strong> cross-chain token hints + bridge-adjacent wallets + mixer-tagged funders — manual correlation recommended.</div>`;
     }
 
+    // Stat mini-grid — plain-English labels, matches risk-score grid style
+    const tierVal = ccb.bridge_mixer_tier ? String(ccb.bridge_mixer_tier).charAt(0).toUpperCase() + String(ccb.bridge_mixer_tier).slice(1) : '—';
+    const bridgeN = ccb.bridge_adjacent_holder_wallet_count != null ? ccb.bridge_adjacent_holder_wallet_count : '—';
+    const funderBridgeN = ccb.wallets_with_bridge_touching_funder != null ? ccb.wallets_with_bridge_touching_funder : '—';
+    let statGrid = `<div class="inv-cc-stat-grid">
+      <div class="inv-cc-stat"><div class="inv-cc-stat-k">Bridge activity</div><div class="inv-cc-stat-v">${esc(tierVal)}</div></div>
+      <div class="inv-cc-stat"><div class="inv-cc-stat-k">Wallets with bridge contacts</div><div class="inv-cc-stat-v">${esc(String(bridgeN))}</div></div>
+      <div class="inv-cc-stat"><div class="inv-cc-stat-k">Funded via bridge path</div><div class="inv-cc-stat-v">${esc(String(funderBridgeN))}</div></div>`;
+    if (ccb.foreign_candidate_count) {
+      statGrid += `<div class="inv-cc-stat"><div class="inv-cc-stat-k">Cross-chain token hints</div><div class="inv-cc-stat-v">${esc(String(ccb.foreign_candidate_count))}</div></div>`;
+    }
+    statGrid += '</div>';
+
+    // Explorer links for other-chain token candidates
     let linksHtml = '';
     if (links.length) {
-      linksHtml = `<ul class="inv-cc-links">${links.slice(0, 10).map((l) => {
-        const u = l && l.url;
-        const ch = (l && l.chain) || 'link';
-        return u ? `<li><a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(String(ch))}</a> <span class="inv-muted">(${esc(String(l.tier || 'tier ?'))})</span></li>` : '';
-      }).filter(Boolean).join('')}</ul>`;
+      linksHtml = `<p class="inv-muted" style="margin-top:0.35rem">Token found on other chains — verify on official bridge explorers:</p>
+        <ul class="inv-cc-links">${links.slice(0, 10).map((l) => {
+          const u = l && l.url;
+          const ch = (l && l.chain) || 'link';
+          return u ? `<li><a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(String(ch))}</a> <span class="inv-muted">(${esc(String(l.tier || 'tier ?'))})</span></li>` : '';
+        }).filter(Boolean).join('')}</ul>`;
     }
-
-    const tierLine = `<p class="inv-muted">Bridge / mixer bundle tier: <strong>${esc(String(ccb.bridge_mixer_tier != null ? ccb.bridge_mixer_tier : '—'))}</strong> · bridge-adjacent holders (sampled): ${esc(String(ccb.bridge_adjacent_holder_wallet_count != null ? ccb.bridge_adjacent_holder_wallet_count : '—'))} · holders whose funder path shows bridge programs: ${esc(String(ccb.wallets_with_bridge_touching_funder != null ? ccb.wallets_with_bridge_touching_funder : '—'))}${ccb.foreign_candidate_count ? ` · other-chain token hints: ${esc(String(ccb.foreign_candidate_count))}` : ''}</p>`;
 
     // Funder bridge hits — collapsible
     let funderHitsHtml = '';
@@ -833,25 +846,27 @@ function _invTokenBundleSummaryHtml(d) {
         return `<li class="inv-muted"><code>${esc(addr.slice(0, 14))}…</code> → <span>${esc(progs)}</span></li>`;
       }).join('');
       funderHitsHtml = `<details class="inv-details-block" style="margin-top:0.5rem">
-        <summary class="inv-muted" style="cursor:pointer">Funders with bridge-program activity (${funderHits.length})</summary>
+        <summary style="cursor:pointer">Funders with bridge-program activity (${funderHits.length})</summary>
         <ul style="margin:0.4rem 0 0 1rem;padding:0">${funderItems}</ul>
       </details>`;
     }
 
-    // Shared bridge program groups
+    // Shared bridge program groups — collapsible when > 1
     let sharedGroupsHtml = '';
     if (sharedGroups.length) {
       const groupItems = sharedGroups.slice(0, 6).map((g) => {
         const prog = esc(String(g.program_label || g.program_id || g.program || ''));
         const cnt = esc(String(g.wallet_count || g.count || '?'));
         const sample = Array.isArray(g.sample_wallets) ? g.sample_wallets.slice(0, 2).map((w) => `<code>${esc(String(w).slice(0, 12))}…</code>`).join(', ') : '';
-        return `<li class="inv-muted"><strong>${cnt}</strong> wallets share program <em>${prog}</em>${sample ? ` — ${sample}` : ''}</li>`;
+        return `<li class="inv-muted"><strong>${cnt}</strong> wallets share <em>${prog}</em>${sample ? ` — ${sample}` : ''}</li>`;
       }).join('');
-      sharedGroupsHtml = `<p class="inv-muted" style="margin-top:0.4rem;margin-bottom:0.15rem">Shared bridge programs across wallets:</p>
-        <ul style="margin:0 0 0 1rem;padding:0">${groupItems}</ul>`;
+      sharedGroupsHtml = `<details class="inv-details-block" style="margin-top:0.5rem">
+        <summary style="cursor:pointer">Shared bridge programs (${sharedGroups.length})</summary>
+        <ul style="margin:0.4rem 0 0 1rem;padding:0">${groupItems}</ul>
+      </details>`;
     }
 
-    // EVM counterparty addresses from Wormhole bridge history
+    // EVM counterparty addresses — collapsible
     let evmCounterpartiesHtml = '';
     if (evmCounterparties.length) {
       const evmItems = evmCounterparties.slice(0, 10).map((addr) => {
@@ -860,17 +875,27 @@ function _invTokenBundleSummaryHtml(d) {
         return `<li class="inv-muted"><a href="${esc(ethUrl)}" target="_blank" rel="noopener noreferrer"><code>${esc(addrStr.slice(0, 14))}…</code></a></li>`;
       }).join('');
       evmCounterpartiesHtml = `<details class="inv-details-block" style="margin-top:0.5rem">
-        <summary class="inv-muted" style="cursor:pointer">Bridge destinations (EVM) via Wormhole (${evmCounterparties.length})</summary>
+        <summary style="cursor:pointer">EVM bridge destinations — Wormhole history (${evmCounterparties.length})</summary>
         <ul style="margin:0.4rem 0 0 1rem;padding:0">${evmItems}</ul>
       </details>`;
     }
 
-    const notesUl = notes.length
-      ? `<ul class="inv-bundle-archetype" style="margin-top:0.45rem">${notes.map((t) => `<li class="inv-muted">${esc(t)}</li>`).join('')}</ul>`
-      : '';
-    const disc = ccb.disclaimer ? `<p class="inv-muted" style="font-size:0.65rem;margin-top:0.35rem">${esc(ccb.disclaimer)}</p>` : '';
+    // Investigator notes — first shown inline, rest collapsed
+    let notesHtml = '';
+    if (notes.length) {
+      notesHtml += `<p class="inv-note-lead">${esc(notes[0])}</p>`;
+      if (notes.length > 1) {
+        const remaining = notes.slice(1).map((t) => `<li class="inv-muted">${esc(t)}</li>`).join('');
+        notesHtml += `<details class="inv-details-block" style="margin-top:0.25rem">
+          <summary style="cursor:pointer">More context (${notes.length - 1})</summary>
+          <ul style="margin:0.4rem 0 0 1rem;padding:0">${remaining}</ul>
+        </details>`;
+      }
+    }
 
-    coordLine += `<div class="inv-cross-chain-bundle"><div class="inv-subhead" style="margin-top:0.85rem">Cross-chain &amp; bridge / mixer</div>${escalationBanner}${tierLine}${linksHtml ? `<p class="inv-muted" style="margin-top:0.35rem">Explorer links (token may exist on other chains — verify officially)</p>${linksHtml}` : ''}${funderHitsHtml}${sharedGroupsHtml}${evmCounterpartiesHtml}${notesUl}${disc}</div>`;
+    const disc = ccb.disclaimer ? `<p class="inv-muted" style="font-size:0.65rem;margin-top:0.5rem">${esc(ccb.disclaimer)}</p>` : '';
+
+    coordLine += `<div class="inv-cross-chain-bundle">${divider}<div class="inv-subhead">Cross-chain &amp; bridge signals</div>${escalationBanner}${statGrid}${linksHtml}${funderHitsHtml}${sharedGroupsHtml}${evmCounterpartiesHtml}${notesHtml}${disc}</div>`;
   }
 
   const topH = (d.top_holders || [])[0];

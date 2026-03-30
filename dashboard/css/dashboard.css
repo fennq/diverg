@@ -1012,6 +1012,12 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
 .inv-details-block { font-size: 0.74rem; color: var(--dim); }
 .inv-details-block summary { font-size: 0.74rem; color: var(--dim); user-select: none; }
 .inv-details-block summary:hover { color: var(--text); }
+.inv-divider { border: none; border-top: 1px solid var(--border); margin: 0.9rem 0 0.75rem; }
+.inv-note-lead { font-size: 0.75rem; color: var(--dim); margin: 0.45rem 0 0.25rem; line-height: 1.55; }
+.inv-cc-stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.5rem; margin: 0.6rem 0 0.4rem; }
+.inv-cc-stat { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 0.45rem 0.6rem; }
+.inv-cc-stat-k { font-size: 0.595rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 0.2rem; }
+.inv-cc-stat-v { font-size: 0.8125rem; font-weight: 500; color: var(--text); }
 
 /* Responsive */
 @media (max-width: 900px) {
