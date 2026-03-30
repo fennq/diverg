@@ -90,7 +90,7 @@ python scripts/scan_diff.py --target example.com --source db   # console DB only
 python scripts/scan_diff.py --old reports/a.json --new reports/b.json
 ```
 
-Set `DIVERG_DB_PATH` if your dashboard DB is not `data/dashboard.db`.
+Set `DIVERG_DB_PATH` if your dashboard DB is not `data/dashboard.db`. Write-up and diagram: [`docs/posts/scan-diffing.md`](docs/posts/scan-diffing.md).
 
 ### HTTP API & console
 
