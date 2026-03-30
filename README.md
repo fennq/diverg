@@ -105,7 +105,7 @@ python api_server.py
 | `POST /api/scan/stream` | NDJSON stream with progress, then full report |
 | `POST /api/poc/simulate` | PoC for a finding (IDOR, unauthenticated, etc.) |
 | `POST /api/investigation/blockchain` | Solana (Helius) or EVM address summary |
-| `POST /api/investigation/solana-bundle` | SPL bundle snapshot (extension parity) |
+| `POST /api/investigation/solana-bundle` | SPL bundle snapshot: holders, cluster, coordination score, **`cross_chain_bundle`** (Wormhole/CoinGecko-style mint hints + bridge-program and mixer signals; optional funder bridge sampling via **`SOLANA_BUNDLE_FUNDER_BRIDGE_ENHANCED_MAX`**, default 6) |
 | `POST /api/investigation/domain` | OSINT + recon + headers (full skill JSON) |
 | `POST /api/investigation/reputation` | Entity reputation + OSINT context |
 | `GET /api/rewards/me` | Points, referral code, recent ledger (authenticated) |
