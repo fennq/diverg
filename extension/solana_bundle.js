@@ -322,6 +322,96 @@
     return Math.round((10000 * amount) / totalUi) / 100;
   }
 
+  /** Known Solana bridge program IDs — mirrors investigation/bridge_programs_solana.json */
+  var BRIDGE_PROGRAMS = {
+    'worm2kegkjF12nFMY5H8j1NYbfV52Q3AARVjVzsJUJ3': 'Wormhole Core Bridge',
+    'wormDTUJ6BPNq26feREzEhE3dxARYxkSG6AQUvU4C': 'Wormhole Token Bridge',
+    'CCTPiPYPc6AsJuwueEnWgSgucKXD2Ud33HKyB3YEWg': 'Wormhole / Circle CCTP',
+    'DE1bukY7eBU6HpLCk21cEYg2fHS3EFaHQaEPxfXGvko': 'deBridge DLN',
+    'QNJeeG4rFi3P39jqGPaGWdCN9qe8Eq1ptx2YD3k6von': 'Allbridge',
+    'MayanMi45tVFCqFC5p8TMYmEkL8ti1UX8Gs2LMFKGDF': 'Mayan cross-chain facilitator',
+  };
+
+  /**
+   * buildCrossChainBundle: merges bridge-program hits from programSets with mixer/CEX signals.
+   * Mirrors investigation/cross_chain_bundle_intel.py — client-side variant (no registry lookup).
+   */
+  function buildCrossChainBundle(mint, programSets, focusWallets, mixerFunders, privacyMixerFunding, metaByWallet, rootMap) {
+    var bridgeTouchWallets = [];
+    var walletBridgeHits = [];
+    var byProg = {};
+
+    var eligible = focusWallets && focusWallets.length ? focusWallets : null;
+
+    Object.keys(programSets).forEach(function (w) {
+      if (eligible && eligible.indexOf(w) === -1) return;
+      var progs = programSets[w] || {};
+      var hits = [];
+      Object.keys(progs).forEach(function (pid) {
+        if (BRIDGE_PROGRAMS[pid]) hits.push({ program_id: pid, label: BRIDGE_PROGRAMS[pid] });
+      });
+      if (hits.length) {
+        bridgeTouchWallets.push(w);
+        walletBridgeHits.push({ wallet: w, bridge_program_hits: hits.slice(0, 6) });
+        hits.forEach(function (h) {
+          if (!byProg[h.program_id]) byProg[h.program_id] = [];
+          if (byProg[h.program_id].indexOf(w) === -1) byProg[h.program_id].push(w);
+        });
+      }
+    });
+
+    var sharedProgHits = [];
+    Object.keys(byProg).forEach(function (pid) {
+      var ws = byProg[pid];
+      if (ws.length >= 2) {
+        sharedProgHits.push({ program_id: pid, label: BRIDGE_PROGRAMS[pid] || '', wallet_count: ws.length, wallets_sample: ws.slice(0, 8) });
+      }
+    });
+
+    var mixerStrictMax = 0;
+    (privacyMixerFunding || []).forEach(function (g) {
+      var n = parseInt(g.wallet_count || 0, 10);
+      if (n > mixerStrictMax) mixerStrictMax = n;
+    });
+    var anyMixerFunder = Object.keys(mixerFunders || {}).some(function (k) { return mixerFunders[k]; });
+
+    var tier = 'low';
+    if (sharedProgHits.length) tier = 'high';
+    else if (bridgeTouchWallets.length && (mixerStrictMax >= 2 || anyMixerFunder)) tier = 'medium';
+
+    var notes = [];
+    if (bridgeTouchWallets.length >= 2 || sharedProgHits.length) {
+      notes.push('Multiple sampled wallets touched known Solana bridge program IDs — funds may have entered via cross-chain routes; trace each wallet on Solscan.');
+    } else if (bridgeTouchWallets.length === 1) {
+      notes.push('At least one sampled wallet shows bridge-program interaction — check that wallet\'s full history for inbound bridge flows.');
+    }
+    if (mixerStrictMax >= 2 || anyMixerFunder) {
+      notes.push('Mixer- or privacy-tagged funding appears in the sample — combine with bridge context carefully; these are independent heuristics.');
+    }
+    if (bridgeTouchWallets.length >= 1 && (mixerStrictMax >= 2 || anyMixerFunder)) {
+      notes.push('Bridge-adjacent wallets and mixer-tagged funding both appear — manual trace recommended; no automatic \'same actor\' conclusion.');
+    }
+
+    return {
+      mint: mint,
+      has_foreign_token_candidates: false,
+      foreign_candidate_count: 0,
+      foreign_explorer_links: [],
+      cross_chain_sources: [],
+      bridge_mixer_tier: tier,
+      bridge_adjacent_holder_wallet_count: bridgeTouchWallets.length,
+      shared_bridge_program_groups: sharedProgHits.slice(0, 10),
+      strict_mixer_cluster_max_wallets: mixerStrictMax,
+      any_mixer_tagged_funder: anyMixerFunder,
+      bridge_program_funder_count: 0,
+      wallets_with_bridge_touching_funder: 0,
+      funder_bridge_hits: [],
+      investigator_notes: notes.slice(0, 6),
+      combined_escalation: false,
+      disclaimer: 'Hints only: program IDs do not prove shared control or coordination across chains.',
+    };
+  }
+
   /** Defaults match investigation/solana_bundle_signals.py (deep scan). */
   var BUNDLE_SIGNAL_DEFAULTS = {
     fundingBucketSec: 5,
@@ -2087,6 +2177,34 @@
       pnl_note: 'PnL not computed here; use an explorer or portfolio tool for full buy/sell history.',
       bundle_signals: bundleSignals,
     };
+
+    // Build cross_chain_bundle (client-side bridge/mixer summary — no registry lookup in extension)
+    try {
+      var _bs = bundleSignals || {};
+      var _fc = _bs.funding_cluster_bridge_mixer || {};
+      var _ccb = buildCrossChainBundle(
+        mintNorm,
+        programSets,
+        focusMembers.slice(),
+        _bs.funder_mixer_flags || {},
+        _bs.privacy_mixer_funding || [],
+        metaByWallet,
+        {}
+      );
+      // Propagate richer bridge hits from signals object if available
+      if (_fc.bridge_adjacent_wallet_count != null) {
+        _ccb.bridge_adjacent_holder_wallet_count = Math.max(_fc.bridge_adjacent_wallet_count || 0, _ccb.bridge_adjacent_holder_wallet_count);
+        if (_fc.shared_bridge_programs_multi_wallet && _fc.shared_bridge_programs_multi_wallet.length) {
+          _ccb.shared_bridge_program_groups = _fc.shared_bridge_programs_multi_wallet.slice(0, 10);
+        }
+        if (_fc.bridge_mixer_confidence_tier) _ccb.bridge_mixer_tier = _fc.bridge_mixer_confidence_tier;
+        if (_fc.strict_mixer_cluster_max_wallets) _ccb.strict_mixer_cluster_max_wallets = _fc.strict_mixer_cluster_max_wallets;
+        if (_fc.any_mixer_tagged_funder) _ccb.any_mixer_tagged_funder = true;
+      }
+      return Object.assign(result, { cross_chain_bundle: _ccb });
+    } catch (_ccbErr) {
+      return Object.assign(result, { cross_chain_bundle: null });
+    }
   }
 
   global.divergSolanaBundle = {
