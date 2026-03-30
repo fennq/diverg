@@ -60,6 +60,41 @@ EVM_CHAIN_META: dict[str, tuple[int, str]] = {
 ETHERSCAN_V2_API = "https://api.etherscan.io/v2/api"
 ETHERSCAN_BASE = "https://api.etherscan.io/api"  # legacy v1
 
+# Known EVM bridge contract addresses (lowercase) → human-readable label.
+# Used to detect when an address interacts with bridge protocols.
+EVM_BRIDGE_CONTRACTS: dict[str, str] = {
+    # Wormhole — Ethereum
+    "0x3ee18b2214aff97000d974cf647e7c347e8fa585": "Wormhole Token Bridge (ETH)",
+    "0x98f3c9e6e3face36baad05fe09d375ef1464288b": "Wormhole Core (ETH)",
+    # deBridge DLN — Ethereum
+    "0xef4fb24ad0916217251f553c0596f8edc630eb66": "deBridge DLN (ETH)",
+    # LayerZero Endpoint v1 — Ethereum
+    "0x66a71dcef29a0ffbdbe3c6a460a3b5bc225cd675": "LayerZero Endpoint v1 (ETH)",
+    # LayerZero Endpoint v2 — Ethereum
+    "0x1a44076050125825900e736c501f859c50fe728c": "LayerZero Endpoint v2 (ETH)",
+    # Mayan Swift — Ethereum
+    "0xc38e4e6a15593f908255214653d3d947ca1c2338": "Mayan Swift Bridge (ETH)",
+    # Wormhole — BSC
+    "0xb6f6d86a8f9879a9c87f18830f2de421cd3923c0": "Wormhole Token Bridge (BSC)",
+    # deBridge DLN — BSC
+    "0x0fa205c0446cd9eedc7b4d4e0c11254eb28b11ce": "deBridge DLN (BSC)",
+    # LayerZero Endpoint v1 — BSC
+    "0x3c2269811836af69497e5f486a85d7316753cf62": "LayerZero Endpoint v1 (BSC)",
+    # Wormhole — Polygon
+    "0x5a58505a96d1dbf8df91cb21b54419fc36e93fde": "Wormhole Token Bridge (Polygon)",
+    # LayerZero Endpoint v1 — Polygon
+    "0x3c2269811836af69497e5f486a85d7316753cf62": "LayerZero Endpoint v1 (Polygon)",
+    # Wormhole — Arbitrum
+    "0x0b2402144bb366a632d14b83f244d2e0e21bd39c": "Wormhole Token Bridge (Arbitrum)",
+    # LayerZero Endpoint v1 — Arbitrum
+    "0x3c2269811836af69497e5f486a85d7316753cf62": "LayerZero Endpoint v1 (Arbitrum)",
+    # Wormhole — Base
+    "0x8d2de8d2f73f1f4cab472ac9a881c9b123c79627": "Wormhole Token Bridge (Base)",
+    # Stargate Finance Router — Ethereum (widely-used bridge aggregator)
+    "0x8731d54e9d02c286767d56ac03e8037c07e01e98": "Stargate Finance Router (ETH)",
+}
+
+
 def _normalize_evm_chain_slug(chain: str) -> str:
     c = (chain or "solana").strip().lower()
     aliases = {"bnb": "bsc", "matic": "polygon", "arb": "arbitrum", "op": "optimism", "avax": "avalanche", "eth": "ethereum"}
@@ -200,6 +235,7 @@ class BlockchainInvestigationReport:
     # Flow graph for Diverg report diagram: nodes (id, label, type), edges (from, to, amount, unit, date_str, count)
     flow_graph: dict | None = None  # {"nodes": [...], "edges": [...]}
     cross_chain: dict | None = None  # registry + CoinGecko hints
+    evm_bridge_hits: list[dict] = field(default_factory=list)  # EVM bridge contract interactions
 
 
 def _over_budget(start: float) -> bool:
@@ -1170,6 +1206,46 @@ def run(
                     proof=a.get("description", ""),
                     verified=True,
                 ))
+
+        # Bridge contract detection: scan deployer/wallet txlist for interactions with known bridge contracts
+        if deployer_address and not _over_budget(run_start):
+            _bridge_raw_txs = _evm_account_txlist(SESSION, deployer_address, ch_slug, etherscan_key, page_size=50)
+            evm_bridge_hits = [
+                {
+                    "tx_hash": tx.get("hash", ""),
+                    "counterparty": tx.get("to", ""),
+                    "bridge": EVM_BRIDGE_CONTRACTS[tx.get("to", "").lower()],
+                    "timestamp": tx.get("timeStamp", ""),
+                    "value_eth": tx.get("value", "0"),
+                    "explorer_url": f"{_explorer_host_for_chain(ch_slug)}/tx/{tx.get('hash', '')}",
+                }
+                for tx in _bridge_raw_txs
+                if tx.get("to", "").lower() in EVM_BRIDGE_CONTRACTS
+            ]
+            if evm_bridge_hits:
+                _bridge_labels = sorted({h["bridge"] for h in evm_bridge_hits})
+                report.findings.append(Finding(
+                    title="EVM Bridge Interaction Detected",
+                    severity="Medium",
+                    url=target_url,
+                    category="Blockchain / Cross-chain",
+                    evidence=(
+                        f"Deployer/wallet {deployer_address[:12]}… interacted with "
+                        f"{len(evm_bridge_hits)} bridge transaction(s) on {ch_slug}: "
+                        + ", ".join(_bridge_labels[:4])
+                    ),
+                    impact=(
+                        "Funds may have crossed chain boundaries via a bridge protocol. "
+                        "Investigate origin and destination chains for full flow."
+                    ),
+                    remediation="Trace bridge transactions on Wormholescan, LayerZero Scan, or the relevant bridge explorer.",
+                    confidence="medium",
+                    source="etherscan_api",
+                    proof=", ".join(h["tx_hash"][:12] + "…" for h in evm_bridge_hits[:3]),
+                    verified=True,
+                ))
+                report.evm_bridge_hits = evm_bridge_hits[:10]
+
     elif solscan_key and not _over_budget(run_start):
         report.on_chain_used = True
         # --- Sniper across launches: token/transfer per token, earliest first ---
@@ -1545,8 +1621,11 @@ def run(
         }
 
     report.crime_report = _build_crime_report(report)
-    if report.cross_chain and isinstance(report.crime_report, dict):
-        report.crime_report["cross_chain"] = report.cross_chain
+    if isinstance(report.crime_report, dict):
+        if report.cross_chain:
+            report.crime_report["cross_chain"] = report.cross_chain
+        if report.evm_bridge_hits:
+            report.crime_report["evm_bridge"] = report.evm_bridge_hits
 
     return json.dumps(asdict(report), indent=2)
 

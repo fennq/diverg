@@ -721,6 +721,21 @@ def run_bundle_snapshot(
             "summary": {"kind": "error", "error": str(_xc_err), "candidate_count": 0, "sources": [], "explorer_links": [], "has_high_tier": False},
         }
 
+    # Fetch live Wormhole bridge transfer history for bridge-adjacent wallets
+    _bridge_transfers: dict[str, Any] = {}
+    try:
+        from wormhole_scan_client import resolve_counterparties as _wh_resolve
+
+        _bridge_adj: list[str] = []
+        if isinstance(bundle_signals, dict):
+            _fc_raw = bundle_signals.get("funding_cluster_bridge_mixer")
+            if isinstance(_fc_raw, dict):
+                _bridge_adj = (_fc_raw.get("bridge_adjacent_wallets") or [])[:6]
+        if _bridge_adj:
+            _bridge_transfers = _wh_resolve(_bridge_adj)
+    except Exception:
+        _bridge_transfers = {}
+
     cross_chain_bundle: Optional[dict[str, Any]] = None
     try:
         from cross_chain_bundle_intel import build_cross_chain_bundle_intel
@@ -730,6 +745,7 @@ def run_bundle_snapshot(
             mint=mint,
             cross_chain=cross_chain if isinstance(cross_chain, dict) else None,
             funding_cluster_bridge_mixer=_fc if isinstance(_fc, dict) else {},
+            bridge_transfers=_bridge_transfers if _bridge_transfers else None,
         )
     except Exception:
         cross_chain_bundle = None
