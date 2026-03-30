@@ -17,39 +17,38 @@ coordLine += `<div class="inv-cross-chain-bundle">${divider}…${statGrid}…</d
 
 ---
 
-## Post (medium, same structure as Phase 3 / 4 ship notes)
+## Post (medium)
 
-**Cross-chain bundle UI** got a cleanup in Diverg.
+Cleaned up how Diverg shows cross-chain / bridge stuff on the Solana bundle.
 
-- **Dashboard** — **plain-English stat grid** instead of one long jargon line; **divider** before the section; **collapsible** funders, shared bridge programs, Wormhole EVM links; first investigator note visible, rest under **More context**
-- **Extension** — **one summary line** (activity + counts); **no hex** in the popup for EVM destinations — “see full report” only; **one** short note
+The dashboard had turned into one long line of numbers and jargon. Now it’s a few small tiles you can scan, a line between that block and the rest, and the heavy detail lives under expand/collapse. Extra investigator notes hide behind “more context” so you’re not staring at eight paragraphs.
 
-Hints only — verify on **official explorers**. Authorized use.
+The extension was worse — tiny popup, truncated 0x addresses everywhere. Now it’s basically one sentence plus “N destinations, open the full report if you care.”
+
+Still hints. Still check the chain yourself. Authorized use only.
 
 ---
 
 ## Short (~260 chars)
 
-Diverg **bundle** cross-chain panel: **stat grid** + **divider**, **details** for deep lists, **More context** for extra notes. Extension: **one-line** triage, **no address spam**. @DivergSec
+Fixed the Solana bundle cross-chain UI: dashboard is tiles + fold-open detail instead of a wall of text; extension stops dumping half an address in a popup. Diverg. @DivergSec
 
 ---
 
 ## Single post (copy-paste — normal tweet)
 
-Shipped a **cross-chain / bridge** UI pass on Diverg’s Solana bundle.
+The Solana bundle cross-chain section was unreadable — one mega paragraph of stats. Split it into actual tiles, put a divider in, shove the long lists under details.
 
-Dashboard: **small stat tiles** (bridge activity, contacts, funder path, token hints), **section divider**, long stuff tucked into **collapsibles**, stacked-risk **one-liner** when it matters.
+Extension: same data, but you’re not decoding hex in a 300px window. One line + a count is enough.
 
-Extension popup: **single readable line** + wormhole **count** — not half a wallet address in a 300px box.
-
-Hints only. @DivergSec
+@DivergSec
 
 ---
 
 ## Thread (3 posts) — optional
 
-**1/** Cross-chain bundle output shouldn’t read like a stack trace. Diverg’s dashboard now uses a **stat grid** and **progressive disclosure** — scan the tiles, expand when you need the receipts.
+**1/** Cross-chain on the bundle scan used to dump everything in your face. We reworked the dashboard so you get a quick read first — numbers in a grid, boring stuff folded away.
 
-**2/** **Stacked signals** (token hints + bridge-adjacent holders + mixer-tagged funders) get a **short escalation** line. Wormhole **EVM destinations** stay in a disclosure with explorer links.
+**2/** When a bunch of signals stack (bridges + mixers + “this token might exist elsewhere”) there’s a short warning up top. The wormhole / EVM stuff is still there if you open it.
 
-**3/** The **extension** matches the same API with a **one-line summary** and “N EVM destinations — full report” instead of raw hex in the popup.
+**3/** Chrome extension got the same idea: one summary, no fake “here’s six characters of an address” cosplay. Open the full result when you’re at a desk.
