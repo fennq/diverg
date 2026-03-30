@@ -43,9 +43,14 @@ python scripts/scan_diff.py --target example.com --source files
 
 # Two explicit report files
 python scripts/scan_diff.py --old reports/a.json --new reports/b.json
+
+# Write a Markdown summary to disk (good for release notes or tickets)
+python scripts/scan_diff.py --target example.com -o scan-delta.md
 ```
 
 If your dashboard database is not at `data/dashboard.db`, set **`DIVERG_DB_PATH`** to match `api_server.py` / your deployment.
+
+Unit coverage lives in `tests/test_scan_diff.py`.
 
 ## Closing
 
@@ -60,3 +65,5 @@ We added scan diffing for Diverg: compare two runs for the same site and get *ne
 
 **LinkedIn-style:**  
 Security scans produce snapshots. Teams care about **deltas**: what broke, what healed, what shifted after a release. Our scan diff CLI aligns dashboard history and `reports/*.json`, keys findings in a stable way, and outputs a clear delta (terminal or Markdown). Useful for release notes, remediation proof, and avoiding manual JSON diffing.
+
+**More copy variants (thread + short lines):** [`docs/TWEET_SCAN_DIFF.md`](../TWEET_SCAN_DIFF.md)
