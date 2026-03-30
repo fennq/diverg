@@ -796,6 +796,26 @@ function _invTokenBundleSummaryHtml(d) {
     coordLine += `<ul class="inv-bundle-archetype">${arch.map((t) => `<li class="inv-muted">${esc(t)}</li>`).join('')}</ul>`;
   }
 
+  const ccb = d.cross_chain_bundle;
+  if (ccb && typeof ccb === 'object') {
+    const notes = Array.isArray(ccb.investigator_notes) ? ccb.investigator_notes : [];
+    const links = Array.isArray(ccb.foreign_explorer_links) ? ccb.foreign_explorer_links : [];
+    let linksHtml = '';
+    if (links.length) {
+      linksHtml = `<ul class="inv-cc-links">${links.slice(0, 10).map((l) => {
+        const u = l && l.url;
+        const ch = (l && l.chain) || 'link';
+        return u ? `<li><a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(String(ch))}</a> <span class="inv-muted">(${esc(String(l.tier || 'tier ?'))})</span></li>` : '';
+      }).filter(Boolean).join('')}</ul>`;
+    }
+    const tierLine = `<p class="inv-muted">Bridge / mixer bundle tier: <strong>${esc(String(ccb.bridge_mixer_tier != null ? ccb.bridge_mixer_tier : '—'))}</strong> · bridge-adjacent holders (sampled): ${esc(String(ccb.bridge_adjacent_holder_wallet_count != null ? ccb.bridge_adjacent_holder_wallet_count : '—'))} · holders whose funder path shows bridge programs: ${esc(String(ccb.wallets_with_bridge_touching_funder != null ? ccb.wallets_with_bridge_touching_funder : '—'))}${ccb.foreign_candidate_count ? ` · other-chain token hints: ${esc(String(ccb.foreign_candidate_count))}` : ''}</p>`;
+    const notesUl = notes.length
+      ? `<ul class="inv-bundle-archetype" style="margin-top:0.45rem">${notes.map((t) => `<li class="inv-muted">${esc(t)}</li>`).join('')}</ul>`
+      : '';
+    const disc = ccb.disclaimer ? `<p class="inv-muted" style="font-size:0.65rem;margin-top:0.35rem">${esc(ccb.disclaimer)}</p>` : '';
+    coordLine += `<div class="inv-cross-chain-bundle"><div class="inv-subhead" style="margin-top:0.85rem">Cross-chain &amp; bridge / mixer</div>${tierLine}${linksHtml ? `<p class="inv-muted" style="margin-top:0.35rem">Explorer links (token may exist on other chains — verify officially)</p>${linksHtml}` : ''}${notesUl}${disc}</div>`;
+  }
+
   const topH = (d.top_holders || [])[0];
   let ownershipStrip = '';
   if (topH) {

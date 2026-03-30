@@ -9,6 +9,10 @@ X (Twitter) mention search per holder when X_API_BEARER_TOKEN or NITTER_BASE_URL
 The Chrome extension runs the same logic client-side (extension/solana_bundle.js) with a
 user-supplied Helius key (no X from the extension). This module is for Python callers and
 the dashboard API with HELIUS_API_KEY in the environment.
+
+Cross-chain bundle intel: `cross_chain_bundle` merges Wormhole/CoinGecko-style mint mappings with
+bridge/mixer signals (including optional `SOLANA_BUNDLE_FUNDER_BRIDGE_ENHANCED_MAX` funder tx samples
+for bridge program IDs on funding paths; set to 0 to disable extra calls).
 """
 from __future__ import annotations
 
@@ -717,6 +721,18 @@ def run_bundle_snapshot(
             "summary": {"kind": "error", "error": str(_xc_err), "candidate_count": 0, "sources": [], "explorer_links": [], "has_high_tier": False},
         }
 
+    cross_chain_bundle: Optional[dict[str, Any]] = None
+    try:
+        from cross_chain_bundle_intel import build_cross_chain_bundle_intel
+
+        _fc = (bundle_signals or {}).get("funding_cluster_bridge_mixer") if isinstance(bundle_signals, dict) else None
+        cross_chain_bundle = build_cross_chain_bundle_intel(
+            mint=mint,
+            cross_chain=cross_chain if isinstance(cross_chain, dict) else None,
+            funding_cluster_bridge_mixer=_fc if isinstance(_fc, dict) else {},
+        )
+    except Exception:
+        cross_chain_bundle = None
 
     return {
         "ok": True,
@@ -752,5 +768,6 @@ def run_bundle_snapshot(
         "disclaimer": disclaimer,
         "pnl_note": "PnL not computed here; use an explorer or portfolio tool for full buy/sell history.",
         "cross_chain": cross_chain,
+        "cross_chain_bundle": cross_chain_bundle,
         "bundle_signals": bundle_signals,
     }

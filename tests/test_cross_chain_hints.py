@@ -122,6 +122,57 @@ class TestCrossChainHints(unittest.TestCase):
         self.assertEqual(out_focus["bridge_adjacent_wallet_count"], 1)
         self.assertEqual(out_focus.get("bridge_signal_scope"), "focus_cluster")
 
+    def test_funding_cluster_funder_bridge_path(self):
+        from solana_bundle_signals import build_funding_cluster_bridge_mixer
+
+        worm = "wormDTUJ6BPNq26feREzEhE3dxARYxkSG6AQUvU4C"
+        funder = "DRpbCBMxVnDK7maPM5tGv6MvB3v1sRMC86PZ8okm21hy"
+        program_sets = {"W1": set(), "W2": set()}
+        meta = {"W1": {"funder": funder}, "W2": {"funder": funder}}
+        root_map: dict = {"W1": None, "W2": None}
+        funder_program_sets = {funder: {worm}}
+        out = build_funding_cluster_bridge_mixer(
+            program_sets=program_sets,
+            lookup_wallets=["W1", "W2"],
+            privacy_mixer_funding_strict=[],
+            funder_mixer_flags={},
+            funder_program_sets=funder_program_sets,
+            meta_by_wallet=meta,
+            root_map=root_map,
+        )
+        self.assertGreaterEqual(out.get("wallets_with_bridge_touching_funder", 0), 2)
+        self.assertGreaterEqual(out.get("bridge_program_funder_count", 0), 1)
+        self.assertTrue(out.get("funder_bridge_hits"))
+
+    def test_cross_chain_bundle_intel_merge(self):
+        from cross_chain_bundle_intel import build_cross_chain_bundle_intel
+
+        cc = {
+            "summary": {
+                "candidate_count": 1,
+                "explorer_links": [{"chain": "ethereum", "url": "https://etherscan.io/token/0xaa", "tier": "high"}],
+                "sources": ["wormhole_token_list"],
+            }
+        }
+        fc = {
+            "bridge_adjacent_wallet_count": 2,
+            "bridge_mixer_confidence_tier": "high",
+            "shared_bridge_programs_multi_wallet": [{"program_id": "x", "wallet_count": 2}],
+            "strict_mixer_cluster_max_wallets": 0,
+            "any_mixer_tagged_funder": False,
+            "bridge_program_funder_count": 0,
+            "wallets_with_bridge_touching_funder": 0,
+            "funder_bridge_hits": [],
+        }
+        out = build_cross_chain_bundle_intel(
+            mint="So11111111111111111111111111111111111111112",
+            cross_chain=cc,
+            funding_cluster_bridge_mixer=fc,
+        )
+        self.assertTrue(out["has_foreign_token_candidates"])
+        self.assertGreater(len(out["investigator_notes"]), 0)
+        self.assertIn("foreign_explorer_links", out)
+
 
 if __name__ == "__main__":
     unittest.main()
