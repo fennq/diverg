@@ -1,35 +1,43 @@
-# Tweet + asset — scan diffing (CLI)
+# Tweet — Scan diffing (CLI)
 
-**What shipped:** `scripts/scan_diff.py` compares two Diverg scans for the same target and buckets findings as **new**, **fixed**, **changed severity**, and **unchanged**. Same `findings[]` shape as the web console (`scans.report_json`) and orchestrator JSON under `reports/`.
+**Diagram (SVG):** [`docs/diagrams/scan-diff-flow.svg`](diagrams/scan-diff-flow.svg)
 
-**Visual (recommended):** `docs/diagrams/scan-diff-flow.svg` — dark theme flow: Console DB + `reports/*.json` → `scan_diff.py` → delta buckets.
-
-**Long read:** `docs/posts/scan-diffing.md`
+**Long read:** [`docs/posts/scan-diffing.md`](posts/scan-diffing.md)
 
 ---
 
-## Single post (medium)
+## Post (medium, same structure as Phase 3 / 4 ship notes)
 
-**Scan diffing** — stop eyeballing two JSON exports.
+**Scan diffing** is live in Diverg.
 
-Diverg’s CLI picks the **latest two** runs for a host (from the **dashboard DB**, from **`reports/*.json`**, or both), keys each finding by **title + URL + category**, and tells you what **appeared**, what **disappeared**, what **moved in severity**, and what stayed the same.
+We compare **two scans for the same target** so you see the delta, not two full reports:
 
-Pipe to **Markdown** with `-o` for release notes or tickets. Set `DIVERG_DB_PATH` if your DB isn’t `data/dashboard.db`.
+- **Sources** — **dashboard DB** (`scans.report_json` → `findings[]`) and/or **`reports/*.json`** from the orchestrator; same finding shape everywhere
+- **Matching** — stable key on **title + URL + category** so the same issue tracks across runs
+- **Buckets** — **new**, **fixed**, **changed severity**, **unchanged**
+- **Output** — terminal, or **Markdown** with **`python scripts/scan_diff.py … -o delta.md`** for tickets and release notes
+- **Config** — **`DIVERG_DB_PATH`** when the console DB isn’t `data/dashboard.db`
 
-Authorized testing only. @DivergSec
-
----
-
-## Short (~280 chars)
-
-Scan diff for Diverg: compare two runs per target → **new / fixed / changed severity / unchanged**. Same finding schema as console + CLI JSON. `python scripts/scan_diff.py --target example.com` or `-o delta.md`. Diagram: repo `docs/diagrams/scan-diff-flow.svg`. @DivergSec
+Authorized testing only.
 
 ---
 
-## Thread (3 posts)
+## Short (~260 chars)
 
-**1/** Two scans, same site — the useful question is **what changed**. We added a small CLI that diffs Diverg reports: new issues, cleared items, severity shifts, unchanged noise.
+Scan diff in Diverg: **latest two runs per target**, **DB + reports/**, **new / fixed / severity change / unchanged**, **`-o` Markdown**. Same **`findings[]`** as console + orchestrator. `DIVERG_DB_PATH` when needed. @DivergSec
 
-**2/** It reads **dashboard history** and/or **`reports/*.json`**, matches findings on title + URL + category, and prints a clear delta. Optional **`-o file.md`** for tickets or ship notes.
+---
 
-**3/** Flow diagram: `docs/diagrams/scan-diff-flow.svg` · write-up: `docs/posts/scan-diffing.md` · tool: `scripts/scan_diff.py`. Use only on systems you’re allowed to test.
+## Alt text (SVG)
+
+Dark flowchart: Console database findings and reports JSON feed into scan_diff.py; arrows to output box listing new, fixed, changed severity, unchanged, terminal or markdown; footer shows example CLI command.
+
+---
+
+## Thread (3 posts) — optional
+
+**1/** Two scans, same site — the question is **what changed**. Diverg’s **scan_diff** CLI compares the **latest two** runs: **new** findings, **fixed** ones, **severity moves**, and what stayed **unchanged**.
+
+**2/** It pulls from the **dashboard DB** and/or **`reports/*.json`**, keys on **title + URL + category**, and prints a clear delta — or **`-o file.md`** for ship notes. Set **`DIVERG_DB_PATH`** if your DB path isn’t default.
+
+**3/** Flow: **`docs/diagrams/scan-diff-flow.svg`** · write-up: **`docs/posts/scan-diffing.md`** · tool: **`scripts/scan_diff.py`**. Authorized use only.
