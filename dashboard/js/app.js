@@ -1148,18 +1148,25 @@ function pdfFriendlySeverity(sevRaw) {
   return map[s] || 'Review the details below and decide with your team.';
 }
 
+function _jspdfConstructor() {
+  const mod = window.jspdf;
+  if (mod && typeof mod.jsPDF === 'function') return mod.jsPDF;
+  if (typeof window.jsPDF === 'function') return window.jsPDF;
+  return null;
+}
+
 function exportReportPdf() {
   if (!State.report) {
     toast('No report loaded', 'err');
     return;
   }
-  const mod = window.jspdf;
-  if (!mod || typeof mod.jsPDF !== 'function') {
+  const JsPDF = _jspdfConstructor();
+  if (!JsPDF) {
     toast('PDF helper did not load. Refresh the page and try again.', 'err');
     return;
   }
 
-  const doc = new mod.jsPDF({ unit: 'pt', format: 'a4' });
+  const doc = new JsPDF({ unit: 'pt', format: 'a4' });
   const margin = 48;
   const bottom = 56;
   const pageH = doc.internal.pageSize.getHeight();
