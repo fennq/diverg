@@ -85,7 +85,7 @@ def load_bundle_intel_overrides() -> dict[str, Any]:
     _cache_data = {
         "wallet_cex_allowlist": _set("wallet_cex_allowlist"),
         "wallet_cex_denylist": _set("wallet_cex_denylist"),
-        "wallet_mixer_allowlist": _set("wallet_mixer_allowlist"),
+        "wallet_mixer_allowlist": set(_default_mixer_wallet_allowlist()) | _set("wallet_mixer_allowlist"),
         "wallet_mixer_denylist": _set("wallet_mixer_denylist"),
         "cex_extra_label_markers": _markers("cex_extra_label_markers"),
         "mixer_extra_label_markers": tuple(
@@ -103,7 +103,7 @@ def _empty_overrides() -> dict[str, Any]:
     return {
         "wallet_cex_allowlist": set(),
         "wallet_cex_denylist": set(),
-        "wallet_mixer_allowlist": set(),
+        "wallet_mixer_allowlist": set(_default_mixer_wallet_allowlist()),
         "wallet_mixer_denylist": set(),
         "cex_extra_label_markers": (),
         "mixer_extra_label_markers": _default_mixer_label_markers(),
@@ -123,3 +123,29 @@ def _default_mixer_label_markers() -> tuple[str, ...]:
         pass
     # conservative defaults
     return ("splitnow", "tornado cash", "coinjoin", "mixing service")
+
+
+def _default_mixer_wallet_allowlist() -> tuple[str, ...]:
+    """Default Solana mixer/privacy wallet allowlist from local intel JSON."""
+    try:
+        if _MIXER_INTEL_FILE.is_file():
+            raw = json.loads(_MIXER_INTEL_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                sw = raw.get("solana_wallets")
+                out: list[str] = []
+                if isinstance(sw, dict):
+                    for _svc, addrs in sw.items():
+                        if isinstance(addrs, list):
+                            for a in addrs:
+                                aa = _norm_addr(str(a))
+                                if aa:
+                                    out.append(aa)
+                elif isinstance(sw, list):
+                    for a in sw:
+                        aa = _norm_addr(str(a))
+                        if aa:
+                            out.append(aa)
+                return tuple(dict.fromkeys(out))
+    except Exception:
+        pass
+    return ()
