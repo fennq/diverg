@@ -1,14 +1,17 @@
-# 500 tabs or 5 minutes: the ZachXBT dilemma every security team faces
+================================================================================
+500 tabs or 5 minutes: the ZachXBT dilemma every security team faces
+================================================================================
 
-Easiest copy for editors or email: open **`automation-vs-manual-investigation-plain.txt`** in this folder (no markdown, Select All and paste). The `.md` file below is the same article for the repo.
+Select everything in this file and paste into Docs, Medium, email, etc.
+ZachXBT on Twitter: https://twitter.com/zachxbt
 
----
 
-## The hook
+THE HOOK
+--------
 
 You have seen the threads. One investigator, a frightening number of tabs, and a story that clearly took real time to assemble.
 
-That work, the kind people associate with names like [ZachXBT](https://twitter.com/zachxbt), is not the problem. It is the standard for serious manual OSINT.
+That work, the kind people associate with names like ZachXBT, is not the problem. It is the standard for serious manual OSINT.
 
 The problem is this: most teams do not get a spare week on every token, wallet, or deployment before they need a direction.
 
@@ -16,17 +19,17 @@ So the real question is not "can we replace the thread." It is "what do we do in
 
 That is where first-pass automation shows up.
 
----
 
-## What this article is (and is not)
+WHAT THIS ARTICLE IS (AND IS NOT)
+---------------------------------
 
 This article compares two modes of work. It is not a scorecard against any individual.
 
 Any timing numbers here are order-of-magnitude illustrations for planning, not a lab race and not a claim about how any specific researcher spends their calendar.
 
----
 
-## Two modes side by side
+TWO MODES SIDE BY SIDE
+----------------------
 
 Manual expert investigation (thread-grade)
 
@@ -42,7 +45,6 @@ Repeatability: the thread is the artifact; redoing the work is mostly manual.
 
 Parallelism: usually one deep narrative at a time per investigator.
 
----
 
 Diverg (automated triage)
 
@@ -58,13 +60,11 @@ Repeatability: run the same command or API again; compare scans over time (for e
 
 Parallelism: many targets in parallel, within infra and policy limits.
 
----
-
 Takeaway in one line: manual work wins on narrative finish and discretion. Automation wins on how fast you get to a first map and how many leads you can screen before you commit human weeks.
 
----
 
-## Why speed on the first mile still matters
+WHY SPEED ON THE FIRST MILE STILL MATTERS
+-----------------------------------------
 
 Automation does not replace legal judgment, compliance sign-off, or the decision to go public.
 
@@ -78,9 +78,9 @@ Team efficiency. Outputs are easier to diff, export, and compare run to run, whi
 
 The comparison is not "Diverg versus ZachXBT." It is "dossier-grade manual work" versus "platform-grade first look." Plenty of teams will use both.
 
----
 
-## Illustrative timing (planning only, not head-to-head)
+ILLUSTRATIVE TIMING (PLANNING ONLY, NOT HEAD-TO-HEAD)
+----------------------------------------------------
 
 Use these as rough heuristics only.
 
@@ -110,9 +110,9 @@ Diverg: output is triage under authorized use, not an automatic accusation or a 
 
 One more caveat: a polished public thread is not the same artifact as a first machine pass. The minutes-to-low-tens-of-minutes band is not comparable to the polish bar of a finished investigation.
 
----
 
-## What Diverg does not automate
+WHAT DIVERG DOES NOT AUTOMATE
+-----------------------------
 
 Final legal or reputational judgment.
 
@@ -122,9 +122,9 @@ Your obligation to verify primary sources on official explorers and bridge docum
 
 Replacing investigator discretion when the machine is wrong or incomplete.
 
----
 
-## Closing
+CLOSING
+-------
 
 ZachXBT-style depth remains what many people picture when they say on-chain investigation, and that is for good reason.
 
@@ -134,9 +134,10 @@ Illustrative stats here are not claiming automation beats a named investigator o
 
 Authorized testing and professional use only. Verify what matters on-chain.
 
----
 
-## Appendix: single post for social (copy-paste)
+================================================================================
+APPENDIX: SINGLE POST FOR SOCIAL (copy-paste)
+================================================================================
 
 Manual thread-grade work (explorers, tabs, serious clock) optimizes for story and proof.
 
@@ -146,9 +147,10 @@ Different job: automation for triage speed and throughput, humans for final call
 
 @DivergSec
 
----
 
-## Appendix: thread for social (copy-paste)
+================================================================================
+APPENDIX: THREAD FOR SOCIAL (copy-paste)
+================================================================================
 
 1/ Everyone knows the manual masterclass: one investigator, infinite tabs, a thread that took serious clock. That is not what we are trying to replace.
 
@@ -158,14 +160,7 @@ Different job: automation for triage speed and throughput, humans for final call
 
 4/ We are not claiming automation beats a finished public investigation on narrative quality. We are claiming it beats starting from zero on speed to a first structured picture. Authorized use. Verify on-chain.
 
----
 
-## Related in this repo
-
-Plain copy-paste: [automation-vs-manual-investigation-plain.txt](automation-vs-manual-investigation-plain.txt)
-
-Scan diffing: [scan-diffing.md](scan-diffing.md)
-
-More tweet variants: [TWEET_AUTOMATION_VS_MANUAL.md](../TWEET_AUTOMATION_VS_MANUAL.md)
-
-Cross-chain / bundle note: [TWEET_CROSS_CHAIN_INVESTIGATION.md](../TWEET_CROSS_CHAIN_INVESTIGATION.md)
+================================================================================
+END
+================================================================================
