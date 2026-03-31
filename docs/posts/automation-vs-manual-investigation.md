@@ -1,4 +1,4 @@
-# 500 tabs or 5 minutes: the ZachXBT problem every security team hits
+# 500 tabs or 5 minutes: the ZachXBT dilemma every security team faces
 
 *Gold-standard manual threads (the ZachXBT-shaped workflow) vs first-pass automation — what Diverg compresses, what still needs a human, and why the timing gap isn’t humble-brag—it’s your calendar.*
 
