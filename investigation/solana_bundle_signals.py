@@ -2082,6 +2082,94 @@ def compute_coordination_bundle(
 
     score = round(min(100.0, score), 2)
 
+    # Confidence-gated meaning layer: keep broad recall signals visible, but separate
+    # "observed" from corroborated/high-confidence escalations for cleaner interpretation.
+    observed_signals: list[str] = []
+    corroborated_signals: list[str] = []
+    high_confidence_signals: list[str] = []
+
+    if time_clusters:
+        observed_signals.append("funding_time_sync")
+    if amount_clusters:
+        observed_signals.append("same_first_fund_amount")
+    if shared_inc.get("top_shared"):
+        observed_signals.append("shared_inbound_counterparty")
+    if shared_out.get("top_shared_receivers"):
+        observed_signals.append("shared_outbound_receiver")
+    if funding_cluster_bridge_mixer.get("bridge_adjacent_wallet_count", 0) >= 1:
+        observed_signals.append("bridge_program_touched_wallet")
+    if int(funding_cluster_bridge_mixer.get("mixer_program_touch_wallet_count") or 0) >= 1:
+        observed_signals.append("mixer_program_touch")
+    if str(cex_split_pattern.get("confidence_tier") or "none") != "none":
+        observed_signals.append("cex_split_pattern")
+    if str(wash_flow_patterns.get("confidence") or "none") != "none":
+        observed_signals.append("wash_flow_pattern")
+
+    if parallel_cex_funding:
+        corroborated_signals.append("parallel_cex_funder_cluster_strict")
+    if privacy_mixer_funding:
+        corroborated_signals.append("privacy_mixer_shared_funder_strict")
+    if int(funding_cluster_bridge_mixer.get("wallets_with_bridge_touching_funder") or 0) >= 2:
+        corroborated_signals.append("bridge_program_on_shared_funder_path")
+    if int(funding_cluster_bridge_mixer.get("wallets_with_mixer_touching_funder") or 0) >= 2:
+        corroborated_signals.append("mixer_tag_on_shared_funder_path")
+    if int(funding_cluster_bridge_mixer.get("mixer_program_funder_count") or 0) >= 1:
+        corroborated_signals.append("mixer_program_on_funder_path")
+    if str(cex_split_pattern.get("confidence_tier") or "none") in ("high", "medium"):
+        corroborated_signals.append("cex_split_pattern_corroborated")
+
+    if str(wash_flow_patterns.get("confidence") or "none") == "high":
+        high_confidence_signals.append("wash_flow_pattern_high")
+    if (
+        parallel_cex_funding
+        and int(funding_cluster_bridge_mixer.get("wallets_with_bridge_touching_funder") or 0) >= 2
+    ):
+        high_confidence_signals.append("cex_plus_bridge_path")
+    if (
+        privacy_mixer_funding
+        and int(funding_cluster_bridge_mixer.get("mixer_program_touch_wallet_count") or 0) >= 1
+    ):
+        high_confidence_signals.append("mixer_tag_plus_program_touch")
+
+    confidence_tier = "low"
+    if len(high_confidence_signals) >= 1:
+        confidence_tier = "high"
+    elif len(corroborated_signals) >= 2:
+        confidence_tier = "high"
+    elif len(corroborated_signals) >= 1:
+        confidence_tier = "medium"
+    elif len(observed_signals) >= 3:
+        confidence_tier = "medium"
+
+    candidate_evidence: list[dict[str, Any]] = []
+    for w in lookup_wallets:
+        m = meta_by_wallet.get(w) or {}
+        cand: dict[str, Any] = {
+            "wallet": w,
+            "direct_funder": m.get("funder"),
+            "funder_root": root_map.get(w),
+            "funder_chain": chain_map.get(w, [])[1:] if chain_map else [],
+            "first_fund_timestamp_unix": m.get("first_fund_timestamp_unix"),
+            "first_fund_lamports": m.get("first_fund_lamports"),
+            "mixer_path_tier": None,
+            "cex_path_tier": None,
+            "bridge_program_touch": False,
+            "mixer_program_touch": False,
+        }
+        d = m.get("funder")
+        r = root_map.get(w)
+        if isinstance(d, str):
+            cand["cex_path_tier"] = funder_cex_tier.get(d)
+            cand["mixer_path_tier"] = funder_mixer_tier.get(d)
+        if (not cand["mixer_path_tier"] or cand["mixer_path_tier"] == "none") and isinstance(r, str):
+            cand["mixer_path_tier"] = funder_mixer_tier.get(r)
+        if (not cand["cex_path_tier"] or cand["cex_path_tier"] == "none") and isinstance(r, str):
+            cand["cex_path_tier"] = funder_cex_tier.get(r)
+        pset = program_sets.get(w) or set()
+        cand["bridge_program_touch"] = any(pid in load_bridge_program_allowlist() for pid in pset)
+        cand["mixer_program_touch"] = any(pid in load_mixer_program_allowlist() for pid in pset)
+        candidate_evidence.append(cand)
+
     archetype_hints: list[str] = []
     if parallel_cex_funding:
         _strict_hint = (
@@ -2142,6 +2230,13 @@ def compute_coordination_bundle(
         "funding_cluster_bridge_mixer": funding_cluster_bridge_mixer,
         "cex_split_pattern": cex_split_pattern,
         "wash_flow_patterns": wash_flow_patterns,
+        "candidate_evidence": candidate_evidence[:120],
+        "confidence_model": {
+            "tier": confidence_tier,
+            "observed_signals": observed_signals,
+            "corroborated_signals": corroborated_signals,
+            "high_confidence_signals": high_confidence_signals,
+        },
         "coordination_score": score,
         "coordination_reasons": reasons,
         "params": {

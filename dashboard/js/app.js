@@ -820,6 +820,23 @@ function _invTokenBundleSummaryHtml(d) {
   if (arch.length) {
     coordLine += `<ul class="inv-bundle-archetype">${arch.map((t) => `<li class="inv-muted">${esc(t)}</li>`).join('')}</ul>`;
   }
+  const cm = bs.confidence_model || {};
+  const cmTier = String(cm.tier || 'low');
+  const observed = Array.isArray(cm.observed_signals) ? cm.observed_signals : [];
+  const corroborated = Array.isArray(cm.corroborated_signals) ? cm.corroborated_signals : [];
+  const hiConf = Array.isArray(cm.high_confidence_signals) ? cm.high_confidence_signals : [];
+  const cand = Array.isArray(bs.candidate_evidence) ? bs.candidate_evidence : [];
+  const candCount = cand.length;
+  const candMixer = cand.filter((c) => c && (c.mixer_path_tier === 'weak' || c.mixer_path_tier === 'strong' || c.mixer_program_touch)).length;
+  const candBridge = cand.filter((c) => c && c.bridge_program_touch).length;
+  const candDeep = cand.filter((c) => c && Array.isArray(c.funder_chain) && c.funder_chain.length >= 3).length;
+  const plainExplain = `<div class="inv-explain-grid" style="margin-top:0.6rem">
+    <div class="inv-cc-stat"><div class="inv-cc-stat-k">What we saw</div><div class="inv-cc-stat-v">${esc(String(candCount))} wallet candidates</div><div class="inv-muted" style="font-size:0.67rem">${esc(String(candMixer))} mixer-linked · ${esc(String(candBridge))} bridge-touched · ${esc(String(candDeep))} deep-chain</div></div>
+    <div class="inv-cc-stat"><div class="inv-cc-stat-k">Why it matters</div><div class="inv-cc-stat-v">${esc(String(observed.length))} observed signals</div><div class="inv-muted" style="font-size:0.67rem">${esc(String(corroborated.length))} corroborated</div></div>
+    <div class="inv-cc-stat"><div class="inv-cc-stat-k">Confidence</div><div class="inv-cc-stat-v">${esc(cmTier)}</div><div class="inv-muted" style="font-size:0.67rem">${esc(String(hiConf.length))} high-confidence pattern(s)</div></div>
+    <div class="inv-cc-stat"><div class="inv-cc-stat-k">What to verify next</div><div class="inv-cc-stat-v">Trace top 3 chains</div><div class="inv-muted" style="font-size:0.67rem">Check explorer hops + bridge endpoints + funding timing</div></div>
+  </div>`;
+  coordLine += plainExplain;
 
   const ccb = d.cross_chain_bundle;
   if (ccb && typeof ccb === 'object') {
