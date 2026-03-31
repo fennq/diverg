@@ -880,6 +880,191 @@ def shared_outbound_receivers(
     return {"shared_receiver_to_wallets": hot, "top_shared_receivers": top}
 
 
+def build_cex_split_pattern(
+    *,
+    lookup_wallets: list[str],
+    meta_by_wallet: dict[str, dict[str, Any]],
+    root_map: dict[str, Optional[str]],
+    funder_cex_tier: dict[str, str],
+    shared_outbound: dict[str, Any],
+    eligible_wallets: Optional[list[str]] = None,
+    bucket_sec: float = FUNDING_TIME_BUCKET_SEC,
+) -> dict[str, Any]:
+    """
+    Detect CEX-routed split/fan-out behavior heuristically.
+    This is attribution support only (not ownership proof).
+    """
+    eligible = set(eligible_wallets or lookup_wallets)
+    cex_path_hits: list[dict[str, Any]] = []
+    by_funder: dict[str, list[str]] = defaultdict(list)
+    cex_wallets: set[str] = set()
+
+    for w in lookup_wallets:
+        if w not in eligible:
+            continue
+        m = meta_by_wallet.get(w) or {}
+        d = m.get("funder")
+        r = root_map.get(w)
+        best: Optional[tuple[str, str, str]] = None  # (via, addr, tier)
+        for via, addr in (("direct", d), ("root", r)):
+            if not isinstance(addr, str) or not addr:
+                continue
+            tier = str(funder_cex_tier.get(addr) or "none")
+            if tier == "none":
+                continue
+            if best is None:
+                best = (via, addr, tier)
+            elif best[2] != "strong" and tier == "strong":
+                best = (via, addr, tier)
+        if not best:
+            continue
+        via, addr, tier = best
+        cex_wallets.add(w)
+        by_funder[addr].append(w)
+        cex_path_hits.append({"wallet": w, "via": via, "funder_address": addr, "tier": tier})
+
+    shared_funder_groups = []
+    for faddr, ws in by_funder.items():
+        uniq = sorted(set(ws))
+        if len(uniq) >= 2:
+            shared_funder_groups.append(
+                {
+                    "funder": faddr,
+                    "wallet_count": len(uniq),
+                    "wallets": uniq[:30],
+                    "tier": str(funder_cex_tier.get(faddr) or "none"),
+                }
+            )
+    shared_funder_groups.sort(key=lambda x: -x["wallet_count"])
+
+    # repeated first-fund denominations among cex-path wallets
+    lam_groups = []
+    by_lam: dict[int, list[str]] = defaultdict(list)
+    for w in sorted(cex_wallets):
+        lp = (meta_by_wallet.get(w) or {}).get("first_fund_lamports")
+        try:
+            ilp = int(lp)
+        except (TypeError, ValueError):
+            continue
+        if ilp > 0:
+            by_lam[ilp].append(w)
+    for lam, ws in by_lam.items():
+        uniq = sorted(set(ws))
+        if len(uniq) >= 2:
+            lam_groups.append({"lamports": lam, "wallet_count": len(uniq), "wallets": uniq[:30]})
+    lam_groups.sort(key=lambda x: -x["wallet_count"])
+
+    # synchronized first-fund time buckets among cex-path wallets
+    bucket_groups = []
+    by_bucket: dict[int, list[str]] = defaultdict(list)
+    for w in sorted(cex_wallets):
+        ts = (meta_by_wallet.get(w) or {}).get("first_fund_timestamp_unix")
+        if ts is None:
+            continue
+        b = time_bucket(ts, bucket_sec)
+        if b is not None:
+            by_bucket[b].append(w)
+    for b, ws in by_bucket.items():
+        uniq = sorted(set(ws))
+        if len(uniq) >= 2:
+            bucket_groups.append({"bucket_id": str(b), "wallet_count": len(uniq), "wallets": uniq[:30]})
+    bucket_groups.sort(key=lambda x: -x["wallet_count"])
+
+    # shared outbound receivers touched by >=2 cex-path wallets
+    shared_receiver_hits = []
+    recv_map = shared_outbound.get("shared_receiver_to_wallets") if isinstance(shared_outbound, dict) else {}
+    if isinstance(recv_map, dict):
+        for recv, ws in recv_map.items():
+            if not isinstance(ws, list):
+                continue
+            inter = sorted(set(ws) & cex_wallets)
+            if len(inter) >= 2:
+                shared_receiver_hits.append(
+                    {"receiver": recv, "wallet_count": len(inter), "wallets": inter[:30]}
+                )
+    shared_receiver_hits.sort(key=lambda x: -x["wallet_count"])
+
+    confidence = "low"
+    top_shared = shared_funder_groups[0]["wallet_count"] if shared_funder_groups else 0
+    top_lam = lam_groups[0]["wallet_count"] if lam_groups else 0
+    top_bucket = bucket_groups[0]["wallet_count"] if bucket_groups else 0
+    recv_n = len(shared_receiver_hits)
+    if top_shared >= 3 and (top_lam >= 2 or top_bucket >= 2) and recv_n >= 1:
+        confidence = "high"
+    elif top_shared >= 2 and (top_lam >= 2 or top_bucket >= 2 or recv_n >= 1):
+        confidence = "medium"
+    elif len(cex_wallets) >= 2:
+        confidence = "low"
+    else:
+        confidence = "none"
+
+    risk_lines: list[str] = []
+    if top_shared >= 2:
+        risk_lines.append(
+            f"{top_shared} wallet(s) share the same CEX-tagged funding path (direct/root)."
+        )
+    if top_lam >= 2:
+        risk_lines.append(
+            f"{top_lam} wallet(s) received matching first-fund lamport sizes on CEX-tagged paths."
+        )
+    if top_bucket >= 2:
+        risk_lines.append(
+            f"{top_bucket} wallet(s) were first-funded in the same time bucket on CEX-tagged paths."
+        )
+    if recv_n >= 1:
+        risk_lines.append(
+            f"{recv_n} shared outbound receiver(s) collect funds from multiple CEX-path wallets."
+        )
+
+    return {
+        "confidence_tier": confidence,
+        "cex_path_wallet_count": len(cex_wallets),
+        "cex_path_hits": cex_path_hits[:40],
+        "shared_cex_funder_groups": shared_funder_groups[:20],
+        "repeated_first_fund_lamports": lam_groups[:20],
+        "time_bucket_groups": bucket_groups[:20],
+        "shared_outbound_receivers": shared_receiver_hits[:20],
+        "risk_lines": risk_lines[:8],
+    }
+
+
+def _outbound_receivers_by_wallet(
+    wallets: list[str],
+    transfers_cache: dict[str, Optional[dict]],
+) -> dict[str, set[str]]:
+    """Per-wallet outbound receiver sets from cached transfer rows."""
+    out: dict[str, set[str]] = {}
+    for w in wallets:
+        rows = _iter_transfer_rows(transfers_cache.get(w))
+        if not rows:
+            continue
+        recv: set[str] = set()
+        for t in rows:
+            direction = str(t.get("direction") or t.get("type") or t.get("transferType") or "").lower()
+            if direction not in ("out", "outgoing", "sent", "send", "withdraw"):
+                continue
+            to_a = (
+                t.get("to")
+                or t.get("toUserAccount")
+                or t.get("toAddress")
+                or t.get("toUser")
+                or t.get("recipient")
+                or t.get("destination")
+                or t.get("destinationAccount")
+                or t.get("counterparty")
+            )
+            if isinstance(to_a, dict):
+                to_a = to_a.get("address") or to_a.get("pubkey")
+            if not isinstance(to_a, str) or not _ADDR_RE.match(to_a):
+                continue
+            if to_a == w:
+                continue
+            recv.add(to_a)
+        if recv:
+            out[w] = recv
+    return out
+
+
 def _programs_from_enhanced(tx: dict) -> set[str]:
     progs: set[str] = set()
 
@@ -938,6 +1123,9 @@ def build_funding_cluster_bridge_mixer(
     funder_program_sets: Optional[dict[str, set[str]]] = None,
     meta_by_wallet: Optional[dict[str, dict[str, Any]]] = None,
     root_map: Optional[dict[str, Optional[str]]] = None,
+    funder_cex_tier: Optional[dict[str, str]] = None,
+    shared_outbound: Optional[dict[str, Any]] = None,
+    transfers_cache: Optional[dict[str, Optional[dict]]] = None,
 ) -> dict[str, Any]:
     """
     bridge_count_eligible_wallets: when non-empty, only these wallets count toward bridge_adjacent_* and
@@ -1052,6 +1240,83 @@ def build_funding_cluster_bridge_mixer(
             "One sampled wallet’s funder path shows bridge-program activity in enhanced tx sample."
         )
 
+    # --- CEX-routed split/fanout pattern (behavioral proxy for aggregator/CEX routing) ---
+    cex_tier_map = funder_cex_tier if isinstance(funder_cex_tier, dict) else {}
+    sh = shared_outbound if isinstance(shared_outbound, dict) else {}
+    shared_recv_map = sh.get("shared_receiver_to_wallets") if isinstance(sh.get("shared_receiver_to_wallets"), dict) else {}
+    cex_path_wallets: set[str] = set()
+    cex_path_funders: set[str] = set()
+    cex_path_hits: list[dict[str, Any]] = []
+    for w in lookup_wallets:
+        if eligible is not None and w not in eligible:
+            continue
+        meta = (meta_by_wallet or {}).get(w) if isinstance(meta_by_wallet, dict) else {}
+        if not isinstance(meta, dict):
+            continue
+        direct = meta.get("funder")
+        root = root_map.get(w) if isinstance(root_map, dict) else None
+        candidates: list[tuple[str, str, str]] = []
+        if isinstance(direct, str) and direct:
+            tier = str(cex_tier_map.get(direct) or "none")
+            if tier != "none":
+                candidates.append(("direct", direct, tier))
+        if isinstance(root, str) and root and root != direct:
+            tier = str(cex_tier_map.get(root) or "none")
+            if tier != "none":
+                candidates.append(("root", root, tier))
+        if not candidates:
+            continue
+        chosen = sorted(candidates, key=lambda x: (0 if x[2] == "strong" else 1, 0 if x[0] == "direct" else 1))[0]
+        via, funder_addr, tier = chosen
+        cex_path_wallets.add(w)
+        cex_path_funders.add(funder_addr)
+        cex_path_hits.append(
+            {
+                "wallet": w,
+                "via": via,
+                "funder_address": funder_addr,
+                "tier": tier,
+            }
+        )
+
+    cex_wallet_set = set(cex_path_wallets)
+    shared_recv_hits: list[dict[str, Any]] = []
+    for recv, ws in shared_recv_map.items():
+        if not isinstance(recv, str):
+            continue
+        if not isinstance(ws, list):
+            continue
+        cset = sorted({x for x in ws if x in cex_wallet_set})
+        if len(cset) >= 2:
+            shared_recv_hits.append(
+                {"receiver": recv, "wallet_count": len(cset), "wallets_sample": cset[:10]}
+            )
+    shared_recv_hits.sort(key=lambda x: -x["wallet_count"])
+
+    fanout_avg = 0.0
+    fanout_max = 0
+    if transfers_cache:
+        outbound_map = _outbound_receivers_by_wallet(sorted(cex_wallet_set), transfers_cache)
+        fanouts = [len(v) for v in outbound_map.values() if isinstance(v, set)]
+        if fanouts:
+            fanout_avg = round(sum(fanouts) / float(len(fanouts)), 3)
+            fanout_max = max(fanouts)
+
+    cex_split_conf = "none"
+    cex_w_n = len(cex_wallet_set)
+    shared_recv_n = len(shared_recv_hits)
+    if cex_w_n >= 3 and (shared_recv_n >= 2 or fanout_avg >= 3.0 or fanout_max >= 5):
+        cex_split_conf = "high"
+    elif cex_w_n >= 2 and (shared_recv_n >= 1 or fanout_avg >= 2.0 or fanout_max >= 3):
+        cex_split_conf = "medium"
+    elif cex_w_n >= 1:
+        cex_split_conf = "low"
+
+    if cex_split_conf in ("high", "medium"):
+        risk_lines.append(
+            f"CEX-routed split pattern ({cex_split_conf}): {cex_w_n} wallet(s) trace to CEX funder paths with outbound fanout/shared receivers."
+        )
+
     return {
         "bridge_adjacent_wallet_count": len(set(bridge_touch_wallets)),
         "bridge_adjacent_wallets": sorted(set(bridge_touch_wallets))[:40],
@@ -1066,6 +1331,14 @@ def build_funding_cluster_bridge_mixer(
         "funder_bridge_hits": funder_bridge_hits[:20],
         "wallets_with_bridge_touching_funder": w_bf_n,
         "wallets_with_bridge_touching_funder_sample": w_bf,
+        "cex_split_pattern_confidence": cex_split_conf,
+        "cex_split_wallet_count": cex_w_n,
+        "cex_split_funder_count": len(cex_path_funders),
+        "cex_split_shared_receiver_count": shared_recv_n,
+        "cex_split_fanout_avg": fanout_avg,
+        "cex_split_fanout_max": fanout_max,
+        "cex_split_path_hits": cex_path_hits[:30],
+        "cex_split_shared_receiver_hits": shared_recv_hits[:20],
     }
 
 
@@ -1236,6 +1509,14 @@ def compute_coordination_bundle(
 
     shared_inc = shared_inbound_senders(meta_by_wallet)
     shared_out = shared_outbound_receivers(lookup_wallets, transfers_cache)
+    cex_split_pattern = build_cex_split_pattern(
+        lookup_wallets=lookup_wallets,
+        meta_by_wallet=meta_by_wallet,
+        root_map=root_map,
+        funder_cex_tier=funder_cex_tier,
+        shared_outbound=shared_out,
+        eligible_wallets=list(focus_wallets) if focus_wallets else None,
+    )
 
     enhanced_sample: dict[str, Any] = {}
     co_slots_by_w: dict[str, list[int]] = {}
@@ -1401,6 +1682,9 @@ def compute_coordination_bundle(
         funder_program_sets=funder_program_sets,
         meta_by_wallet=meta_by_wallet,
         root_map=root_map,
+        funder_cex_tier=funder_cex_tier,
+        shared_outbound=shared_out,
+        transfers_cache=transfers_cache,
     )
 
     # Funder/root path parity for mixer signals (same spirit as bridge-path signals)
@@ -1454,6 +1738,31 @@ def compute_coordination_bundle(
         ]
         if funding_cluster_bridge_mixer.get("bridge_mixer_confidence_tier") == "low":
             funding_cluster_bridge_mixer["bridge_mixer_confidence_tier"] = "medium"
+    funding_cluster_bridge_mixer["cex_split_pattern"] = cex_split_pattern
+    _cex_hits = list(cex_split_pattern.get("cex_path_hits") or [])
+    _cex_recv_hits = list(cex_split_pattern.get("shared_outbound_receivers") or [])
+    _fanouts: list[float] = []
+    for _g in list(cex_split_pattern.get("shared_cex_funder_groups") or []):
+        try:
+            _fanouts.append(float(_g.get("wallet_count") or 0.0))
+        except (TypeError, ValueError):
+            continue
+    _fanout_avg = (sum(_fanouts) / len(_fanouts)) if _fanouts else 0.0
+    # Flat aliases kept for downstream UI/renderers that already read these keys.
+    funding_cluster_bridge_mixer["cex_split_pattern_confidence"] = str(
+        cex_split_pattern.get("confidence_tier") or "none"
+    )
+    funding_cluster_bridge_mixer["cex_split_wallet_count"] = int(
+        cex_split_pattern.get("cex_path_wallet_count") or 0
+    )
+    funding_cluster_bridge_mixer["cex_split_shared_receiver_count"] = len(_cex_recv_hits)
+    funding_cluster_bridge_mixer["cex_split_fanout_avg"] = round(_fanout_avg, 3)
+    funding_cluster_bridge_mixer["cex_split_path_hits"] = _cex_hits[:30]
+    funding_cluster_bridge_mixer["cex_split_shared_receiver_hits"] = _cex_recv_hits[:20]
+    if cex_split_pattern.get("risk_lines"):
+        funding_cluster_bridge_mixer["risk_lines"] = (
+            funding_cluster_bridge_mixer.get("risk_lines") or []
+        ) + list(cex_split_pattern.get("risk_lines") or [])
     if funding_cluster_bridge_mixer.get("shared_bridge_programs_multi_wallet"):
         score += min(8.0, 3.0 + 2.0 * len(funding_cluster_bridge_mixer["shared_bridge_programs_multi_wallet"]))
         reasons.append("bridge_program_multi_wallet_sample")
@@ -1471,6 +1780,26 @@ def compute_coordination_bundle(
     elif _w_mf == 1:
         score += 1.0
         reasons.append("mixer_tag_on_single_funder_path")
+    _cex_split_tier = str(cex_split_pattern.get("confidence_tier") or "none")
+    if _cex_split_tier == "high":
+        score += 9.0
+        reasons.append("cex_split_pattern_high")
+    elif _cex_split_tier == "medium":
+        score += 6.0
+        reasons.append("cex_split_pattern_medium")
+    elif _cex_split_tier == "low":
+        score += 2.0
+        reasons.append("cex_split_pattern_low")
+    _cex_split_conf = str(funding_cluster_bridge_mixer.get("cex_split_pattern_confidence") or "none")
+    if _cex_split_conf == "high":
+        score += 8.0
+        reasons.append("cex_split_pattern_high")
+    elif _cex_split_conf == "medium":
+        score += 4.0
+        reasons.append("cex_split_pattern_medium")
+    elif _cex_split_conf == "low":
+        score += 1.0
+        reasons.append("cex_split_pattern_low")
 
     score = round(min(100.0, score), 2)
 
@@ -1529,6 +1858,7 @@ def compute_coordination_bundle(
         "enhanced_tx_type_overlap_pairs": type_overlap[:20],
         "program_overlap_pairs": p_overlap[:20],
         "funding_cluster_bridge_mixer": funding_cluster_bridge_mixer,
+        "cex_split_pattern": cex_split_pattern,
         "coordination_score": score,
         "coordination_reasons": reasons,
         "params": {

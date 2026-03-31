@@ -95,6 +95,16 @@ EVM_BRIDGE_CONTRACTS: dict[str, str] = {
 }
 
 _MIXER_INTEL_FILE = Path(__file__).resolve().parent.parent / "investigation" / "mixer_service_intel.json"
+_MIXER_TIER_RANK = {
+    "unverified_candidate": 0,
+    "verified_analytics": 1,
+    "verified_primary": 2,
+}
+
+
+def _mixer_min_tier_rank() -> int:
+    raw = (os.environ.get("DIVERG_MIXER_MIN_TIER") or "verified_analytics").strip().lower()
+    return _MIXER_TIER_RANK.get(raw, _MIXER_TIER_RANK["verified_analytics"])
 
 
 def _load_mixer_intel() -> tuple[dict[str, str], dict[str, str], tuple[str, ...]]:
@@ -105,6 +115,7 @@ def _load_mixer_intel() -> tuple[dict[str, str], dict[str, str], tuple[str, ...]
     contracts: dict[str, str] = {}
     wallets: dict[str, str] = {}
     markers: list[str] = []
+    min_rank = _mixer_min_tier_rank()
     try:
         if _MIXER_INTEL_FILE.is_file():
             raw = json.loads(_MIXER_INTEL_FILE.read_text(encoding="utf-8"))
@@ -114,23 +125,50 @@ def _load_mixer_intel() -> tuple[dict[str, str], dict[str, str], tuple[str, ...]
                     for k, v in c.items():
                         kk = str(k).strip().lower()
                         if kk.startswith("0x") and len(kk) == 42:
-                            contracts[kk] = str(v or "Mixer/Privacy Service")[:120]
+                            if isinstance(v, dict):
+                                tier = str(v.get("tier") or "unverified_candidate").strip().lower()
+                                if _MIXER_TIER_RANK.get(tier, 0) >= min_rank:
+                                    contracts[kk] = str(v.get("service") or "Mixer/Privacy Service")[:120]
+                            else:
+                                # Backward-compatible string entries are treated as verified intel.
+                                contracts[kk] = str(v or "Mixer/Privacy Service")[:120]
                 w = raw.get("evm_wallets")
                 if isinstance(w, dict):
                     for svc, addrs in w.items():
                         if isinstance(addrs, list):
                             for a in addrs:
-                                aa = str(a).strip().lower()
-                                if aa.startswith("0x") and len(aa) == 42:
-                                    wallets[aa] = str(svc or "Mixer/Privacy Wallet")[:120]
+                                if isinstance(a, dict):
+                                    aa = str(a.get("address") or "").strip().lower()
+                                    tier = str(a.get("tier") or "unverified_candidate").strip().lower()
+                                    label = str(a.get("service") or svc or "Mixer/Privacy Wallet")[:120]
+                                    if aa.startswith("0x") and len(aa) == 42 and _MIXER_TIER_RANK.get(tier, 0) >= min_rank:
+                                        wallets[aa] = label
+                                else:
+                                    aa = str(a).strip().lower()
+                                    if aa.startswith("0x") and len(aa) == 42:
+                                        wallets[aa] = str(svc or "Mixer/Privacy Wallet")[:120]
                 elif isinstance(w, list):
                     for a in w:
-                        aa = str(a).strip().lower()
-                        if aa.startswith("0x") and len(aa) == 42:
-                            wallets[aa] = "Mixer/Privacy Wallet"
+                        if isinstance(a, dict):
+                            aa = str(a.get("address") or "").strip().lower()
+                            tier = str(a.get("tier") or "unverified_candidate").strip().lower()
+                            label = str(a.get("service") or "Mixer/Privacy Wallet")[:120]
+                            if aa.startswith("0x") and len(aa) == 42 and _MIXER_TIER_RANK.get(tier, 0) >= min_rank:
+                                wallets[aa] = label
+                        else:
+                            aa = str(a).strip().lower()
+                            if aa.startswith("0x") and len(aa) == 42:
+                                wallets[aa] = "Mixer/Privacy Wallet"
                 m = raw.get("label_markers")
                 if isinstance(m, list):
-                    markers = [str(x).strip().lower() for x in m if x is not None and str(x).strip()]
+                    for x in m:
+                        if isinstance(x, dict):
+                            marker = str(x.get("marker") or "").strip().lower()
+                            tier = str(x.get("tier") or "unverified_candidate").strip().lower()
+                            if marker and _MIXER_TIER_RANK.get(tier, 0) >= min_rank:
+                                markers.append(marker)
+                        elif x is not None and str(x).strip():
+                            markers.append(str(x).strip().lower())
     except Exception:
         pass
 

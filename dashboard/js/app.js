@@ -819,11 +819,16 @@ function _invTokenBundleSummaryHtml(d) {
     const bridgeN = ccb.bridge_adjacent_holder_wallet_count != null ? ccb.bridge_adjacent_holder_wallet_count : '—';
     const funderBridgeN = ccb.wallets_with_bridge_touching_funder != null ? ccb.wallets_with_bridge_touching_funder : '—';
     const funderMixerN = ccb.wallets_with_mixer_touching_funder != null ? ccb.wallets_with_mixer_touching_funder : '—';
+    const cexSplitTier = ccb.cex_split_pattern_confidence ? String(ccb.cex_split_pattern_confidence) : 'none';
+    const cexSplitN = ccb.cex_split_wallet_count != null ? ccb.cex_split_wallet_count : '—';
     let statGrid = `<div class="inv-cc-stat-grid">
       <div class="inv-cc-stat"><div class="inv-cc-stat-k">Bridge activity</div><div class="inv-cc-stat-v">${esc(tierVal)}</div></div>
       <div class="inv-cc-stat"><div class="inv-cc-stat-k">Wallets with bridge contacts</div><div class="inv-cc-stat-v">${esc(String(bridgeN))}</div></div>
       <div class="inv-cc-stat"><div class="inv-cc-stat-k">Funded via bridge path</div><div class="inv-cc-stat-v">${esc(String(funderBridgeN))}</div></div>
       <div class="inv-cc-stat"><div class="inv-cc-stat-k">Funded via mixer path</div><div class="inv-cc-stat-v">${esc(String(funderMixerN))}</div></div>`;
+    if (cexSplitTier !== 'none') {
+      statGrid += `<div class="inv-cc-stat"><div class="inv-cc-stat-k">CEX split pattern</div><div class="inv-cc-stat-v">${esc(cexSplitTier)} (${esc(String(cexSplitN))})</div></div>`;
+    }
     if (ccb.foreign_candidate_count) {
       statGrid += `<div class="inv-cc-stat"><div class="inv-cc-stat-k">Cross-chain token hints</div><div class="inv-cc-stat-v">${esc(String(ccb.foreign_candidate_count))}</div></div>`;
     }

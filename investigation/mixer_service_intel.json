@@ -1,50 +1,290 @@
 {
-  "version": 1,
+  "version": 2,
   "last_updated": "2026-03-31",
+  "evidence_policy": {
+    "tiers": [
+      "verified_primary",
+      "verified_analytics",
+      "unverified_candidate"
+    ],
+    "default_min_tier_for_scoring": "verified_analytics",
+    "scoring_includes": [
+      "verified_primary",
+      "verified_analytics"
+    ],
+    "scoring_excludes": [
+      "unverified_candidate"
+    ]
+  },
+  "service_intel_notes": {
+    "SplitNOW": {
+      "status": "no_public_canonical_wallet_list",
+      "evidence_tier": "unverified_candidate",
+      "notes": "No independently verifiable canonical on-chain wallet set found from third-party sources. Keep wallet arrays empty until verified attribution exists.",
+      "sources": []
+    },
+    "Privacy Cash": {
+      "status": "insufficient_verified_wallet_intel",
+      "evidence_tier": "unverified_candidate",
+      "notes": "Program and authority addresses are visible from third-party Solana indexers, but attribution as stable mixer-owned fund wallets remains low confidence.",
+      "sources": [
+        "https://solanafloor.com/news/privacy-cash-launches-swaps-daily-addresses-hits-all-time-high",
+        "https://orbmarkets.io/address/9fhQBbumKEFuXtMBDw8AaQyAjCorLGJQiS3skWZdQyQD/history"
+      ]
+    },
+    "Sinbad": {
+      "status": "sanctioned_entity_btc_addresses_available",
+      "evidence_tier": "verified_primary",
+      "notes": "Public sanctioned addresses are Bitcoin addresses and not valid EVM/Solana wallet entries.",
+      "sources": [
+        "https://sanctionssearch.ofac.treas.gov/Details.aspx?id=44437",
+        "https://www.opensanctions.org/entities/ofac-44437/"
+      ]
+    }
+  },
   "label_markers": [
-    "splitnow",
-    "split now",
-    "tornado cash",
-    "tornado",
-    "railgun",
-    "sinbad",
-    "blender",
-    "chipmixer",
-    "wasabi",
-    "samourai",
-    "whirlpool",
-    "coinjoin",
-    "privacy pool",
-    "privacy protocol",
-    "no kyc swap",
-    "mixing service"
+    {
+      "marker": "splitnow",
+      "tier": "unverified_candidate",
+      "sources": []
+    },
+    {
+      "marker": "split now",
+      "tier": "unverified_candidate",
+      "sources": []
+    },
+    {
+      "marker": "tornado cash",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    {
+      "marker": "tornado",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    {
+      "marker": "railgun",
+      "tier": "unverified_candidate",
+      "sources": []
+    },
+    {
+      "marker": "sinbad",
+      "tier": "verified_primary",
+      "sources": [
+        "https://sanctionssearch.ofac.treas.gov/Details.aspx?id=44437",
+        "https://www.opensanctions.org/entities/ofac-44437/"
+      ]
+    },
+    {
+      "marker": "blender",
+      "tier": "verified_analytics",
+      "sources": [
+        "https://www.elliptic.co/blog/sinbad-crypto-mixer-flagged-by-elliptic-sanctioned-and-seized"
+      ]
+    },
+    {
+      "marker": "chipmixer",
+      "tier": "unverified_candidate",
+      "sources": []
+    },
+    {
+      "marker": "wasabi",
+      "tier": "unverified_candidate",
+      "sources": []
+    },
+    {
+      "marker": "samourai",
+      "tier": "unverified_candidate",
+      "sources": []
+    },
+    {
+      "marker": "whirlpool",
+      "tier": "unverified_candidate",
+      "sources": []
+    },
+    {
+      "marker": "coinjoin",
+      "tier": "unverified_candidate",
+      "sources": []
+    },
+    {
+      "marker": "privacy pool",
+      "tier": "unverified_candidate",
+      "sources": []
+    },
+    {
+      "marker": "privacy protocol",
+      "tier": "unverified_candidate",
+      "sources": []
+    },
+    {
+      "marker": "privacy cash",
+      "tier": "unverified_candidate",
+      "sources": []
+    },
+    {
+      "marker": "no kyc swap",
+      "tier": "unverified_candidate",
+      "sources": []
+    },
+    {
+      "marker": "mixing service",
+      "tier": "unverified_candidate",
+      "sources": []
+    }
   ],
   "evm_contracts": {
-    "0xd90e2f925da726b50c4ed8d0fb90ad053324f31b": "Tornado Cash Router (ETH)",
-    "0x12d66f87a04a9e220743712ce6d9bb1b5616b8fc": "Tornado Cash ETH 0.1",
-    "0x47ce0c6ed5b0ce3d3a51fdb1c52dc66a7c3c2936": "Tornado Cash ETH 1",
-    "0x910cbd523d972eb0a6f4cae4618ad62622b39dbf": "Tornado Cash ETH 10",
-    "0xa160cdab225685da1d56aa342ad8841c3b53f291": "Tornado Cash ETH 100",
-    "0xd4b88df4d29f5cedd6857912842cff3b20c8cfa3": "Tornado Cash DAI 100",
-    "0xfd8610d20aa15b7b2e3be39b396a1bc3516c7144": "Tornado Cash DAI 1000",
-    "0x07687e702b410fa43f4cb4af7fa097918ffd2730": "Tornado Cash DAI 10000",
-    "0x23773e65ed146a459791799d01336db287f25334": "Tornado Cash DAI 100000",
-    "0x4736dcf1b7a3d580672cce6e7c65cd5cc9cfba9d": "Tornado Cash USDC 100",
-    "0xd96f2b1c14db8458374d9aca76e26c3d18364307": "Tornado Cash USDC 1000",
-    "0x169ad27a470d064dede56a2d3ff727986b15d52b": "Tornado Cash USDT 100",
-    "0x0836222f2b2b24a3f36f98668ed8f0b38d1a872f": "Tornado Cash USDT 1000",
-    "0x178169b423a011fff22b9e3f3abea13414ddd0f1": "Tornado Cash WBTC 0.1",
-    "0x610b717796ad172b316836ac95a2ffad065ceab4": "Tornado Cash WBTC 1",
-    "0xbb93e510bbcd0b7beb5a853875f9ec60275cf498": "Tornado Cash WBTC 10",
-    "0x722122df12d4e14e13ac3b6895a86e84145b6967": "Tornado Cash Proxy (ETH)"
+    "0xd90e2f925da726b50c4ed8d0fb90ad053324f31b": {
+      "service": "Tornado Cash Router (ETH)",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0x12d66f87a04a9e220743712ce6d9bb1b5616b8fc": {
+      "service": "Tornado Cash ETH 0.1",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0x47ce0c6ed5b0ce3d3a51fdb1c52dc66a7c3c2936": {
+      "service": "Tornado Cash ETH 1",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0x910cbd523d972eb0a6f4cae4618ad62622b39dbf": {
+      "service": "Tornado Cash ETH 10",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0xa160cdab225685da1d56aa342ad8841c3b53f291": {
+      "service": "Tornado Cash ETH 100",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0xd4b88df4d29f5cedd6857912842cff3b20c8cfa3": {
+      "service": "Tornado Cash DAI 100",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0xfd8610d20aa15b7b2e3be39b396a1bc3516c7144": {
+      "service": "Tornado Cash DAI 1000",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0x07687e702b410fa43f4cb4af7fa097918ffd2730": {
+      "service": "Tornado Cash DAI 10000",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0x23773e65ed146a459791799d01336db287f25334": {
+      "service": "Tornado Cash DAI 100000",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0x4736dcf1b7a3d580672cce6e7c65cd5cc9cfba9d": {
+      "service": "Tornado Cash USDC 100",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0xd96f2b1c14db8458374d9aca76e26c3d18364307": {
+      "service": "Tornado Cash USDC 1000",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0x169ad27a470d064dede56a2d3ff727986b15d52b": {
+      "service": "Tornado Cash USDT 100",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0x0836222f2b2b24a3f36f98668ed8f0b38d1a872f": {
+      "service": "Tornado Cash USDT 1000",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0x178169b423a011fff22b9e3f3abea13414ddd0f1": {
+      "service": "Tornado Cash WBTC 0.1",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0x610b717796ad172b316836ac95a2ffad065ceab4": {
+      "service": "Tornado Cash WBTC 1",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0xbb93e510bbcd0b7beb5a853875f9ec60275cf498": {
+      "service": "Tornado Cash WBTC 10",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    },
+    "0x722122df12d4e14e13ac3b6895a86e84145b6967": {
+      "service": "Tornado Cash Proxy (ETH)",
+      "tier": "verified_primary",
+      "sources": [
+        "https://docs.tornado.ws/general/deployments.html"
+      ]
+    }
   },
   "evm_wallets": {
     "SplitNOW": [],
+    "Privacy Cash": [],
     "Tornado Cash": [],
     "Railgun": [],
     "Sinbad": []
   },
   "solana_wallets": {
-    "SplitNOW": []
+    "SplitNOW": [],
+    "Privacy Cash": [
+      {
+        "address": "9fhQBbumKEFuXtMBDw8AaQyAjCorLGJQiS3skWZdQyQD",
+        "tier": "unverified_candidate",
+        "role": "program_id_candidate",
+        "sources": [
+          "https://orbmarkets.io/address/9fhQBbumKEFuXtMBDw8AaQyAjCorLGJQiS3skWZdQyQD/history"
+        ]
+      },
+      {
+        "address": "AWexibGxNFKTa1b5R5MN4PJr9HWnWRwf8EW9g8cLx3dM",
+        "tier": "unverified_candidate",
+        "role": "upgrade_authority_candidate",
+        "sources": [
+          "https://orbmarkets.io/address/9fhQBbumKEFuXtMBDw8AaQyAjCorLGJQiS3skWZdQyQD/history"
+        ]
+      }
+    ]
   }
 }
