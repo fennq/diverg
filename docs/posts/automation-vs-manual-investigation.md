@@ -1,4 +1,6 @@
-# Automation vs manual investigation: speed, scale, and where Diverg fits
+# ZachXBT spends hours in the weeds — here’s what automation clears in minutes
+
+*Subtitle: Manual thread-grade work vs Diverg-style first-pass OSINT — speed, scale, and where each wins.*
 
 High-signal blockchain OSINT—threads that map wallets, bridges, mixers, and narratives across months—has a clear public archetype: investigators who work **by hand** in explorers, spreadsheets, and screenshots, then publish when the story holds up. **[ZachXBT](https://twitter.com/zachxbt)** is widely cited for that style: deep, patient, manually assembled evidence chains.
 
