@@ -144,6 +144,42 @@ class TestCrossChainHints(unittest.TestCase):
         self.assertGreaterEqual(out.get("bridge_program_funder_count", 0), 1)
         self.assertTrue(out.get("funder_bridge_hits"))
 
+    def test_funding_cluster_cex_split_pattern(self):
+        from solana_bundle_signals import build_funding_cluster_bridge_mixer
+
+        wallets = ["W1", "W2", "W3"]
+        meta = {
+            "W1": {"funder": "F1"},
+            "W2": {"funder": "F2"},
+            "W3": {"funder": "F3"},
+        }
+        tier = {"F1": "strong", "F2": "strong", "F3": "strong"}
+        shared_out = {
+            "shared_receiver_to_wallets": {
+                "R1": ["W1", "W2"],
+                "R2": ["W2", "W3"],
+            }
+        }
+        transfers = {
+            "W1": [{"direction": "out", "to": "R1"}, {"direction": "out", "to": "R3"}, {"direction": "out", "to": "R4"}],
+            "W2": [{"direction": "out", "to": "R1"}, {"direction": "out", "to": "R2"}, {"direction": "out", "to": "R5"}],
+            "W3": [{"direction": "out", "to": "R2"}, {"direction": "out", "to": "R6"}, {"direction": "out", "to": "R7"}],
+        }
+        out = build_funding_cluster_bridge_mixer(
+            program_sets={w: set() for w in wallets},
+            lookup_wallets=wallets,
+            privacy_mixer_funding_strict=[],
+            funder_mixer_flags={},
+            meta_by_wallet=meta,
+            root_map={w: None for w in wallets},
+            funder_cex_tier=tier,
+            shared_outbound=shared_out,
+            transfers_cache=transfers,
+        )
+        self.assertIn(out.get("cex_split_pattern_confidence"), ("medium", "high"))
+        self.assertGreaterEqual(int(out.get("cex_split_wallet_count") or 0), 3)
+        self.assertGreaterEqual(int(out.get("cex_split_shared_receiver_count") or 0), 1)
+
     def test_cross_chain_bundle_intel_merge(self):
         from cross_chain_bundle_intel import build_cross_chain_bundle_intel
 
@@ -256,6 +292,69 @@ class TestCrossChainHints(unittest.TestCase):
         # Notes should mention mixer/privacy path context when path-level count is present
         notes_joined = " ".join(out["investigator_notes"]).lower()
         self.assertTrue("mixer" in notes_joined or "privacy" in notes_joined)
+
+    def test_cross_chain_bundle_intel_cex_split_fields(self):
+        from cross_chain_bundle_intel import build_cross_chain_bundle_intel
+
+        fc = {
+            "bridge_adjacent_wallet_count": 2,
+            "bridge_mixer_confidence_tier": "medium",
+            "shared_bridge_programs_multi_wallet": [],
+            "strict_mixer_cluster_max_wallets": 0,
+            "any_mixer_tagged_funder": False,
+            "bridge_program_funder_count": 1,
+            "wallets_with_bridge_touching_funder": 1,
+            "cex_split_pattern_confidence": "high",
+            "cex_split_wallet_count": 3,
+            "cex_split_shared_receiver_count": 1,
+            "cex_split_fanout_avg": 3.0,
+            "funder_bridge_hits": [],
+        }
+        out = build_cross_chain_bundle_intel(
+            mint="So11111111111111111111111111111111111111112",
+            cross_chain={"summary": {"candidate_count": 1, "explorer_links": [], "sources": []}},
+            funding_cluster_bridge_mixer=fc,
+            bridge_transfers=None,
+        )
+        self.assertEqual(out.get("cex_split_pattern_confidence"), "high")
+        self.assertEqual(out.get("cex_split_wallet_count"), 3)
+        self.assertTrue(out.get("combined_escalation"))
+        notes = " ".join(out.get("investigator_notes") or []).lower()
+        self.assertIn("cex-routed split pattern", notes)
+
+    def test_cross_chain_bundle_intel_cex_split_fields(self):
+        from cross_chain_bundle_intel import build_cross_chain_bundle_intel
+
+        fc = {
+            "bridge_adjacent_wallet_count": 2,
+            "bridge_mixer_confidence_tier": "medium",
+            "shared_bridge_programs_multi_wallet": [{"program_id": "x", "wallet_count": 2}],
+            "strict_mixer_cluster_max_wallets": 0,
+            "any_mixer_tagged_funder": False,
+            "bridge_program_funder_count": 1,
+            "wallets_with_bridge_touching_funder": 2,
+            "wallets_with_mixer_touching_funder": 0,
+            "mixer_service_funder_count": 0,
+            "mixer_path_hits": [],
+            "funder_bridge_hits": [],
+            "cex_split_pattern_confidence": "high",
+            "cex_split_wallet_count": 3,
+            "cex_split_shared_receiver_count": 2,
+            "cex_split_fanout_avg": 3.1,
+            "cex_split_path_hits": [{"wallet": "W1", "tier": "strong"}],
+            "cex_split_shared_receiver_hits": [{"receiver": "R1", "wallet_count": 2}],
+        }
+        out = build_cross_chain_bundle_intel(
+            mint="So11111111111111111111111111111111111111112",
+            cross_chain={"summary": {"candidate_count": 1, "explorer_links": []}},
+            funding_cluster_bridge_mixer=fc,
+            bridge_transfers={},
+        )
+        self.assertEqual(out.get("cex_split_pattern_confidence"), "high")
+        self.assertEqual(out.get("cex_split_wallet_count"), 3)
+        notes_joined = " ".join(out.get("investigator_notes") or []).lower()
+        self.assertIn("cex-routed split pattern", notes_joined)
+        self.assertTrue(out.get("combined_escalation"))
 
 
 class TestWormholeScanClient(unittest.TestCase):
@@ -382,9 +481,42 @@ class TestMixerIntel(unittest.TestCase):
 
         ov = load_bundle_intel_overrides()
         markers = tuple(ov.get("mixer_extra_label_markers") or ())
-        self.assertIn("splitnow", markers)
+        # strict policy excludes unverified candidates by default
+        self.assertNotIn("splitnow", markers)
         self.assertTrue(any("tornado" in m for m in markers))
         self.assertIsInstance(ov.get("wallet_mixer_allowlist"), set)
+
+    def test_bundle_overrides_tier_filtering(self):
+        import tempfile
+        import bundle_intel_overrides as bio
+
+        payload = {
+            "label_markers": [
+                {"marker": "candidate-mixer", "tier": "unverified_candidate"},
+                {"marker": "verified-mixer", "tier": "verified_analytics"},
+            ],
+            "solana_wallets": {
+                "Svc": [
+                    {"address": "So11111111111111111111111111111111111111112", "tier": "verified_analytics"},
+                    {"address": "9fN9x5f4dnm3DU4D7jY2R2wYjvATNQv4VxQbATqj8v9n", "tier": "unverified_candidate"},
+                ]
+            },
+        }
+        old_file = bio._MIXER_INTEL_FILE
+        with tempfile.TemporaryDirectory() as td:
+            fp = Path(td) / "mixer_intel_test.json"
+            fp.write_text(json.dumps(payload), encoding="utf-8")
+            try:
+                bio._MIXER_INTEL_FILE = fp
+                with patch.dict("os.environ", {"DIVERG_MIXER_MIN_TIER": "verified_analytics"}, clear=False):
+                    ov = bio.load_bundle_intel_overrides()
+                self.assertIn("verified-mixer", tuple(ov.get("mixer_extra_label_markers") or ()))
+                self.assertNotIn("candidate-mixer", tuple(ov.get("mixer_extra_label_markers") or ()))
+                allow = ov.get("wallet_mixer_allowlist") or set()
+                self.assertIn("So11111111111111111111111111111111111111112", allow)
+                self.assertNotIn("9fN9x5f4dnm3DU4D7jY2R2wYjvATNQv4VxQbATqj8v9n", allow)
+            finally:
+                bio._MIXER_INTEL_FILE = old_file
 
     def test_evm_detect_mixer_hits(self):
         # Import from skills module path
@@ -427,6 +559,69 @@ class TestMixerIntel(unittest.TestCase):
         finally:
             bi.KNOWN_MIXER_EVM_WALLETS.clear()
             bi.KNOWN_MIXER_EVM_WALLETS.update(backup)
+
+    def test_blockchain_loader_tier_filtering(self):
+        import tempfile
+        import skills.blockchain_investigation as bi
+
+        payload = {
+            "evm_contracts": {
+                "0xd90e2f925da726b50c4ed8d0fb90ad053324f31b": {
+                    "service": "Verified Contract",
+                    "tier": "verified_primary",
+                },
+                "0x000000000000000000000000000000000000dEaD": {
+                    "service": "Candidate Contract",
+                    "tier": "unverified_candidate",
+                },
+            },
+            "evm_wallets": {
+                "Svc": [
+                    {"address": "0x1111111111111111111111111111111111111111", "tier": "verified_analytics"},
+                    {"address": "0x2222222222222222222222222222222222222222", "tier": "unverified_candidate"},
+                ]
+            },
+            "label_markers": [
+                {"marker": "verified-marker", "tier": "verified_analytics"},
+                {"marker": "candidate-marker", "tier": "unverified_candidate"},
+            ],
+        }
+        old_file = bi._MIXER_INTEL_FILE
+        with tempfile.TemporaryDirectory() as td:
+            fp = Path(td) / "mixer_intel_test.json"
+            fp.write_text(json.dumps(payload), encoding="utf-8")
+            try:
+                bi._MIXER_INTEL_FILE = fp
+                with patch.dict("os.environ", {"DIVERG_MIXER_MIN_TIER": "verified_analytics"}, clear=False):
+                    contracts, wallets, markers = bi._load_mixer_intel()
+                self.assertIn("0xd90e2f925da726b50c4ed8d0fb90ad053324f31b", contracts)
+                self.assertNotIn("0x000000000000000000000000000000000000dead", contracts)
+                self.assertIn("0x1111111111111111111111111111111111111111", wallets)
+                self.assertNotIn("0x2222222222222222222222222222222222222222", wallets)
+                self.assertIn("verified-marker", markers)
+                self.assertNotIn("candidate-marker", markers)
+            finally:
+                bi._MIXER_INTEL_FILE = old_file
+
+    def test_build_cex_split_pattern_high(self):
+        from solana_bundle_signals import build_cex_split_pattern
+
+        out = build_cex_split_pattern(
+            lookup_wallets=["W1", "W2", "W3"],
+            meta_by_wallet={
+                "W1": {"funder": "F1", "first_fund_lamports": 1000, "first_fund_timestamp_unix": 1700000000},
+                "W2": {"funder": "F1", "first_fund_lamports": 1000, "first_fund_timestamp_unix": 1700000001},
+                "W3": {"funder": "F1", "first_fund_lamports": 900, "first_fund_timestamp_unix": 1700000002},
+            },
+            root_map={"W1": None, "W2": None, "W3": None},
+            funder_cex_tier={"F1": "strong"},
+            shared_outbound={"shared_receiver_to_wallets": {"R1": ["W1", "W2"]}},
+            eligible_wallets=["W1", "W2", "W3"],
+            bucket_sec=5.0,
+        )
+        self.assertEqual(out.get("confidence_tier"), "high")
+        self.assertEqual(out.get("cex_path_wallet_count"), 3)
+        self.assertTrue(out.get("shared_cex_funder_groups"))
 
 
 if __name__ == "__main__":

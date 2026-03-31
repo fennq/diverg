@@ -23,6 +23,11 @@ from pathlib import Path
 from typing import Any
 
 _ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+_TIER_RANK = {
+    "unverified_candidate": 0,
+    "verified_analytics": 1,
+    "verified_primary": 2,
+}
 
 _cache_path: str | None = None
 _cache_mtime: float | None = None
@@ -33,6 +38,11 @@ _MIXER_INTEL_FILE = Path(__file__).resolve().parent / "mixer_service_intel.json"
 def _norm_addr(s: str) -> str | None:
     t = (s or "").strip()
     return t if _ADDR_RE.match(t) else None
+
+
+def _min_tier_rank() -> int:
+    raw = (os.environ.get("DIVERG_MIXER_MIN_TIER") or "verified_analytics").strip().lower()
+    return _TIER_RANK.get(raw, _TIER_RANK["verified_analytics"])
 
 
 def load_bundle_intel_overrides() -> dict[str, Any]:
@@ -117,12 +127,20 @@ def _default_mixer_label_markers() -> tuple[str, ...]:
             raw = json.loads(_MIXER_INTEL_FILE.read_text(encoding="utf-8"))
             markers = raw.get("label_markers") if isinstance(raw, dict) else None
             if isinstance(markers, list):
-                out = [str(x).lower().strip() for x in markers if x is not None and str(x).strip()]
+                out: list[str] = []
+                for x in markers:
+                    if isinstance(x, dict):
+                        marker = str(x.get("marker") or "").lower().strip()
+                        tier = str(x.get("tier") or "unverified_candidate").lower().strip()
+                        if marker and _TIER_RANK.get(tier, 0) >= _min_tier_rank():
+                            out.append(marker)
+                    elif x is not None and str(x).strip():
+                        out.append(str(x).lower().strip())
                 return tuple(dict.fromkeys(out))
     except Exception:
         pass
-    # conservative defaults
-    return ("splitnow", "tornado cash", "coinjoin", "mixing service")
+    # conservative defaults if intel file unavailable
+    return ("tornado cash", "sinbad", "blender")
 
 
 def _default_mixer_wallet_allowlist() -> tuple[str, ...]:
@@ -137,14 +155,27 @@ def _default_mixer_wallet_allowlist() -> tuple[str, ...]:
                     for _svc, addrs in sw.items():
                         if isinstance(addrs, list):
                             for a in addrs:
-                                aa = _norm_addr(str(a))
-                                if aa:
-                                    out.append(aa)
+                                # supports either raw address strings or {"address","tier",...}
+                                if isinstance(a, dict):
+                                    aa = _norm_addr(str(a.get("address") or ""))
+                                    tier = str(a.get("tier") or "unverified_candidate").strip().lower()
+                                    if aa and _TIER_RANK.get(tier, 0) >= _min_tier_rank():
+                                        out.append(aa)
+                                else:
+                                    aa = _norm_addr(str(a))
+                                    if aa:
+                                        out.append(aa)
                 elif isinstance(sw, list):
                     for a in sw:
-                        aa = _norm_addr(str(a))
-                        if aa:
-                            out.append(aa)
+                        if isinstance(a, dict):
+                            aa = _norm_addr(str(a.get("address") or ""))
+                            tier = str(a.get("tier") or "unverified_candidate").strip().lower()
+                            if aa and _TIER_RANK.get(tier, 0) >= _min_tier_rank():
+                                out.append(aa)
+                        else:
+                            aa = _norm_addr(str(a))
+                            if aa:
+                                out.append(aa)
                 return tuple(dict.fromkeys(out))
     except Exception:
         pass

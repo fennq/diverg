@@ -601,8 +601,11 @@
       const hasMixer = ccb.strict_mixer_cluster_max_wallets >= 2 || ccb.any_mixer_tagged_funder;
       const hasBridge = bridgeN > 0 || sharedN > 0;
       const hasEvm = evmN > 0;
+      const cexSplitTier = String(ccb.cex_split_pattern_confidence || 'none');
+      const cexSplitN = Number(ccb.cex_split_wallet_count || 0);
+      const hasCexSplit = cexSplitTier !== 'none' && cexSplitN > 0;
 
-      if (hasBridge || hasMixer || hasEvm || ccb.combined_escalation) {
+      if (hasBridge || hasMixer || hasEvm || hasCexSplit || ccb.combined_escalation) {
         parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">Cross-chain / bridge signals</div>`);
 
         // Escalation warning — one compact line
@@ -617,6 +620,9 @@
         if (hasMixer) {
           if (ccb.strict_mixer_cluster_max_wallets >= 2) summaryParts.push(`mixer cluster (${escapeHtml(String(ccb.strict_mixer_cluster_max_wallets))} wallets)`);
           else if (ccb.any_mixer_tagged_funder) summaryParts.push('mixer-tagged funder');
+        }
+        if (hasCexSplit) {
+          summaryParts.push(`CEX split ${escapeHtml(cexSplitTier)} (${escapeHtml(String(cexSplitN))} wallets)`);
         }
         parts.push(`<div class="sol-v-mini" style="font-size:11px">${summaryParts.join(' · ')}</div>`);
 

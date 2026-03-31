@@ -35,6 +35,11 @@ def build_cross_chain_bundle_intel(
     mixer_funders_n = int(fc.get("mixer_service_funder_count") or 0)
     funder_bridge_w = int(fc.get("wallets_with_bridge_touching_funder") or 0)
     bridge_funders_n = int(fc.get("bridge_program_funder_count") or 0)
+    cex_split_conf = str(fc.get("cex_split_pattern_confidence") or "none")
+    cex_split_w = int(fc.get("cex_split_wallet_count") or 0)
+    cex_split_shared_recv = int(fc.get("cex_split_shared_receiver_count") or 0)
+    cex_split_fanout_avg = float(fc.get("cex_split_fanout_avg") or 0.0)
+    cex_split_signal = cex_split_conf in ("high", "medium")
 
     # EVM counterparty addresses from live Wormhole Scan bridge history
     try:
@@ -92,10 +97,24 @@ def build_cross_chain_bundle_intel(
             f"{len(counterparty_evm_addrs)} distinct EVM address(es) via Wormhole — "
             "inspect each on Etherscan."
         )
+    if cex_split_signal:
+        investigator_notes.append(
+            f"CEX-routed split pattern ({cex_split_conf}) detected: {cex_split_w} wallet(s) share CEX funder paths, "
+            f"{cex_split_shared_recv} shared outbound receiver cluster(s), average fanout {cex_split_fanout_avg:.2f}."
+        )
+    elif cex_split_conf == "low":
+        investigator_notes.append(
+            "At least one wallet traces to a CEX funder path, but split/fanout corroboration is weak in this sample."
+        )
     if has_foreign and (bridge_n >= 1 or funder_bridge_w >= 1) and (mixer_strict >= 2 or any_mixer_funder):
         investigator_notes.append(
             "Stacked signals: foreign token mapping + bridge-adjacent wallets + mixer-tagged paths — "
             "manual correlation recommended; no automatic 'same actor' conclusion."
+        )
+    if has_foreign and (bridge_n >= 1 or funder_bridge_w >= 1) and cex_split_signal:
+        investigator_notes.append(
+            "Stacked signals: foreign token mapping + bridge path + CEX-routed split behavior — "
+            "this can indicate aggregator/obfuscation-style routing; verify per transaction path."
         )
 
     mixer_signal = (mixer_strict >= 2 or any_mixer_funder or mixer_path_w >= 1)
@@ -109,6 +128,16 @@ def build_cross_chain_bundle_intel(
             bool(counterparty_evm_addrs)
             and (bridge_n >= 1 or funder_bridge_w >= 1)
             and mixer_signal
+        )
+        or (
+            has_foreign
+            and (bridge_n >= 1 or funder_bridge_w >= 1)
+            and cex_split_signal
+        )
+        or (
+            bool(counterparty_evm_addrs)
+            and (bridge_n >= 1 or funder_bridge_w >= 1)
+            and cex_split_signal
         )
     )
 
@@ -129,6 +158,12 @@ def build_cross_chain_bundle_intel(
         "bridge_program_funder_count": bridge_funders_n,
         "wallets_with_bridge_touching_funder": funder_bridge_w,
         "funder_bridge_hits": fc.get("funder_bridge_hits") if isinstance(fc.get("funder_bridge_hits"), list) else [],
+        "cex_split_pattern_confidence": cex_split_conf,
+        "cex_split_wallet_count": cex_split_w,
+        "cex_split_shared_receiver_count": cex_split_shared_recv,
+        "cex_split_fanout_avg": round(cex_split_fanout_avg, 3),
+        "cex_split_path_hits": fc.get("cex_split_path_hits") if isinstance(fc.get("cex_split_path_hits"), list) else [],
+        "cex_split_shared_receiver_hits": fc.get("cex_split_shared_receiver_hits") if isinstance(fc.get("cex_split_shared_receiver_hits"), list) else [],
         "bridge_transfers_by_wallet": bridge_transfers_by_wallet,
         "counterparty_evm_addresses": counterparty_evm_addrs[:20],
         "investigator_notes": investigator_notes[:8],
