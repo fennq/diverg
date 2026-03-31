@@ -31,6 +31,8 @@ def build_cross_chain_bundle_intel(
     n_shared_bridge = len(shared_bridge) if isinstance(shared_bridge, list) else 0
     mixer_strict = int(fc.get("strict_mixer_cluster_max_wallets") or 0)
     any_mixer_funder = bool(fc.get("any_mixer_tagged_funder"))
+    mixer_path_w = int(fc.get("wallets_with_mixer_touching_funder") or 0)
+    mixer_funders_n = int(fc.get("mixer_service_funder_count") or 0)
     funder_bridge_w = int(fc.get("wallets_with_bridge_touching_funder") or 0)
     bridge_funders_n = int(fc.get("bridge_program_funder_count") or 0)
 
@@ -75,6 +77,15 @@ def build_cross_chain_bundle_intel(
             "Mixer- or privacy-tagged funding appears in the sample — combine with bridge context carefully; "
             "these are independent heuristics."
         )
+    if mixer_path_w >= 2:
+        investigator_notes.append(
+            "Multiple holders map (directly or via root) to funder paths with mixer/privacy tags — "
+            "treat as risk context and verify each hop."
+        )
+    elif mixer_funders_n >= 1 and mixer_path_w >= 1:
+        investigator_notes.append(
+            "A sampled funder path includes mixer/privacy-tagged addresses — expand the funding path review."
+        )
     if counterparty_evm_addrs:
         investigator_notes.append(
             f"Bridge transfers found: wallets in this sample sent/received funds to "
@@ -87,16 +98,17 @@ def build_cross_chain_bundle_intel(
             "manual correlation recommended; no automatic 'same actor' conclusion."
         )
 
+    mixer_signal = (mixer_strict >= 2 or any_mixer_funder or mixer_path_w >= 1)
     combined_escalation = (
         (
             has_foreign
             and (bridge_n >= 2 or n_shared_bridge > 0 or funder_bridge_w >= 2)
-            and (mixer_strict >= 2 or any_mixer_funder)
+            and mixer_signal
         )
         or (
             bool(counterparty_evm_addrs)
             and (bridge_n >= 1 or funder_bridge_w >= 1)
-            and (mixer_strict >= 2 or any_mixer_funder)
+            and mixer_signal
         )
     )
 
@@ -111,6 +123,9 @@ def build_cross_chain_bundle_intel(
         "shared_bridge_program_groups": shared_bridge[:10] if isinstance(shared_bridge, list) else [],
         "strict_mixer_cluster_max_wallets": mixer_strict,
         "any_mixer_tagged_funder": any_mixer_funder,
+        "wallets_with_mixer_touching_funder": mixer_path_w,
+        "mixer_service_funder_count": mixer_funders_n,
+        "mixer_path_hits": fc.get("mixer_path_hits") if isinstance(fc.get("mixer_path_hits"), list) else [],
         "bridge_program_funder_count": bridge_funders_n,
         "wallets_with_bridge_touching_funder": funder_bridge_w,
         "funder_bridge_hits": fc.get("funder_bridge_hits") if isinstance(fc.get("funder_bridge_hits"), list) else [],

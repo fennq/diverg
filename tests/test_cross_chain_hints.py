@@ -199,6 +199,9 @@ class TestCrossChainHints(unittest.TestCase):
             "shared_bridge_programs_multi_wallet": [],
             "strict_mixer_cluster_max_wallets": 2,
             "any_mixer_tagged_funder": True,
+            "wallets_with_mixer_touching_funder": 1,
+            "mixer_service_funder_count": 1,
+            "mixer_path_hits": [{"wallet": "W1", "via": "direct", "funder_address": "F1", "tier": "strong"}],
             "bridge_program_funder_count": 1,
             "wallets_with_bridge_touching_funder": 1,
             "funder_bridge_hits": [],
@@ -219,6 +222,40 @@ class TestCrossChainHints(unittest.TestCase):
         self.assertTrue(out["combined_escalation"])
         # bridge_transfers_by_wallet should be trimmed
         self.assertIn("FunderWallet1111111111111111111111111111111", out["bridge_transfers_by_wallet"])
+        # mixer path fields should be present and numeric
+        self.assertIn("wallets_with_mixer_touching_funder", out)
+        self.assertIsInstance(out["wallets_with_mixer_touching_funder"], int)
+
+    def test_cross_chain_bundle_intel_mixer_path_fields(self):
+        from cross_chain_bundle_intel import build_cross_chain_bundle_intel
+
+        fc = {
+            "bridge_adjacent_wallet_count": 0,
+            "bridge_mixer_confidence_tier": "medium",
+            "shared_bridge_programs_multi_wallet": [],
+            "strict_mixer_cluster_max_wallets": 1,
+            "any_mixer_tagged_funder": False,
+            "bridge_program_funder_count": 0,
+            "wallets_with_bridge_touching_funder": 0,
+            "wallets_with_mixer_touching_funder": 2,
+            "mixer_service_funder_count": 1,
+            "mixer_path_hits": [
+                {"wallet": "W1", "via": "direct", "funder_address": "F1", "tier": "strong"},
+                {"wallet": "W2", "via": "root", "funder_address": "F1", "tier": "strong"},
+            ],
+            "funder_bridge_hits": [],
+        }
+        out = build_cross_chain_bundle_intel(
+            mint="So11111111111111111111111111111111111111112",
+            cross_chain=None,
+            funding_cluster_bridge_mixer=fc,
+        )
+        self.assertEqual(out["wallets_with_mixer_touching_funder"], 2)
+        self.assertEqual(out["mixer_service_funder_count"], 1)
+        self.assertEqual(len(out["mixer_path_hits"]), 2)
+        # Notes should mention mixer/privacy path context when path-level count is present
+        notes_joined = " ".join(out["investigator_notes"]).lower()
+        self.assertTrue("mixer" in notes_joined or "privacy" in notes_joined)
 
 
 class TestWormholeScanClient(unittest.TestCase):

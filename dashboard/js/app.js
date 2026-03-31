@@ -801,6 +801,7 @@ function _invTokenBundleSummaryHtml(d) {
     const notes = Array.isArray(ccb.investigator_notes) ? ccb.investigator_notes : [];
     const links = Array.isArray(ccb.foreign_explorer_links) ? ccb.foreign_explorer_links : [];
     const funderHits = Array.isArray(ccb.funder_bridge_hits) ? ccb.funder_bridge_hits : [];
+    const mixerPathHits = Array.isArray(ccb.mixer_path_hits) ? ccb.mixer_path_hits : [];
     const sharedGroups = Array.isArray(ccb.shared_bridge_program_groups) ? ccb.shared_bridge_program_groups : [];
     const evmCounterparties = Array.isArray(ccb.counterparty_evm_addresses) ? ccb.counterparty_evm_addresses : [];
 
@@ -817,10 +818,12 @@ function _invTokenBundleSummaryHtml(d) {
     const tierVal = ccb.bridge_mixer_tier ? String(ccb.bridge_mixer_tier).charAt(0).toUpperCase() + String(ccb.bridge_mixer_tier).slice(1) : '—';
     const bridgeN = ccb.bridge_adjacent_holder_wallet_count != null ? ccb.bridge_adjacent_holder_wallet_count : '—';
     const funderBridgeN = ccb.wallets_with_bridge_touching_funder != null ? ccb.wallets_with_bridge_touching_funder : '—';
+    const funderMixerN = ccb.wallets_with_mixer_touching_funder != null ? ccb.wallets_with_mixer_touching_funder : '—';
     let statGrid = `<div class="inv-cc-stat-grid">
       <div class="inv-cc-stat"><div class="inv-cc-stat-k">Bridge activity</div><div class="inv-cc-stat-v">${esc(tierVal)}</div></div>
       <div class="inv-cc-stat"><div class="inv-cc-stat-k">Wallets with bridge contacts</div><div class="inv-cc-stat-v">${esc(String(bridgeN))}</div></div>
-      <div class="inv-cc-stat"><div class="inv-cc-stat-k">Funded via bridge path</div><div class="inv-cc-stat-v">${esc(String(funderBridgeN))}</div></div>`;
+      <div class="inv-cc-stat"><div class="inv-cc-stat-k">Funded via bridge path</div><div class="inv-cc-stat-v">${esc(String(funderBridgeN))}</div></div>
+      <div class="inv-cc-stat"><div class="inv-cc-stat-k">Funded via mixer path</div><div class="inv-cc-stat-v">${esc(String(funderMixerN))}</div></div>`;
     if (ccb.foreign_candidate_count) {
       statGrid += `<div class="inv-cc-stat"><div class="inv-cc-stat-k">Cross-chain token hints</div><div class="inv-cc-stat-v">${esc(String(ccb.foreign_candidate_count))}</div></div>`;
     }
@@ -848,6 +851,22 @@ function _invTokenBundleSummaryHtml(d) {
       funderHitsHtml = `<details class="inv-details-block" style="margin-top:0.5rem">
         <summary style="cursor:pointer">Funders with bridge-program activity (${funderHits.length})</summary>
         <ul style="margin:0.4rem 0 0 1rem;padding:0">${funderItems}</ul>
+      </details>`;
+    }
+
+    // Funder mixer/privacy path hits — collapsible
+    let mixerPathHitsHtml = '';
+    if (mixerPathHits.length) {
+      const mixerItems = mixerPathHits.slice(0, 10).map((h) => {
+        const wallet = String(h.wallet || '');
+        const addr = String(h.funder_address || '');
+        const via = String(h.via || 'funder');
+        const tier = String(h.tier || '');
+        return `<li class="inv-muted"><code>${esc(wallet.slice(0, 12))}…</code> via ${esc(via)} → <code>${esc(addr.slice(0, 14))}…</code> <span class="inv-muted">(${esc(tier)})</span></li>`;
+      }).join('');
+      mixerPathHitsHtml = `<details class="inv-details-block" style="margin-top:0.5rem">
+        <summary style="cursor:pointer">Funders with mixer/privacy path signals (${mixerPathHits.length})</summary>
+        <ul style="margin:0.4rem 0 0 1rem;padding:0">${mixerItems}</ul>
       </details>`;
     }
 
@@ -895,7 +914,7 @@ function _invTokenBundleSummaryHtml(d) {
 
     const disc = ccb.disclaimer ? `<p class="inv-muted" style="font-size:0.65rem;margin-top:0.5rem">${esc(ccb.disclaimer)}</p>` : '';
 
-    coordLine += `<div class="inv-cross-chain-bundle">${divider}<div class="inv-subhead">Cross-chain &amp; bridge signals</div>${escalationBanner}${statGrid}${linksHtml}${funderHitsHtml}${sharedGroupsHtml}${evmCounterpartiesHtml}${notesHtml}${disc}</div>`;
+    coordLine += `<div class="inv-cross-chain-bundle">${divider}<div class="inv-subhead">Cross-chain &amp; bridge signals</div>${escalationBanner}${statGrid}${linksHtml}${funderHitsHtml}${mixerPathHitsHtml}${sharedGroupsHtml}${evmCounterpartiesHtml}${notesHtml}${disc}</div>`;
   }
 
   const topH = (d.top_holders || [])[0];
