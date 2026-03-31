@@ -27,6 +27,7 @@ _ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 _cache_path: str | None = None
 _cache_mtime: float | None = None
 _cache_data: dict[str, Any] | None = None
+_MIXER_INTEL_FILE = Path(__file__).resolve().parent / "mixer_service_intel.json"
 
 
 def _norm_addr(s: str) -> str | None:
@@ -87,7 +88,11 @@ def load_bundle_intel_overrides() -> dict[str, Any]:
         "wallet_mixer_allowlist": _set("wallet_mixer_allowlist"),
         "wallet_mixer_denylist": _set("wallet_mixer_denylist"),
         "cex_extra_label_markers": _markers("cex_extra_label_markers"),
-        "mixer_extra_label_markers": _markers("mixer_extra_label_markers"),
+        "mixer_extra_label_markers": tuple(
+            dict.fromkeys(
+                list(_default_mixer_label_markers()) + list(_markers("mixer_extra_label_markers"))
+            )
+        ),
     }
     _cache_path = str(p.resolve())
     _cache_mtime = mtime
@@ -101,5 +106,20 @@ def _empty_overrides() -> dict[str, Any]:
         "wallet_mixer_allowlist": set(),
         "wallet_mixer_denylist": set(),
         "cex_extra_label_markers": (),
-        "mixer_extra_label_markers": (),
+        "mixer_extra_label_markers": _default_mixer_label_markers(),
     }
+
+
+def _default_mixer_label_markers() -> tuple[str, ...]:
+    """Default mixer/privacy service label markers from local intel JSON."""
+    try:
+        if _MIXER_INTEL_FILE.is_file():
+            raw = json.loads(_MIXER_INTEL_FILE.read_text(encoding="utf-8"))
+            markers = raw.get("label_markers") if isinstance(raw, dict) else None
+            if isinstance(markers, list):
+                out = [str(x).lower().strip() for x in markers if x is not None and str(x).strip()]
+                return tuple(dict.fromkeys(out))
+    except Exception:
+        pass
+    # conservative defaults
+    return ("splitnow", "tornado cash", "coinjoin", "mixing service")

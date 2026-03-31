@@ -339,5 +339,29 @@ class TestWormholeScanClient(unittest.TestCase):
         self.assertIn("76y77prsiCMvXMjuoZ5VRrhG5qYBrUMYTE5WgHqgjEn6", m, "LayerZero v2 endpoint should be in allowlist")
 
 
+class TestMixerIntel(unittest.TestCase):
+    def test_default_mixer_markers_loaded(self):
+        from bundle_intel_overrides import load_bundle_intel_overrides
+
+        ov = load_bundle_intel_overrides()
+        markers = tuple(ov.get("mixer_extra_label_markers") or ())
+        self.assertIn("splitnow", markers)
+        self.assertTrue(any("tornado" in m for m in markers))
+
+    def test_evm_detect_mixer_hits(self):
+        # Import from skills module path
+        sys.path.insert(0, str(_ROOT))
+        from skills.blockchain_investigation import _evm_detect_mixer_hits
+
+        txs = [
+            {"hash": "0xabc", "to": "0xd90e2f925da726b50c4ed8d0fb90ad053324f31b", "timeStamp": "1710000000", "value": "1"},
+            {"hash": "0xdef", "to": "0x000000000000000000000000000000000000dead", "timeStamp": "1710000001", "value": "0"},
+        ]
+        hits = _evm_detect_mixer_hits(txs, "ethereum")
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0]["tx_hash"], "0xabc")
+        self.assertIn("Tornado", hits[0]["service"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -94,6 +94,50 @@ EVM_BRIDGE_CONTRACTS: dict[str, str] = {
     "0x8731d54e9d02c286767d56ac03e8037c07e01e98": "Stargate Finance Router (ETH)",
 }
 
+_MIXER_INTEL_FILE = Path(__file__).resolve().parent.parent / "investigation" / "mixer_service_intel.json"
+
+
+def _load_mixer_intel() -> tuple[dict[str, str], tuple[str, ...]]:
+    """
+    Load known mixer/privacy service intel.
+    Returns (evm_contract_map, label_markers).
+    """
+    contracts: dict[str, str] = {}
+    markers: list[str] = []
+    try:
+        if _MIXER_INTEL_FILE.is_file():
+            raw = json.loads(_MIXER_INTEL_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                c = raw.get("evm_contracts")
+                if isinstance(c, dict):
+                    for k, v in c.items():
+                        kk = str(k).strip().lower()
+                        if kk.startswith("0x") and len(kk) == 42:
+                            contracts[kk] = str(v or "Mixer/Privacy Service")[:120]
+                m = raw.get("label_markers")
+                if isinstance(m, list):
+                    markers = [str(x).strip().lower() for x in m if x is not None and str(x).strip()]
+    except Exception:
+        pass
+
+    # Environment override/extension for urgent intel updates
+    extra_env = (os.environ.get("DIVERG_MIXER_LABEL_MARKERS") or "").strip()
+    if extra_env:
+        markers.extend([s.strip().lower() for s in extra_env.split(",") if s.strip()])
+
+    # Optional explicit address list via env (comma-separated EVM addresses)
+    extra_addr_env = (os.environ.get("DIVERG_KNOWN_MIXER_EVM") or "").strip()
+    if extra_addr_env:
+        for a in extra_addr_env.split(","):
+            t = a.strip().lower()
+            if t.startswith("0x") and len(t) == 42:
+                contracts.setdefault(t, "Mixer/Privacy Service (env)")
+
+    return contracts, tuple(dict.fromkeys(markers))
+
+
+KNOWN_MIXER_EVM_CONTRACTS, KNOWN_MIXER_LABEL_MARKERS = _load_mixer_intel()
+
 
 def _normalize_evm_chain_slug(chain: str) -> str:
     c = (chain or "solana").strip().lower()
@@ -167,6 +211,26 @@ def _explorer_host_for_chain(chain_slug: str) -> str:
     return "https://etherscan.io"
 
 
+def _evm_detect_mixer_hits(txlist: list[dict[str, Any]], chain_slug: str) -> list[dict[str, Any]]:
+    """Detect interactions with known mixer/privacy contracts in EVM tx list."""
+    host = _explorer_host_for_chain(chain_slug)
+    hits: list[dict[str, Any]] = []
+    for tx in txlist:
+        to_addr = str(tx.get("to") or "").strip().lower()
+        if to_addr in KNOWN_MIXER_EVM_CONTRACTS:
+            hits.append(
+                {
+                    "tx_hash": tx.get("hash", ""),
+                    "counterparty": to_addr,
+                    "service": KNOWN_MIXER_EVM_CONTRACTS[to_addr],
+                    "timestamp": tx.get("timeStamp", ""),
+                    "value_eth": tx.get("value", "0"),
+                    "explorer_url": f"{host}/tx/{tx.get('hash', '')}",
+                }
+            )
+    return hits
+
+
 # Platform identifiers for launchpad / token-creation sites
 LAUNCHPAD_DOMAINS = (
     "liquid.af",
@@ -236,6 +300,7 @@ class BlockchainInvestigationReport:
     flow_graph: dict | None = None  # {"nodes": [...], "edges": [...]}
     cross_chain: dict | None = None  # registry + CoinGecko hints
     evm_bridge_hits: list[dict] = field(default_factory=list)  # EVM bridge contract interactions
+    evm_mixer_hits: list[dict] = field(default_factory=list)  # EVM mixer/privacy contract interactions
 
 
 def _over_budget(start: float) -> bool:
@@ -1246,6 +1311,32 @@ def run(
                 ))
                 report.evm_bridge_hits = evm_bridge_hits[:10]
 
+            # Mixer/privacy service detection on EVM side (e.g. Tornado-style contracts)
+            evm_mixer_hits = _evm_detect_mixer_hits(_bridge_raw_txs, ch_slug)
+            if evm_mixer_hits:
+                _svc = sorted({h["service"] for h in evm_mixer_hits})
+                report.findings.append(Finding(
+                    title="EVM Mixer/Privacy Service Interaction Detected",
+                    severity="Medium",
+                    url=target_url,
+                    category="Blockchain / Mixer",
+                    evidence=(
+                        f"Deployer/wallet {deployer_address[:12]}… interacted with "
+                        f"{len(evm_mixer_hits)} known mixer/privacy transaction(s) on {ch_slug}: "
+                        + ", ".join(_svc[:4])
+                    ),
+                    impact=(
+                        "Funds may have passed through a privacy/mixing service. "
+                        "Treat as risk context and verify flows on-chain."
+                    ),
+                    remediation="Verify each tx and counterparty on explorer and corroborate with additional sources.",
+                    confidence="medium",
+                    source="etherscan_api",
+                    proof=", ".join(h["tx_hash"][:12] + "…" for h in evm_mixer_hits[:3]),
+                    verified=True,
+                ))
+                report.evm_mixer_hits = evm_mixer_hits[:10]
+
     elif solscan_key and not _over_budget(run_start):
         report.on_chain_used = True
         # --- Sniper across launches: token/transfer per token, earliest first ---
@@ -1626,6 +1717,8 @@ def run(
             report.crime_report["cross_chain"] = report.cross_chain
         if report.evm_bridge_hits:
             report.crime_report["evm_bridge"] = report.evm_bridge_hits
+        if report.evm_mixer_hits:
+            report.crime_report["evm_mixer"] = report.evm_mixer_hits
 
     return json.dumps(asdict(report), indent=2)
 
