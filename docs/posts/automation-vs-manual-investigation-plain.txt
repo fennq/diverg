@@ -2,8 +2,33 @@
 500 tabs or 5 minutes: the ZachXBT dilemma every security team faces
 ================================================================================
 
-Select everything in this file and paste into Docs, Medium, email, etc.
 ZachXBT on Twitter: https://twitter.com/zachxbt
+
+
+================================================================================
+FOR X / TWITTER ONLY (Phase 3-4 ship note format, same as DivergSec phase posts)
+Copy from the next line through @DivergSec, then paste into X.
+================================================================================
+
+500 tabs or 5 minutes: the ZachXBT dilemma every security team faces.
+
+We leveled up the first mile of on-chain triage with:
+
+- structured map in minutes (holders, funders, clusters, bridge and cross-chain hints) instead of hours in explorers for the same sketch
+- re-run and scan diff when the mint or deployment moves, instead of replaying the full manual trace
+- parallel cases inside policy, because triage is a queue not one thread at a time
+- same rule as always: machine output is triage, legal sign-off and public narrative stay human; verify what matters on-chain
+
+Authorized testing only.
+
+@DivergSec
+
+
+================================================================================
+LONG ARTICLE (Google Docs, Medium, email, etc.) starts below
+================================================================================
+
+Select from THE HOOK downward, or use the whole file minus the X block above.
 
 
 THE HOOK
@@ -136,7 +161,25 @@ Authorized testing and professional use only. Verify what matters on-chain.
 
 
 ================================================================================
-APPENDIX: SINGLE POST FOR SOCIAL (copy-paste)
+APPENDIX: SINGLE POST FOR SOCIAL — Phase-style (match Phase 3/4 ship tweets)
+================================================================================
+
+500 tabs or 5 minutes: the ZachXBT dilemma every security team faces.
+
+We leveled up the first mile of on-chain triage so your week is not eaten before you know if the case matters:
+
+- minutes to a first structured map (holders, funders, clusters, bridge and cross-chain hints) instead of hours of explorer hopping for the same sketch
+- re-run and scan diff when the site or mint moves, instead of replaying the whole manual trace
+- parallel targets inside policy, because triage is a firehose, not one thread at a time
+- same story: automation is not the final accusation, legal sign-off, or the public thread, verify what matters on-chain
+
+Authorized testing only.
+
+@DivergSec
+
+
+================================================================================
+APPENDIX: SINGLE POST FOR SOCIAL — shorter narrative (copy-paste)
 ================================================================================
 
 Manual thread-grade work (explorers, tabs, serious clock) optimizes for story and proof.
