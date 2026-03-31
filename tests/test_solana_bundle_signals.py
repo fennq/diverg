@@ -179,5 +179,67 @@ class TestFundingCorroboration(unittest.TestCase):
         self.assertEqual(corr, {"a", "b"})
 
 
+class TestRecallAndMeaningOutputs(unittest.TestCase):
+    def test_detect_wash_flow_patterns_split_merge(self) -> None:
+        flows = {
+            "SRC": [
+                {"from": "SRC", "to": "A1", "lamports": 100, "signature": "s1"},
+                {"from": "SRC", "to": "A2", "lamports": 100, "signature": "s2"},
+                {"from": "SRC", "to": "A3", "lamports": 100, "signature": "s3"},
+            ],
+            "A1": [{"from": "A1", "to": "DST", "lamports": 90, "signature": "s4"}],
+            "A2": [{"from": "A2", "to": "DST", "lamports": 90, "signature": "s5"}],
+            "A3": [{"from": "A3", "to": "DST", "lamports": 90, "signature": "s6"}],
+        }
+        chains = {"W1": ["W1", "SRC", "A1", "DST"], "W2": ["W2", "SRC", "A2", "DST"]}
+        out = sbs.detect_wash_flow_patterns(flows, chains, bridge_programs={}, mixer_programs={})
+        self.assertIn(out.get("confidence"), ("medium", "high"))
+        self.assertTrue(out.get("split_merge_flows"))
+        self.assertGreaterEqual(int(out.get("pattern_count") or 0), 1)
+
+    def test_compute_coordination_bundle_emits_candidate_and_confidence(self) -> None:
+        addr1 = "11111111111111111111111111111111"
+        addr2 = "21111111111111111111111111111111"
+        fund1 = "31111111111111111111111111111111"
+        fund2 = "41111111111111111111111111111111"
+        root1 = "51111111111111111111111111111111"
+        root2 = "61111111111111111111111111111111"
+
+        funded_by = {
+            addr1: {"funder": fund1, "lamports": 1_000_000_000, "timestamp": 1700000000},
+            addr2: {"funder": fund2, "lamports": 1_000_000_000, "timestamp": 1700000001},
+        }
+
+        transfer_payload = {"data": []}
+        identity_none = {}
+
+        def _enhanced(addr: str, limit: int = 25, token_accounts: str = "balanceChanged", type_filter=None):
+            return [{"slot": 1, "tokenTransfers": [], "nativeTransfers": []}]
+
+        with unittest.mock.patch("solana_bundle_signals.helius_transfers", return_value=transfer_payload), \
+            unittest.mock.patch("solana_bundle_signals.helius_wallet_identity", return_value=identity_none), \
+            unittest.mock.patch("solana_bundle_signals.helius_enhanced_transactions", side_effect=_enhanced):
+            out = sbs.compute_coordination_bundle(
+                lookup_wallets=[addr1, addr2],
+                funded_by=funded_by,
+                owner_amount={addr1: 10.0, addr2: 12.0},
+                mint="So11111111111111111111111111111111111111112",
+                focus_wallets=[addr1, addr2],
+                transfers_cache_preload={addr1: transfer_payload, addr2: transfer_payload},
+                funder_root_by_wallet={addr1: root1, addr2: root2},
+                funder_chain_by_wallet={addr1: [addr1, fund1, root1], addr2: [addr2, fund2, root2]},
+            )
+
+        self.assertIn("candidate_evidence", out)
+        self.assertTrue(isinstance(out.get("candidate_evidence"), list))
+        self.assertGreaterEqual(len(out.get("candidate_evidence") or []), 2)
+        self.assertIn("confidence_model", out)
+        cm = out.get("confidence_model") or {}
+        self.assertIn(cm.get("tier"), ("low", "medium", "high"))
+        self.assertIn("observed_signals", cm)
+        self.assertIn("corroborated_signals", cm)
+        self.assertIn("high_confidence_signals", cm)
+
+
 if __name__ == "__main__":
     unittest.main()

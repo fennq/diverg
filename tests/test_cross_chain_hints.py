@@ -418,6 +418,22 @@ class TestWormholeScanClient(unittest.TestCase):
         self.assertIn("0xbf5f3f65102ae745a48bd521d10bab5bf02a9ef4", result)
         self.assertIn("0x6b175474e89094c44da98b954eedeac495271d0f", result)
 
+    def test_extract_counterparty_solana_addresses(self):
+        from wormhole_scan_client import extract_counterparty_solana_addresses
+
+        transfers = {
+            "wallet1": [
+                {
+                    "source_address": "7dm9am6Qx7cH64RB99Mzf7ZsLbEfmXM7ihXXCvMiT2X1",
+                    "dest_address": "8LwX9t5C5a4bE4Pr4W9w5gw24R3f7F1C4nWYkQwP6V7N",
+                }
+            ],
+            "wallet2": [{"dest_address": "0xbf5f3f65102ae745a48bd521d10bab5bf02a9ef4"}],
+        }
+        out = extract_counterparty_solana_addresses(transfers)
+        self.assertIn("7dm9am6Qx7cH64RB99Mzf7ZsLbEfmXM7ihXXCvMiT2X1", out)
+        self.assertIn("8LwX9t5C5a4bE4Pr4W9w5gw24R3f7F1C4nWYkQwP6V7N", out)
+
     def test_fetch_bridge_operations_mocked(self):
         from unittest.mock import MagicMock, patch
 
