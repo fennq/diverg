@@ -8,6 +8,36 @@ This article compares the two *modes* of work (not a scorecard against any indiv
 
 ---
 
+## For social — comparison tweet (copy-paste)
+
+**Single post (illustrative numbers — not a timed race vs anyone):**
+
+Manual thread-grade work (the ZachXBT-shaped workflow: explorers, tabs, months of context) optimizes for **story + proof**.
+
+Diverg optimizes for **first structured signal**:
+
+• sketch token + cluster + bridge hints: often **minutes** on platform vs **hours** to get the same shape by hand  
+• re-check after a deploy / new mint: **re-run + diff** vs redoing a lot of the trace  
+• **many targets in parallel** instead of one narrative at a time  
+
+Different job. Automation = speed to triage and throughput; humans = final call, legal bar, and the thread.
+
+@DivergSec
+
+---
+
+## Thread (3–4 posts) — same angle
+
+**1/** Everyone knows the manual masterclass: one investigator, infinite tabs, a thread that took serious clock to get right. That’s not what we’re replacing.
+
+**2/** Diverg is the **first mile**: holders, funders, coordination heuristics, bridge/cross-chain flags — **machine output in roughly minutes to low tens of minutes** (keys, scope, APIs), vs the **hours** it routinely takes to build the same *map* by hand before you even know if the case is worth it.
+
+**3/** That gap is where **throughput** lives: more leads screened, faster **no**, faster **escalate to a human deep dive**. Plus **scan diff** — what changed between runs — without replaying the whole manual movie.
+
+**4/** We’re not claiming automation beats a finished public investigation on *quality of narrative*. We’re claiming it beats **starting from zero** on *speed to first structured picture*. Authorized use; verify what matters on-chain.
+
+---
+
 ## Two ways to produce evidence
 
 | | **Manual expert investigation** (thread-grade) | **Diverg (automated triage)** |
@@ -36,7 +66,7 @@ So the comparison isn’t “Diverg vs ZachXBT.” It’s **dossier-grade manual
 
 ## Illustrative timing table (not measured head-to-head)
 
-Use these only as **planning heuristics**.
+Use these only as **planning heuristics**. Rough **order-of-magnitude**: manual **first trustworthy map** of a non-trivial token + cluster + bridges often sits in the **1–8 hour** band for an analyst working carefully; an automated **first machine pass** with skills + console/API often lands closer to **~2–20 minutes** wall-clock before human review—**not** apples-to-apples with a published thread’s polish bar.
 
 | Stage | Manual (typical analyst workflow) | Diverg (automated) |
 |-------|-------------------------------------|---------------------|
