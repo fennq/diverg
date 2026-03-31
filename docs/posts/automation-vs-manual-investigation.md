@@ -1,109 +1,169 @@
 # 500 tabs or 5 minutes: the ZachXBT dilemma every security team faces
 
-Gold-standard manual threads (the ZachXBT-shaped workflow) vs first-pass automation: what Diverg compresses, what still needs a human, and why the timing gap is not humble-brag, it is your calendar.
-
-High-signal blockchain OSINT (threads that map wallets, bridges, mixers, and narratives across months) has a clear public archetype: investigators who work by hand in explorers, spreadsheets, and screenshots, then publish when the story holds up. [ZachXBT](https://twitter.com/zachxbt) is widely cited for that style: deep, patient, manually assembled evidence chains.
-
-Diverg is built for a different layer of the same problem: repeated, automated first-pass investigations that teams can run inside authorized workflows, so you get structured output in minutes, not after a full manual dossier is finished.
-
-This article compares the two modes of work (not a scorecard against any individual). Timing ranges below are order-of-magnitude illustrations for planning conversations, not lab benchmarks or claims about a specific researcher's calendar.
+Copy-paste note: the sections below are spaced for easy grab. Start from "The hook" for the main article. Social snippets are at the bottom.
 
 ---
 
-## For social: comparison tweet (copy-paste)
+## The hook
 
-Single post (illustrative numbers; not a timed race vs anyone):
+You have seen the threads. One investigator, a frightening number of tabs, and a story that clearly took real time to assemble.
 
-Manual thread-grade work (the ZachXBT-shaped workflow: explorers, tabs, months of context) optimizes for story and proof.
+That work, the kind people associate with names like [ZachXBT](https://twitter.com/zachxbt), is not the problem. It is the standard for serious manual OSINT.
 
-Diverg optimizes for first structured signal:
+The problem is this: most teams do not get a spare week on every token, wallet, or deployment before they need a direction.
 
-- sketch token + cluster + bridge hints: often minutes on platform vs hours to get the same shape by hand  
-- re-check after a deploy / new mint: re-run + diff vs redoing a lot of the trace  
-- many targets in parallel instead of one narrative at a time  
+So the real question is not "can we replace the thread." It is "what do we do in the first hour when we still do not know if the case is worth a week."
 
-Different job. Automation = speed to triage and throughput; humans = final call, legal bar, and the thread.
-
-@DivergSec
+That is where first-pass automation shows up.
 
 ---
 
-## Thread (3-4 posts): same angle
+## What this article is (and is not)
 
-1/ Everyone knows the manual masterclass: one investigator, infinite tabs, a thread that took serious clock to get right. That is not what we are replacing.
+This article compares two modes of work. It is not a scorecard against any individual.
 
-2/ Diverg is the first mile: holders, funders, coordination heuristics, bridge/cross-chain flags. Machine output in roughly minutes to low tens of minutes (keys, scope, APIs), vs the hours it routinely takes to build the same map by hand before you even know if the case is worth it.
-
-3/ That gap is where throughput lives: more leads screened, faster no, faster escalate to a human deep dive. Plus scan diff (what changed between runs) without replaying the whole manual movie.
-
-4/ We are not claiming automation beats a finished public investigation on quality of narrative. We are claiming it beats starting from zero on speed to first structured picture. Authorized use; verify what matters on-chain.
+Any timing numbers here are order-of-magnitude illustrations for planning, not a lab race and not a claim about how any specific researcher spends their calendar.
 
 ---
 
-## Two ways to produce evidence
+## Two modes side by side
 
-| | Manual expert investigation (thread-grade) | Diverg (automated triage) |
-|--|--|--|
-| Primary output | Narrative + curated screenshots, tuned for public persuasion | JSON / dashboard findings, skills output, reproducible runs |
-| Typical first meaningful pass | Often hours to days before you would publish or brief stakeholders, depending on chain depth, sleep, and case complexity | Often ~2-20 minutes wall-clock for a first machine pass on a target (token bundle, domain scan, blockchain skill), depending on API keys, rate limits, and scope |
-| Cross-chain / bridges | Manual hops across Solana / EVM explorers, bridge UIs, labels | Bundled program allowlists, optional Wormhole Scan sampling, EVM bridge-contract checks in structured reports |
-| Repeatability | The thread is the artifact; redoing everything is mostly manual | Same command / API again; scan diff over time; DB history in console workflows |
-| Parallelism | Usually one narrative at a time per investigator | Many targets or tenants in parallel subject to infra and policy |
+Manual expert investigation (thread-grade)
 
-Takeaway: Manual work optimizes for judgment, context, and story. Automation optimizes for speed to first hypothesis, coverage, and operational repeatability.
+What you optimize for: judgment, context, and a story that holds up under scrutiny.
 
----
+What the first meaningful pass often looks like: hours to days before you would brief someone or post, depending on depth and complexity.
 
-## Why "quicker" matters (without claiming replacement)
+What you get: narrative plus curated screenshots and links, tuned for persuasion.
 
-Automated triage does not replace careful human review before legal, compliance, or public accusations. It compresses the early phase:
+Cross-chain and bridges: you hop chains by hand in explorers, bridge sites, labels.
 
-1. Time to first map. In illustrative terms, work that might take an analyst a half-day of explorer hopping to sketch who funded whom and whether bridges or clusters show up can often be surfaced in minutes as structured signals (holders, funder clustering, bridge-adjacent wallets, cross-chain hints).
+Repeatability: the thread is the artifact; redoing the work is mostly manual.
 
-2. Opportunity surface. When each case no longer starts at zero every time, you can touch more targets, run before/after diffs, and deprioritize faster when automation returns low signal.
-
-3. Efficiency for teams. Outputs are diffable, exportable, and consistent, useful for internal triage, not only for public threads.
-
-So the comparison is not "Diverg vs ZachXBT." It is dossier-grade manual artistry vs platform-grade automated first looks, and many organizations will use both: machines for breadth and speed; humans for final calls and narrative.
+Parallelism: usually one deep narrative at a time per investigator.
 
 ---
 
-## Illustrative timing table (not measured head-to-head)
+Diverg (automated triage)
 
-Use these only as planning heuristics. Rough order-of-magnitude: manual first trustworthy map of a non-trivial token + cluster + bridges often sits in the 1-8 hour band for an analyst working carefully; an automated first machine pass with skills + console/API often lands closer to ~2-20 minutes wall-clock before human review, not apples-to-apples with a published thread's polish bar.
+What you optimize for: speed to a first structured picture, coverage, repeatability.
 
-| Stage | Manual (typical analyst workflow) | Diverg (automated) |
-|-------|-------------------------------------|---------------------|
-| Initial wallet / token sketch | ~30 min - 4+ hr before you trust your own notes | Often ~2-15 min to first consolidated skill output |
-| Cross-chain hints + bridge touches | Often 1-6+ hr chaining explorers and registries | Bundled in one pipeline pass (plus optional Wormhole Scan sampling) in the same run |
-| Re-check after new deployment or mint | Large portions of work re-done by hand | Re-run scan; compare reports (e.g. scan diff) for what changed |
-| Publishing bar | High: social and legal stakes | Diverg emphasizes authorized use; automation output is triage, not automatic accusation |
+What the first meaningful pass often looks like: on the order of about two to twenty minutes wall-clock for a first machine pass on a target (bundle scan, domain scan, blockchain skill), depending on keys, rate limits, and scope.
+
+What you get: JSON, dashboard findings, skills output, repeatable runs.
+
+Cross-chain and bridges: bundled signals such as program allowlists, optional Wormhole Scan sampling for bridge-adjacent wallets, EVM bridge-contract style checks in structured reports where applicable.
+
+Repeatability: run the same command or API again; compare scans over time (for example scan diff); history in console workflows.
+
+Parallelism: many targets in parallel, within infra and policy limits.
+
+---
+
+Takeaway in one line: manual work wins on narrative finish and discretion. Automation wins on how fast you get to a first map and how many leads you can screen before you commit human weeks.
+
+---
+
+## Why speed on the first mile still matters
+
+Automation does not replace legal judgment, compliance sign-off, or the decision to go public.
+
+It compresses the messy opening phase.
+
+Time to first map. Sketching who funded whom, whether clusters or bridges show up, and whether a token maps elsewhere can cost an analyst a large fraction of a day in explorer hopping. The same shape of signal can often surface in minutes as structured output (holders, clusters, bridge-adjacent wallets, cross-chain hints) before humans sharpen it.
+
+Opportunity surface. If every case does not start from a blank spreadsheet, you can touch more targets, diff before and after a deploy or mint, and walk away faster when the machine pass is quiet.
+
+Team efficiency. Outputs are easier to diff, export, and compare run to run, which matters more for internal triage than for a viral thread.
+
+The comparison is not "Diverg versus ZachXBT." It is "dossier-grade manual work" versus "platform-grade first look." Plenty of teams will use both.
+
+---
+
+## Illustrative timing (planning only, not head-to-head)
+
+Use these as rough heuristics only.
+
+Initial wallet or token sketch
+
+Manual: on the order of thirty minutes to four-plus hours before you trust your own notes.
+
+Diverg: often about two to fifteen minutes to a first consolidated skill output.
+
+Cross-chain hints plus bridge touches
+
+Manual: often one to six-plus hours chaining explorers and registries.
+
+Diverg: bundled into one pipeline pass in the same run, including optional Wormhole Scan sampling where configured.
+
+Re-check after a new deployment or mint
+
+Manual: large parts of the trace redone by hand.
+
+Diverg: re-run the scan and compare reports (for example scan diff) for what changed.
+
+Publishing bar
+
+Manual: high, because social and legal stakes are real.
+
+Diverg: output is triage under authorized use, not an automatic accusation or a substitute for verification on-chain.
+
+One more caveat: a polished public thread is not the same artifact as a first machine pass. The minutes-to-low-tens-of-minutes band is not comparable to the polish bar of a finished investigation.
 
 ---
 
 ## What Diverg does not automate
 
-- Final legal or reputational judgment  
-- Public thread craft, tone, and community norms  
-- Primary-source ownership of every hop (you still verify on official explorers and bridge docs)  
-- Replacement for investigator discretion where automation is wrong or incomplete  
+Final legal or reputational judgment.
+
+Public thread craft, tone, and community norms.
+
+Your obligation to verify primary sources on official explorers and bridge documentation.
+
+Replacing investigator discretion when the machine is wrong or incomplete.
 
 ---
 
 ## Closing
 
-ZachXBT-style work remains the benchmark many people picture when they say "on-chain investigation," because depth and patience are obvious in the output.
+ZachXBT-style depth remains what many people picture when they say on-chain investigation, and that is for good reason.
 
-Diverg-style automation is for teams that need faster first answers, more cases screened per week, and repeatable baselines, so humans spend their time on the cases that actually deserve a manual deep dive.
+Diverg-style automation is for teams that need faster first answers, more cases screened per week, and baselines they can reproduce, so people spend their depth budget where it counts.
 
-Illustrative stats in this article are not a claim that any automated workflow beats any specific manual investigator on quality; only that time-to-first-structured-signal and parallel throughput are the lever automation is designed to move.
+Illustrative stats here are not claiming automation beats a named investigator on quality of final narrative. They only describe the lever platforms push: time to first structured signal and parallel throughput.
 
-Authorized testing and professional use only. Verify everything that matters on-chain.
+Authorized testing and professional use only. Verify what matters on-chain.
+
+---
+
+## Appendix: single post for social (copy-paste)
+
+Manual thread-grade work (explorers, tabs, serious clock) optimizes for story and proof.
+
+Diverg optimizes for first structured signal: minutes for a rough map versus hours by hand, re-run and diff instead of replaying the whole trace, many targets in parallel instead of one narrative at a time.
+
+Different job: automation for triage speed and throughput, humans for final call and thread.
+
+@DivergSec
+
+---
+
+## Appendix: thread for social (copy-paste)
+
+1/ Everyone knows the manual masterclass: one investigator, infinite tabs, a thread that took serious clock. That is not what we are trying to replace.
+
+2/ Diverg is the first mile: holders, funders, coordination heuristics, bridge and cross-chain flags. Machine output in about minutes to low tens of minutes versus the hours it takes to build the same map by hand before you know if the case matters.
+
+3/ That gap is throughput: more leads screened, faster no, faster escalate to a human deep dive. Plus scan diff for what changed without replaying the whole manual movie.
+
+4/ We are not claiming automation beats a finished public investigation on narrative quality. We are claiming it beats starting from zero on speed to a first structured picture. Authorized use. Verify on-chain.
 
 ---
 
 ## Related in this repo
 
-- [Scan diffing](scan-diffing.md): what changed between two runs for the same target  
-- Social copy variants: [`docs/TWEET_AUTOMATION_VS_MANUAL.md`](../TWEET_AUTOMATION_VS_MANUAL.md)  
-- Cross-chain / bundle context: [`docs/TWEET_CROSS_CHAIN_INVESTIGATION.md`](../TWEET_CROSS_CHAIN_INVESTIGATION.md) (high-level product note)
+Scan diffing: [docs/posts/scan-diffing.md](scan-diffing.md)
+
+More tweet variants: [docs/TWEET_AUTOMATION_VS_MANUAL.md](../TWEET_AUTOMATION_VS_MANUAL.md)
+
+Cross-chain / bundle note: [docs/TWEET_CROSS_CHAIN_INVESTIGATION.md](../TWEET_CROSS_CHAIN_INVESTIGATION.md)
