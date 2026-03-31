@@ -384,6 +384,7 @@ class TestMixerIntel(unittest.TestCase):
         markers = tuple(ov.get("mixer_extra_label_markers") or ())
         self.assertIn("splitnow", markers)
         self.assertTrue(any("tornado" in m for m in markers))
+        self.assertIsInstance(ov.get("wallet_mixer_allowlist"), set)
 
     def test_evm_detect_mixer_hits(self):
         # Import from skills module path
@@ -406,6 +407,26 @@ class TestMixerIntel(unittest.TestCase):
         summary = _summarize_service_hits(hits)
         self.assertTrue(summary)
         self.assertGreaterEqual(summary[0]["count"], 2)
+
+    def test_evm_detect_mixer_wallet_hits(self):
+        sys.path.insert(0, str(_ROOT))
+        import skills.blockchain_investigation as bi
+
+        backup = dict(bi.KNOWN_MIXER_EVM_WALLETS)
+        try:
+            bi.KNOWN_MIXER_EVM_WALLETS["0x000000000000000000000000000000000000beef"] = "SplitNOW Wallet"
+            txs = [
+                {"hash": "0x111", "to": "0x000000000000000000000000000000000000beef", "timeStamp": "1710000010", "value": "1"},
+                {"hash": "0x222", "from": "0x000000000000000000000000000000000000beef", "timeStamp": "1710000011", "value": "2"},
+            ]
+            hits = bi._evm_detect_mixer_hits(txs, "ethereum")
+            self.assertEqual(len(hits), 2)
+            self.assertEqual(hits[0]["service"], "SplitNOW Wallet")
+            dirs = sorted([h["direction"] for h in hits])
+            self.assertEqual(dirs, ["incoming", "outgoing"])
+        finally:
+            bi.KNOWN_MIXER_EVM_WALLETS.clear()
+            bi.KNOWN_MIXER_EVM_WALLETS.update(backup)
 
 
 if __name__ == "__main__":

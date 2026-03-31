@@ -1,10 +1,22 @@
 {
+  "version": 1,
+  "last_updated": "2026-03-31",
   "label_markers": [
     "splitnow",
     "split now",
     "tornado cash",
     "tornado",
+    "railgun",
+    "sinbad",
+    "blender",
+    "chipmixer",
+    "wasabi",
+    "samourai",
+    "whirlpool",
     "coinjoin",
+    "privacy pool",
+    "privacy protocol",
+    "no kyc swap",
     "mixing service"
   ],
   "evm_contracts": {
@@ -16,5 +28,14 @@
     "0xd96f2b1c14db8458374d9aca76e26c3d18364307": "Tornado Cash DAI 100",
     "0x07687e702b410fa43f4cb4af7fa097918ffd2730": "Tornado Cash USDC 100",
     "0x178169b423a011fff22b9e3f3abea13414ddd0f1": "Tornado Cash WBTC 0.1"
+  },
+  "evm_wallets": {
+    "SplitNOW": [],
+    "Tornado Cash": [],
+    "Railgun": [],
+    "Sinbad": []
+  },
+  "solana_wallets": {
+    "SplitNOW": []
   }
 }

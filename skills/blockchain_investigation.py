@@ -97,12 +97,13 @@ EVM_BRIDGE_CONTRACTS: dict[str, str] = {
 _MIXER_INTEL_FILE = Path(__file__).resolve().parent.parent / "investigation" / "mixer_service_intel.json"
 
 
-def _load_mixer_intel() -> tuple[dict[str, str], tuple[str, ...]]:
+def _load_mixer_intel() -> tuple[dict[str, str], dict[str, str], tuple[str, ...]]:
     """
     Load known mixer/privacy service intel.
-    Returns (evm_contract_map, label_markers).
+    Returns (evm_contract_map, evm_wallet_map, label_markers).
     """
     contracts: dict[str, str] = {}
+    wallets: dict[str, str] = {}
     markers: list[str] = []
     try:
         if _MIXER_INTEL_FILE.is_file():
@@ -114,6 +115,19 @@ def _load_mixer_intel() -> tuple[dict[str, str], tuple[str, ...]]:
                         kk = str(k).strip().lower()
                         if kk.startswith("0x") and len(kk) == 42:
                             contracts[kk] = str(v or "Mixer/Privacy Service")[:120]
+                w = raw.get("evm_wallets")
+                if isinstance(w, dict):
+                    for svc, addrs in w.items():
+                        if isinstance(addrs, list):
+                            for a in addrs:
+                                aa = str(a).strip().lower()
+                                if aa.startswith("0x") and len(aa) == 42:
+                                    wallets[aa] = str(svc or "Mixer/Privacy Wallet")[:120]
+                elif isinstance(w, list):
+                    for a in w:
+                        aa = str(a).strip().lower()
+                        if aa.startswith("0x") and len(aa) == 42:
+                            wallets[aa] = "Mixer/Privacy Wallet"
                 m = raw.get("label_markers")
                 if isinstance(m, list):
                     markers = [str(x).strip().lower() for x in m if x is not None and str(x).strip()]
@@ -133,10 +147,18 @@ def _load_mixer_intel() -> tuple[dict[str, str], tuple[str, ...]]:
             if t.startswith("0x") and len(t) == 42:
                 contracts.setdefault(t, "Mixer/Privacy Service (env)")
 
-    return contracts, tuple(dict.fromkeys(markers))
+    # Optional explicit mixer wallet address list via env (comma-separated EVM addresses)
+    extra_wallet_env = (os.environ.get("DIVERG_KNOWN_MIXER_EVM_WALLETS") or "").strip()
+    if extra_wallet_env:
+        for a in extra_wallet_env.split(","):
+            t = a.strip().lower()
+            if t.startswith("0x") and len(t) == 42:
+                wallets.setdefault(t, "Mixer/Privacy Wallet (env)")
+
+    return contracts, wallets, tuple(dict.fromkeys(markers))
 
 
-KNOWN_MIXER_EVM_CONTRACTS, KNOWN_MIXER_LABEL_MARKERS = _load_mixer_intel()
+KNOWN_MIXER_EVM_CONTRACTS, KNOWN_MIXER_EVM_WALLETS, KNOWN_MIXER_LABEL_MARKERS = _load_mixer_intel()
 
 
 def _normalize_evm_chain_slug(chain: str) -> str:
@@ -238,6 +260,21 @@ def _evm_detect_mixer_hits(txlist: list[dict[str, Any]], chain_slug: str) -> lis
                         "explorer_url": f"{host}/tx/{tx_hash}",
                     }
                 )
+        elif to_addr in KNOWN_MIXER_EVM_WALLETS:
+            key = (tx_hash, to_addr, "outgoing")
+            if key not in seen:
+                seen.add(key)
+                hits.append(
+                    {
+                        "tx_hash": tx_hash,
+                        "counterparty": to_addr,
+                        "service": KNOWN_MIXER_EVM_WALLETS[to_addr],
+                        "direction": "outgoing",
+                        "timestamp": tx.get("timeStamp", ""),
+                        "value_eth": tx.get("value", "0"),
+                        "explorer_url": f"{host}/tx/{tx_hash}",
+                    }
+                )
         if from_addr in KNOWN_MIXER_EVM_CONTRACTS:
             key = (tx_hash, from_addr, "incoming")
             if key not in seen:
@@ -247,6 +284,21 @@ def _evm_detect_mixer_hits(txlist: list[dict[str, Any]], chain_slug: str) -> lis
                         "tx_hash": tx_hash,
                         "counterparty": from_addr,
                         "service": KNOWN_MIXER_EVM_CONTRACTS[from_addr],
+                        "direction": "incoming",
+                        "timestamp": tx.get("timeStamp", ""),
+                        "value_eth": tx.get("value", "0"),
+                        "explorer_url": f"{host}/tx/{tx_hash}",
+                    }
+                )
+        elif from_addr in KNOWN_MIXER_EVM_WALLETS:
+            key = (tx_hash, from_addr, "incoming")
+            if key not in seen:
+                seen.add(key)
+                hits.append(
+                    {
+                        "tx_hash": tx_hash,
+                        "counterparty": from_addr,
+                        "service": KNOWN_MIXER_EVM_WALLETS[from_addr],
                         "direction": "incoming",
                         "timestamp": tx.get("timeStamp", ""),
                         "value_eth": tx.get("value", "0"),
@@ -960,10 +1012,17 @@ def _build_flow_graph(
         label_lower = (label or "").lower()
         if addr == deployer:
             ntype = "primary"
-        elif addr in counterparty_addrs or addr.lower() in KNOWN_CEX_MIXER_ADDRESSES or addr.lower() in KNOWN_MIXER_EVM_CONTRACTS:
+        elif (
+            addr in counterparty_addrs
+            or addr.lower() in KNOWN_CEX_MIXER_ADDRESSES
+            or addr.lower() in KNOWN_MIXER_EVM_CONTRACTS
+            or addr.lower() in KNOWN_MIXER_EVM_WALLETS
+        ):
             if "mixer" in label_lower or "jambler" in label_lower or "tumbler" in label_lower:
                 ntype = "mixer"
             elif addr.lower() in KNOWN_MIXER_EVM_CONTRACTS:
+                ntype = "mixer"
+            elif addr.lower() in KNOWN_MIXER_EVM_WALLETS:
                 ntype = "mixer"
             elif any(x in label_lower for x in ("exchange", "cex", "binance", "coinbase", "kraken", "bybit", "okx", "kucoin")):
                 ntype = "cex"
@@ -973,6 +1032,8 @@ def _build_flow_graph(
                 label = "CEX/mixer (known)"
             if not label and addr.lower() in KNOWN_MIXER_EVM_CONTRACTS:
                 label = KNOWN_MIXER_EVM_CONTRACTS.get(addr.lower(), "Mixer/Privacy Service")
+            if not label and addr.lower() in KNOWN_MIXER_EVM_WALLETS:
+                label = KNOWN_MIXER_EVM_WALLETS.get(addr.lower(), "Mixer/Privacy Wallet")
         else:
             ntype = "wallet"
         nodes_map[addr] = {"id": addr, "label": label or addr[:8] + "..." + addr[-4:] if len(addr) > 16 else addr, "type": ntype}

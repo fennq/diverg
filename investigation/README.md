@@ -122,6 +122,7 @@ The core logic lives in `investigation/blockchain_fetch.py`; `run_synq_research.
 - `blockchain_fetch.py` — Generic fetch: `run_blockchain_research(wallet_addresses, token_mint=..., output_path=...)`. Used by `run_synq_research.py` and `run_blockchain_research.py`.
 - `solana_bundle.py` — Holder/cluster bundle snapshot logic (shared with **`POST /api/investigation/solana-bundle`** and the Chrome extension).
 - `solana_bundle_signals.py` — Coordination heuristics; **CEX/mixer tiers** (`classify_cex_tier` / `classify_mixer_tier`: `none` | `weak` | `strong`). Structural “exchange” labels skip **DEX-shaped** fields (`decentralized`, `dex`, `amm`, liquidity-pool wording) so “Decentralized Exchange” is not scored as CEX. Parallel CEX and privacy/mixer clusters default to **high confidence** only when wallets share a tagged funder **and** first-fund time bucket or matching lamports; **loose** variants appear in `parallel_cex_funding_loose` / `privacy_mixer_funding_loose` for review without full score weight.
+- `mixer_service_intel.json` — Maintained mixer/privacy intel pack (label markers, known EVM mixer contracts, optional EVM/Solana mixer wallet account lists by service). Used by bundle and blockchain investigation paths.
 
 **Env (bundle / CEX-mixer):**
 
@@ -134,6 +135,9 @@ The core logic lives in `investigation/blockchain_fetch.py`; `run_synq_research.
 | `SOLANA_BUNDLE_FUNDING_MAX_SPREAD_SEC` | Max `abs(ts_a - ts_b)` for funding alignment when both timestamps exist (`0` = off). Tightens bucket and lamports pairs. |
 | `SOLANA_BUNDLE_ENHANCED_TYPE_OVERLAP_MIN` | Min Jaccard on Helius enhanced-tx **type** strings (mint-touch sample) to add `enhanced_transaction_type_overlap` score (default `0.35`). |
 | `SOLANA_BUNDLE_INTEL_OVERRIDES_PATH` | JSON file: wallet CEX/mixer allow & deny lists + extra label markers. See [`bundle_intel_overrides.example.json`](bundle_intel_overrides.example.json). |
+| `DIVERG_KNOWN_MIXER_EVM` | Extra known EVM mixer contract addresses (comma-separated). |
+| `DIVERG_KNOWN_MIXER_EVM_WALLETS` | Extra known EVM mixer wallet addresses (comma-separated). |
+| `DIVERG_MIXER_LABEL_MARKERS` | Extra mixer/privacy label markers (comma-separated). |
 
 API / extension `bundle_signals` also includes **`funder_cex_intel`** / **`funder_mixer_intel`** (`tier` + `reasons` per funder), **`enhanced_tx_type_overlap_pairs`**, and **`mint_co_movement.enhanced.transaction_types_by_wallet`**.
 
