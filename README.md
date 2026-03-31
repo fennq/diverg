@@ -90,7 +90,7 @@ python scripts/scan_diff.py --target example.com --source db   # console DB only
 python scripts/scan_diff.py --old reports/a.json --new reports/b.json
 ```
 
-Set `DIVERG_DB_PATH` if your dashboard DB is not `data/dashboard.db`. Write-up and diagram: [`docs/posts/scan-diffing.md`](docs/posts/scan-diffing.md). Article (automation vs manual OSINT, illustrative timing): [`docs/posts/automation-vs-manual-investigation.md`](docs/posts/automation-vs-manual-investigation.md).
+Set `DIVERG_DB_PATH` if your dashboard DB is not `data/dashboard.db`. Write-up and diagram: [`docs/posts/scan-diffing.md`](docs/posts/scan-diffing.md). Article (automation vs manual OSINT, illustrative timing): [`docs/posts/automation-vs-manual-investigation.md`](docs/posts/automation-vs-manual-investigation.md) · plain copy: [`docs/posts/automation-vs-manual-investigation-plain.txt`](docs/posts/automation-vs-manual-investigation-plain.txt).
 
 ### HTTP API & console
 
