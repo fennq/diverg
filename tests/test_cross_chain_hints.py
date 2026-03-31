@@ -351,16 +351,24 @@ class TestMixerIntel(unittest.TestCase):
     def test_evm_detect_mixer_hits(self):
         # Import from skills module path
         sys.path.insert(0, str(_ROOT))
-        from skills.blockchain_investigation import _evm_detect_mixer_hits
+        from skills.blockchain_investigation import _evm_detect_mixer_hits, _summarize_service_hits
 
         txs = [
             {"hash": "0xabc", "to": "0xd90e2f925da726b50c4ed8d0fb90ad053324f31b", "timeStamp": "1710000000", "value": "1"},
+            {"hash": "0xghi", "from": "0xd90e2f925da726b50c4ed8d0fb90ad053324f31b", "timeStamp": "1710000002", "value": "2"},
             {"hash": "0xdef", "to": "0x000000000000000000000000000000000000dead", "timeStamp": "1710000001", "value": "0"},
         ]
         hits = _evm_detect_mixer_hits(txs, "ethereum")
-        self.assertEqual(len(hits), 1)
+        self.assertEqual(len(hits), 2)
         self.assertEqual(hits[0]["tx_hash"], "0xabc")
         self.assertIn("Tornado", hits[0]["service"])
+        self.assertIn(hits[0]["direction"], ("incoming", "outgoing"))
+        self.assertEqual(hits[1]["tx_hash"], "0xghi")
+        self.assertEqual(hits[1]["direction"], "incoming")
+
+        summary = _summarize_service_hits(hits)
+        self.assertTrue(summary)
+        self.assertGreaterEqual(summary[0]["count"], 2)
 
 
 if __name__ == "__main__":

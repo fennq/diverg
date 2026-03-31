@@ -215,20 +215,54 @@ def _evm_detect_mixer_hits(txlist: list[dict[str, Any]], chain_slug: str) -> lis
     """Detect interactions with known mixer/privacy contracts in EVM tx list."""
     host = _explorer_host_for_chain(chain_slug)
     hits: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
     for tx in txlist:
+        tx_hash = str(tx.get("hash") or "").strip()
+        if not tx_hash:
+            continue
         to_addr = str(tx.get("to") or "").strip().lower()
+        from_addr = str(tx.get("from") or "").strip().lower()
+
         if to_addr in KNOWN_MIXER_EVM_CONTRACTS:
-            hits.append(
-                {
-                    "tx_hash": tx.get("hash", ""),
-                    "counterparty": to_addr,
-                    "service": KNOWN_MIXER_EVM_CONTRACTS[to_addr],
-                    "timestamp": tx.get("timeStamp", ""),
-                    "value_eth": tx.get("value", "0"),
-                    "explorer_url": f"{host}/tx/{tx.get('hash', '')}",
-                }
-            )
+            key = (tx_hash, to_addr, "outgoing")
+            if key not in seen:
+                seen.add(key)
+                hits.append(
+                    {
+                        "tx_hash": tx_hash,
+                        "counterparty": to_addr,
+                        "service": KNOWN_MIXER_EVM_CONTRACTS[to_addr],
+                        "direction": "outgoing",
+                        "timestamp": tx.get("timeStamp", ""),
+                        "value_eth": tx.get("value", "0"),
+                        "explorer_url": f"{host}/tx/{tx_hash}",
+                    }
+                )
+        if from_addr in KNOWN_MIXER_EVM_CONTRACTS:
+            key = (tx_hash, from_addr, "incoming")
+            if key not in seen:
+                seen.add(key)
+                hits.append(
+                    {
+                        "tx_hash": tx_hash,
+                        "counterparty": from_addr,
+                        "service": KNOWN_MIXER_EVM_CONTRACTS[from_addr],
+                        "direction": "incoming",
+                        "timestamp": tx.get("timeStamp", ""),
+                        "value_eth": tx.get("value", "0"),
+                        "explorer_url": f"{host}/tx/{tx_hash}",
+                    }
+                )
     return hits
+
+
+def _summarize_service_hits(hits: list[dict[str, Any]], key: str = "service") -> list[dict[str, Any]]:
+    counts: dict[str, int] = {}
+    for h in hits:
+        svc = str(h.get(key) or "").strip()
+        if svc:
+            counts[svc] = counts.get(svc, 0) + 1
+    return [{"name": k, "count": v} for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
 
 
 # Platform identifiers for launchpad / token-creation sites
@@ -926,8 +960,10 @@ def _build_flow_graph(
         label_lower = (label or "").lower()
         if addr == deployer:
             ntype = "primary"
-        elif addr in counterparty_addrs or addr.lower() in KNOWN_CEX_MIXER_ADDRESSES:
+        elif addr in counterparty_addrs or addr.lower() in KNOWN_CEX_MIXER_ADDRESSES or addr.lower() in KNOWN_MIXER_EVM_CONTRACTS:
             if "mixer" in label_lower or "jambler" in label_lower or "tumbler" in label_lower:
+                ntype = "mixer"
+            elif addr.lower() in KNOWN_MIXER_EVM_CONTRACTS:
                 ntype = "mixer"
             elif any(x in label_lower for x in ("exchange", "cex", "binance", "coinbase", "kraken", "bybit", "okx", "kucoin")):
                 ntype = "cex"
@@ -935,6 +971,8 @@ def _build_flow_graph(
                 ntype = "counterparty"
             if not label and addr.lower() in KNOWN_CEX_MIXER_ADDRESSES:
                 label = "CEX/mixer (known)"
+            if not label and addr.lower() in KNOWN_MIXER_EVM_CONTRACTS:
+                label = KNOWN_MIXER_EVM_CONTRACTS.get(addr.lower(), "Mixer/Privacy Service")
         else:
             ntype = "wallet"
         nodes_map[addr] = {"id": addr, "label": label or addr[:8] + "..." + addr[-4:] if len(addr) > 16 else addr, "type": ntype}
@@ -1314,7 +1352,9 @@ def run(
             # Mixer/privacy service detection on EVM side (e.g. Tornado-style contracts)
             evm_mixer_hits = _evm_detect_mixer_hits(_bridge_raw_txs, ch_slug)
             if evm_mixer_hits:
-                _svc = sorted({h["service"] for h in evm_mixer_hits})
+                _svc = _summarize_service_hits(evm_mixer_hits)
+                _incoming = sum(1 for h in evm_mixer_hits if h.get("direction") == "incoming")
+                _outgoing = sum(1 for h in evm_mixer_hits if h.get("direction") == "outgoing")
                 report.findings.append(Finding(
                     title="EVM Mixer/Privacy Service Interaction Detected",
                     severity="Medium",
@@ -1322,8 +1362,9 @@ def run(
                     category="Blockchain / Mixer",
                     evidence=(
                         f"Deployer/wallet {deployer_address[:12]}… interacted with "
-                        f"{len(evm_mixer_hits)} known mixer/privacy transaction(s) on {ch_slug}: "
-                        + ", ".join(_svc[:4])
+                        f"{len(evm_mixer_hits)} known mixer/privacy transaction(s) on {ch_slug} "
+                        f"({_outgoing} outgoing, {_incoming} incoming): "
+                        + ", ".join(x["name"] for x in _svc[:4])
                     ),
                     impact=(
                         "Funds may have passed through a privacy/mixing service. "
@@ -1719,6 +1760,7 @@ def run(
             report.crime_report["evm_bridge"] = report.evm_bridge_hits
         if report.evm_mixer_hits:
             report.crime_report["evm_mixer"] = report.evm_mixer_hits
+            report.crime_report["evm_mixer_summary"] = _summarize_service_hits(report.evm_mixer_hits)
 
     return json.dumps(asdict(report), indent=2)
 
