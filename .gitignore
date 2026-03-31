@@ -61,6 +61,7 @@ investigation/*
 !investigation/README.md
 !investigation/bundle_intel_overrides.example.json
 !investigation/bridge_programs_solana.json
+!investigation/mixer_service_intel.json
 
 # Local-only drafts (do not commit)
 twitter/
