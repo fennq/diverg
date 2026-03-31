@@ -1402,6 +1402,58 @@ def compute_coordination_bundle(
         meta_by_wallet=meta_by_wallet,
         root_map=root_map,
     )
+
+    # Funder/root path parity for mixer signals (same spirit as bridge-path signals)
+    _eligible_wallets = set(_bridge_eligible) if _bridge_eligible else set(lookup_wallets)
+    _mixer_path_hits: list[dict[str, Any]] = []
+    _wallets_with_mixer_path: set[str] = set()
+    _mixer_path_funders: set[str] = set()
+    for _w in sorted(_eligible_wallets):
+        _m = meta_by_wallet.get(_w) if isinstance(meta_by_wallet, dict) else None
+        if not isinstance(_m, dict):
+            continue
+        _direct = _m.get("funder")
+        _root = root_map.get(_w) if isinstance(root_map, dict) else None
+        _cands: list[tuple[str, str]] = []
+        if isinstance(_direct, str) and _direct:
+            _cands.append(("direct", _direct))
+        if isinstance(_root, str) and _root and _root != _direct:
+            _cands.append(("root", _root))
+
+        _chosen: Optional[tuple[str, str, str, list[str]]] = None
+        for _via, _addr in _cands:
+            _tier = str(funder_mixer_tier.get(_addr) or "none")
+            if _tier == "none":
+                continue
+            _reasons = list((funder_mixer_intel.get(_addr) or {}).get("reasons") or [])
+            if _chosen is None:
+                _chosen = (_via, _addr, _tier, _reasons)
+            elif _chosen[2] != "strong" and _tier == "strong":
+                _chosen = (_via, _addr, _tier, _reasons)
+        if _chosen:
+            _via, _addr, _tier, _reasons = _chosen
+            _wallets_with_mixer_path.add(_w)
+            _mixer_path_funders.add(_addr)
+            _mixer_path_hits.append(
+                {
+                    "wallet": _w,
+                    "via": _via,
+                    "funder_address": _addr,
+                    "tier": _tier,
+                    "reasons": _reasons[:4],
+                }
+            )
+
+    funding_cluster_bridge_mixer["wallets_with_mixer_touching_funder"] = len(_wallets_with_mixer_path)
+    funding_cluster_bridge_mixer["mixer_service_funder_count"] = len(_mixer_path_funders)
+    funding_cluster_bridge_mixer["mixer_path_hits"] = _mixer_path_hits[:30]
+    funding_cluster_bridge_mixer["any_strong_mixer_path"] = any(h.get("tier") == "strong" for h in _mixer_path_hits)
+    if len(_wallets_with_mixer_path) >= 2:
+        funding_cluster_bridge_mixer["risk_lines"] = (funding_cluster_bridge_mixer.get("risk_lines") or []) + [
+            f"{len(_wallets_with_mixer_path)} focus-path wallet(s) map to funder/root addresses with mixer/privacy tags."
+        ]
+        if funding_cluster_bridge_mixer.get("bridge_mixer_confidence_tier") == "low":
+            funding_cluster_bridge_mixer["bridge_mixer_confidence_tier"] = "medium"
     if funding_cluster_bridge_mixer.get("shared_bridge_programs_multi_wallet"):
         score += min(8.0, 3.0 + 2.0 * len(funding_cluster_bridge_mixer["shared_bridge_programs_multi_wallet"]))
         reasons.append("bridge_program_multi_wallet_sample")
@@ -1412,6 +1464,13 @@ def compute_coordination_bundle(
     if _w_bf >= 2:
         score += min(6.0, 2.0 + 0.5 * _w_bf)
         reasons.append("bridge_program_on_shared_funder_path")
+    _w_mf = int(funding_cluster_bridge_mixer.get("wallets_with_mixer_touching_funder") or 0)
+    if _w_mf >= 2:
+        score += min(7.0, 2.5 + 0.6 * _w_mf)
+        reasons.append("mixer_tag_on_shared_funder_path")
+    elif _w_mf == 1:
+        score += 1.0
+        reasons.append("mixer_tag_on_single_funder_path")
 
     score = round(min(100.0, score), 2)
 
