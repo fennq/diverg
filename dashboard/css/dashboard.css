@@ -1043,6 +1043,13 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.9rem;
 }
+.inv-settings-grid--blockchain {
+  max-width: 980px;
+  grid-template-columns: 1fr;
+}
+.inv-blockchain-card {
+  max-width: 980px;
+}
 #page-investigation .settings-card {
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1110,6 +1117,86 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
 }
 #page-investigation .inv-check {
   color: #9095a6 !important;
+}
+
+.inv-scan-live {
+  border: 1px solid rgba(59, 111, 245, 0.28);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(59, 111, 245, 0.12), rgba(59, 111, 245, 0.03));
+  padding: 0.7rem 0.8rem;
+}
+.inv-scan-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  color: #d7defa;
+  font-weight: 500;
+}
+.inv-scan-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7ea0ff;
+  box-shadow: 0 0 0 0 rgba(126, 160, 255, 0.5);
+  animation: invPulse 1.4s ease-in-out infinite;
+}
+.inv-scan-bar {
+  margin-top: 0.5rem;
+  width: 100%;
+  height: 6px;
+  border-radius: 99px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+.inv-scan-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #4d78ff, #80a0ff);
+  position: relative;
+  transition: width 0.5s ease;
+}
+.inv-scan-bar-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.34) 50%, transparent 100%);
+  animation: invShimmer 1.25s linear infinite;
+}
+.inv-scan-steps {
+  list-style: none;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+.inv-scan-step {
+  font-size: 0.71rem;
+  color: #8f97b2;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.inv-scan-step.active {
+  color: #d8e0ff;
+}
+.inv-scan-step.done {
+  color: #9fc0ff;
+}
+.inv-scan-step-mark {
+  display: inline-flex;
+  width: 0.75rem;
+  justify-content: center;
+}
+@keyframes invPulse {
+  0% { box-shadow: 0 0 0 0 rgba(126, 160, 255, 0.45); opacity: 1; }
+  70% { box-shadow: 0 0 0 6px rgba(126, 160, 255, 0); opacity: 0.7; }
+  100% { box-shadow: 0 0 0 0 rgba(126, 160, 255, 0); opacity: 1; }
+}
+@keyframes invShimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 
 /* Responsive */
