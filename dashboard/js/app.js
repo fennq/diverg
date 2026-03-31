@@ -1025,6 +1025,9 @@ function _invTokenBundleSummaryHtml(d) {
   let scanMeta = '';
   if (p.holder_fetch_source || p.unique_holders_sampled != null) {
     scanMeta = `<p class="inv-muted" style="font-size:0.7rem">Holder data: <strong>${esc(String(p.holder_fetch_source || '—'))}</strong> · ${esc(String(p.unique_holders_sampled ?? '—'))} unique owners in sample · funders fetched for up to ${esc(String(p.max_funded_by_lookups ?? '—'))} wallets</p>`;
+    if (p.holders_scanned_for_funders != null || p.holders_eligible_after_exclusions != null) {
+      scanMeta += `<p class="inv-muted" style="font-size:0.7rem">Coverage: scanned ${esc(String(p.holders_scanned_for_funders ?? '—'))} / ${esc(String(p.holders_eligible_after_exclusions ?? '—'))} eligible holder wallets (${esc(String(p.holders_scan_coverage_pct ?? '—'))}%)${p.scan_all_holders ? ' · full-holder mode' : ''}</p>`;
+    }
   }
   if (d.excluded_liquidity_wallet) {
     const ew = d.excluded_liquidity_wallet;
@@ -1062,6 +1065,8 @@ async function runTokenBundle() {
     if (wallet) body.wallet = wallet;
     const skipX = document.getElementById('tokenBundleSkipX');
     if (skipX && skipX.checked) body.include_x_intel = false;
+    const allHolders = document.getElementById('tokenBundleAllHolders');
+    body.scan_all_holders = !!(allHolders && allHolders.checked);
 
     const r = await post('/api/investigation/solana-bundle', body);
     const html = _invTokenBundleSummaryHtml(r);

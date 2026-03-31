@@ -282,6 +282,7 @@ def run_bundle_snapshot(
     *,
     max_holders: Optional[int] = None,
     max_funded_by_lookups: Optional[int] = None,
+    scan_all_holders: bool = False,
     funded_by_delay_sec: float = 0.05,
     exclude_wallets: Optional[list[str]] = None,
     skip_liquidity_wallet: bool = True,
@@ -294,6 +295,7 @@ def run_bundle_snapshot(
     - seed_wallet: optional wallet to focus cluster and balance stats.
     - max_holders: legacy cap when using largest-accounts fallback only (default 100).
     - max_funded_by_lookups: Helius funded-by + /transfers per distinct wallet (default 100).
+    - scan_all_holders: when True, scan all discovered holder wallets after exclusions.
     - exclude_wallets: optional owner addresses to skip in fund-by scan (e.g. known LP).
     - skip_liquidity_wallet: if True, drop the #1 holder from scans when they hold >= SOLANA_BUNDLE_LP_SKIP_MIN_PCT
       of supply (heuristic for pool/vault wallet).
@@ -311,13 +313,14 @@ def run_bundle_snapshot(
             return {"ok": False, "error": "Invalid wallet address"}
 
     mh = max_holders if max_holders is not None else int(os.environ.get("SOLANA_BUNDLE_MAX_HOLDERS", "100"))
-    mf = (
+    mf_raw = (
         max_funded_by_lookups
         if max_funded_by_lookups is not None
         else int(os.environ.get("SOLANA_BUNDLE_MAX_FUNDED_BY", "120"))
     )
     mh = max(5, min(mh, 200))
-    mf = max(5, min(mf, 150))
+    # default mode is still bounded; explicit per-call values can be larger
+    mf = max(5, min(int(mf_raw), 5000))
     # Helius Wallet API allows max 100 transfers per request (larger values error or fail open).
     tr_limit = max(1, min(int(os.environ.get("SOLANA_BUNDLE_FUNDER_TRANSFERS_LIMIT", "100")), 100))
 
@@ -401,6 +404,9 @@ def run_bundle_snapshot(
             continue
         if w not in lookup_order:
             lookup_order.append(w)
+    holders_eligible_n = len(lookup_order)
+    if scan_all_holders:
+        mf = max(mf, holders_eligible_n)
     lookup_order = lookup_order[:mf]
 
     if not lookup_order:
@@ -437,10 +443,11 @@ def run_bundle_snapshot(
         workers = min(12, max(4, n_w))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futs = {pool.submit(_fetch_intel, w): w for w in lookup_order}
-            for fut in concurrent.futures.as_completed(futs, timeout=480):
+            all_timeout = max(480, n_w * 8)
+            for fut in concurrent.futures.as_completed(futs, timeout=all_timeout):
                 w0 = futs[fut]
                 try:
-                    ww, fb_d, tr_o = fut.result(timeout=120)
+                    ww, fb_d, tr_o = fut.result(timeout=180)
                     funded_by[ww] = fb_d
                     transfers_by[ww] = tr_o
                 except Exception:
@@ -769,6 +776,10 @@ def run_bundle_snapshot(
         "params": {
             "max_holders": mh,
             "max_funded_by_lookups": mf,
+            "scan_all_holders": bool(scan_all_holders),
+            "holders_eligible_after_exclusions": holders_eligible_n,
+            "holders_scanned_for_funders": len(lookup_order),
+            "holders_scan_coverage_pct": round((100.0 * len(lookup_order) / holders_eligible_n), 2) if holders_eligible_n else 0.0,
             "funder_transfers_limit": tr_limit,
             "holder_fetch_source": holder_source,
             "das_max_pages": das_pages,
