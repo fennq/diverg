@@ -293,7 +293,7 @@ class TestCrossChainHints(unittest.TestCase):
         notes_joined = " ".join(out["investigator_notes"]).lower()
         self.assertTrue("mixer" in notes_joined or "privacy" in notes_joined)
 
-    def test_cross_chain_bundle_intel_cex_split_fields(self):
+    def test_cross_chain_bundle_intel_cex_split_fields_basic(self):
         from cross_chain_bundle_intel import build_cross_chain_bundle_intel
 
         fc = {
@@ -322,7 +322,7 @@ class TestCrossChainHints(unittest.TestCase):
         notes = " ".join(out.get("investigator_notes") or []).lower()
         self.assertIn("cex-routed split pattern", notes)
 
-    def test_cross_chain_bundle_intel_cex_split_fields(self):
+    def test_cross_chain_bundle_intel_cex_split_fields_with_hits(self):
         from cross_chain_bundle_intel import build_cross_chain_bundle_intel
 
         fc = {

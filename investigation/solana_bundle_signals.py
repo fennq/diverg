@@ -1790,16 +1790,6 @@ def compute_coordination_bundle(
     elif _cex_split_tier == "low":
         score += 2.0
         reasons.append("cex_split_pattern_low")
-    _cex_split_conf = str(funding_cluster_bridge_mixer.get("cex_split_pattern_confidence") or "none")
-    if _cex_split_conf == "high":
-        score += 8.0
-        reasons.append("cex_split_pattern_high")
-    elif _cex_split_conf == "medium":
-        score += 4.0
-        reasons.append("cex_split_pattern_medium")
-    elif _cex_split_conf == "low":
-        score += 1.0
-        reasons.append("cex_split_pattern_low")
 
     score = round(min(100.0, score), 2)
 
