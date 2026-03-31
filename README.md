@@ -92,6 +92,27 @@ python scripts/scan_diff.py --old reports/a.json --new reports/b.json
 
 Set `DIVERG_DB_PATH` if your dashboard DB is not `data/dashboard.db`. Write-up and diagram: [`docs/posts/scan-diffing.md`](docs/posts/scan-diffing.md). Article (automation vs manual OSINT, illustrative timing): [`docs/posts/automation-vs-manual-investigation.md`](docs/posts/automation-vs-manual-investigation.md) · plain copy: [`docs/posts/automation-vs-manual-investigation-plain.txt`](docs/posts/automation-vs-manual-investigation-plain.txt).
 
+**Bundle benchmark + adjudication (evidence-backed quality loop)**:
+
+```bash
+# 1) Run benchmark pack (publishes TP/FP/FN + precision/recall by tier)
+HELIUS_API_KEY=... python3 scripts/run_bundle_benchmark.py \
+  --cases data/benchmarks/bundle_cases.jsonl \
+  --results-out data/benchmarks/bundle_results.jsonl \
+  --report-out data/benchmarks/bundle_report.json \
+  --queue-out data/benchmarks/adjudication_queue.jsonl
+
+# 2) Adjudicate disputed alerts in a repeatable queue
+python3 scripts/adjudicate_bundle_benchmark.py \
+  --queue data/benchmarks/adjudication_queue.jsonl \
+  --case-id <case_id> \
+  --reviewer <name> \
+  --decision <confirmed_issue|false_positive|false_negative|needs_more_data> \
+  --notes "evidence notes"
+```
+
+Schema and workflow notes: [`data/benchmarks/README.md`](data/benchmarks/README.md).
+
 ### HTTP API & console
 
 ```bash
