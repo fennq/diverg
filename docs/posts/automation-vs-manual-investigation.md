@@ -1,6 +1,6 @@
 # 500 tabs or 5 minutes: the ZachXBT dilemma every security team faces
 
-Easiest copy for editors or email: open **`automation-vs-manual-investigation-plain.txt`** in this folder (no markdown, Select All and paste). The `.md` file below is the same article for the repo.
+Easiest copy: `automation-vs-manual-investigation-plain.txt` (plain text; includes an X post block in Phase 3/4 ship-note format at the top). Tweet-only variants: [TWEET_AUTOMATION_ZACHXBT_PHASE_STYLE.md](../TWEET_AUTOMATION_ZACHXBT_PHASE_STYLE.md).
 
 ---
 
@@ -164,8 +164,12 @@ Different job: automation for triage speed and throughput, humans for final call
 
 Plain copy-paste: [automation-vs-manual-investigation-plain.txt](automation-vs-manual-investigation-plain.txt)
 
+X post (Phase-style, matches Diverg phase announcements): [TWEET_AUTOMATION_ZACHXBT_PHASE_STYLE.md](../TWEET_AUTOMATION_ZACHXBT_PHASE_STYLE.md)
+
 Scan diffing: [scan-diffing.md](scan-diffing.md)
 
 More tweet variants: [TWEET_AUTOMATION_VS_MANUAL.md](../TWEET_AUTOMATION_VS_MANUAL.md)
+
+Phase-style X post (same format as Phase 3/4 ship notes): [TWEET_AUTOMATION_ZACHXBT_PHASE_STYLE.md](../TWEET_AUTOMATION_ZACHXBT_PHASE_STYLE.md)
 
 Cross-chain / bundle note: [TWEET_CROSS_CHAIN_INVESTIGATION.md](../TWEET_CROSS_CHAIN_INVESTIGATION.md)
