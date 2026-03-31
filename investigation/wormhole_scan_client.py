@@ -4,7 +4,7 @@ Fetches cross-chain operations via the public Wormholescan API (no auth required
 Results are cached to disk per-address to avoid redundant network calls.
 
 Env:
-  SOLANA_BUNDLE_WORMHOLE_SCAN_MAX  — max wallet addresses to query (default 6, 0=off).
+  SOLANA_BUNDLE_WORMHOLE_SCAN_MAX  — max wallet addresses to query (default 16, 0=off).
   DIVERG_WORMHOLE_TRANSFERS_CACHE_SEC — disk cache TTL in seconds (default 3600).
 
 Output normalised per operation:
@@ -164,9 +164,14 @@ def _normalise_operation(op: dict[str, Any]) -> Optional[dict[str, Any]]:
     to_chain = _chain_slug(sp.get("toChain") or (content.get("payload") or {}).get("toChain"))
 
     from_addr = str(sp.get("fromAddress") or "").strip()
-    # toAddress may be 0x-padded 32-byte
+    # toAddress may be 0x-padded 32-byte (EVM) or base58 (Solana)
     to_addr_raw = str(sp.get("toAddress") or "").strip()
-    to_addr = _evm_address_clean(to_addr_raw) or to_addr_raw or None
+    to_addr = _evm_address_clean(to_addr_raw) or None
+    if to_addr is None and to_addr_raw:
+        if _ADDR_RE_SOL.match(to_addr_raw):
+            to_addr = to_addr_raw
+        elif to_addr_raw:
+            to_addr = to_addr_raw
 
     src_info = op.get("sourceChain") or {}
     src_tx = (src_info.get("transaction") or {}).get("txHash") or ""
@@ -210,12 +215,14 @@ def _normalise_operation(op: dict[str, Any]) -> Optional[dict[str, Any]]:
 
 def fetch_bridge_operations(
     address: str,
-    limit: int = 20,
+    limit: int = 50,
     timeout: float = 14.0,
     use_cache: bool = True,
+    max_pages: int = 4,
 ) -> list[dict[str, Any]]:
     """Return normalised Wormhole bridge operations involving `address`.
 
+    Paginates up to `max_pages` pages (50 ops each, hard cap 200).
     Checks disk cache first (TTL controlled by DIVERG_WORMHOLE_TRANSFERS_CACHE_SEC).
     Returns empty list on network error or if address has no operations.
     """
@@ -228,27 +235,44 @@ def fetch_bridge_operations(
         if cached is not None:
             return cached
 
-    params = urllib.parse.urlencode({"address": address, "pageSize": min(limit, 50)})
-    url = f"{WORMHOLE_SCAN_BASE}/api/v1/operations?{params}"
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Diverg-cross-chain/1.0", "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            body = r.read()
-        j = json.loads(body)
-    except (urllib.error.URLError, OSError, json.JSONDecodeError):
-        return []
-
-    raw_ops = j if isinstance(j, list) else (j.get("operations") if isinstance(j, dict) else None)
-    if not isinstance(raw_ops, list):
-        return []
-
+    page_size = min(limit, 50)
+    hard_cap = min(limit, max_pages * 50, 200)
     results: list[dict[str, Any]] = []
-    for op in raw_ops:
-        norm = _normalise_operation(op)
-        if norm:
-            results.append(norm)
+    page = 0
+    while len(results) < hard_cap and page < max_pages:
+        params = urllib.parse.urlencode({
+            "address": address,
+            "pageSize": page_size,
+            "page": page,
+        })
+        url = f"{WORMHOLE_SCAN_BASE}/api/v1/operations?{params}"
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "Diverg-cross-chain/1.0",
+                "Accept": "application/json",
+            })
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                body = r.read()
+            j = json.loads(body)
+        except (urllib.error.URLError, OSError, json.JSONDecodeError):
+            break
 
-    if use_cache:
+        raw_ops = j if isinstance(j, list) else (j.get("operations") if isinstance(j, dict) else None)
+        if not isinstance(raw_ops, list) or not raw_ops:
+            break
+
+        for op in raw_ops:
+            norm = _normalise_operation(op)
+            if norm:
+                results.append(norm)
+
+        if len(raw_ops) < page_size:
+            break
+        page += 1
+        if page < max_pages:
+            time.sleep(0.3)
+
+    if use_cache and results:
         _cache_set(address, results)
     return results
 
@@ -263,7 +287,7 @@ def resolve_counterparties(
     Returns {address: [normalised_operations, ...]} for addresses that have activity.
     Respects SOLANA_BUNDLE_WORMHOLE_SCAN_MAX env (default 6); set to 0 to disable.
     """
-    max_wallets = max(0, min(int(os.environ.get("SOLANA_BUNDLE_WORMHOLE_SCAN_MAX", "6")), 20))
+    max_wallets = max(0, min(int(os.environ.get("SOLANA_BUNDLE_WORMHOLE_SCAN_MAX", "16")), 40))
     if max_wallets == 0 or not addresses:
         return {}
 
@@ -295,3 +319,19 @@ def extract_counterparty_evm_addresses(
             if isinstance(da, str) and _ADDR_RE_EVM.match(da):
                 seen[da.lower()] = True
     return sorted(seen.keys())
+
+
+def extract_counterparty_solana_addresses(
+    transfers_by_wallet: dict[str, list[dict[str, Any]]],
+) -> list[str]:
+    """Collect unique Solana destination addresses from Wormhole bridge transfers."""
+    seen: set[str] = set()
+    for ops in transfers_by_wallet.values():
+        for op in ops:
+            da = op.get("dest_address")
+            if isinstance(da, str) and _ADDR_RE_SOL.match(da):
+                seen.add(da)
+            sa = op.get("source_address")
+            if isinstance(sa, str) and _ADDR_RE_SOL.match(sa):
+                seen.add(sa)
+    return sorted(seen)

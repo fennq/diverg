@@ -944,7 +944,57 @@ function _invTokenBundleSummaryHtml(d) {
 
     const disc = ccb.disclaimer ? `<p class="inv-muted" style="font-size:0.65rem;margin-top:0.5rem">${esc(ccb.disclaimer)}</p>` : '';
 
-    coordLine += `<div class="inv-cross-chain-bundle">${divider}<div class="inv-subhead">Cross-chain &amp; bridge signals</div>${escalationBanner}${statGrid}${linksHtml}${funderHitsHtml}${mixerPathHitsHtml}${sharedGroupsHtml}${evmCounterpartiesHtml}${notesHtml}${disc}</div>`;
+    // Mixer program on-chain hits (wallet + funder level)
+    const fcbm = (bs.funding_cluster_bridge_mixer) || {};
+    const mixerProgWalletHits = Array.isArray(fcbm.mixer_program_wallet_hits) ? fcbm.mixer_program_wallet_hits : [];
+    const mixerProgFunderHits = Array.isArray(fcbm.funder_mixer_program_hits) ? fcbm.funder_mixer_program_hits : [];
+    let mixerProgHtml = '';
+    if (mixerProgWalletHits.length || mixerProgFunderHits.length) {
+      let mpItems = '';
+      mixerProgWalletHits.slice(0, 8).forEach((h) => {
+        const w = String(h.wallet || '').slice(0, 12) + '…';
+        const progs = Array.isArray(h.mixer_program_hits) ? h.mixer_program_hits.map((p) => esc(String(p.label || p.program_id || ''))).join(', ') : '';
+        mpItems += `<li class="inv-muted">Wallet <code>${esc(w)}</code> → ${progs}</li>`;
+      });
+      mixerProgFunderHits.slice(0, 8).forEach((h) => {
+        const f = String(h.funder || '').slice(0, 12) + '…';
+        const progs = Array.isArray(h.mixer_program_hits) ? h.mixer_program_hits.map((p) => esc(String(p.label || p.program_id || ''))).join(', ') : '';
+        mpItems += `<li class="inv-muted">Funder <code>${esc(f)}</code> → ${progs}</li>`;
+      });
+      mixerProgHtml = `<details class="inv-details-block" style="margin-top:0.5rem">
+        <summary style="cursor:pointer">On-chain mixer program interactions (${mixerProgWalletHits.length + mixerProgFunderHits.length})</summary>
+        <ul style="margin:0.4rem 0 0 1rem;padding:0">${mpItems}</ul>
+      </details>`;
+    }
+
+    // Wash flow pattern alerts
+    const washFlow = bs.wash_flow_patterns || {};
+    let washHtml = '';
+    const washConf = String(washFlow.confidence || 'none');
+    if (washConf !== 'none' && washFlow.pattern_count > 0) {
+      const washRisk = Array.isArray(washFlow.risk_lines) ? washFlow.risk_lines : [];
+      let washItems = '';
+      (washFlow.circular_flows || []).slice(0, 3).forEach((c) => {
+        washItems += `<li class="inv-muted">Circular: ${(c.cycle || []).map((a) => esc(String(a).slice(0, 8))).join(' → ')}</li>`;
+      });
+      (washFlow.split_merge_flows || []).slice(0, 3).forEach((s) => {
+        washItems += `<li class="inv-muted">Split-merge: ${esc(String(s.source || '').slice(0, 10))} → ${s.converge_count || '?'} intermediaries → ${esc(String(s.destination || '').slice(0, 10))}</li>`;
+      });
+      (washFlow.relay_flows || []).slice(0, 3).forEach((r) => {
+        washItems += `<li class="inv-muted">Relay: ${esc(String(r.program_source || ''))} → <code>${esc(String(r.relay_address || '').slice(0, 12))}…</code> → ${(r.forwarded_to || []).length} chain addr(s)</li>`;
+      });
+      const washBanner = `<div class="inv-wash-alert" style="margin-top:0.5rem;padding:0.5rem 0.75rem;border-left:3px solid var(--err);background:rgba(255,60,60,0.06);border-radius:0.35rem"><strong>Wash flow patterns (${esc(washConf)})</strong>: ${washRisk.map((l) => esc(l)).join(' ')}</div>`;
+      washHtml = washBanner + (washItems ? `<details class="inv-details-block" style="margin-top:0.35rem"><summary style="cursor:pointer">Pattern details (${washFlow.pattern_count})</summary><ul style="margin:0.4rem 0 0 1rem;padding:0">${washItems}</ul></details>` : '');
+    }
+
+    // Scan depth indicator
+    const maxDepth = d.funder_chain_max_depth;
+    let depthHtml = '';
+    if (maxDepth != null && maxDepth > 0) {
+      depthHtml = `<p class="inv-muted" style="font-size:0.7rem;margin-top:0.35rem">Funder chain depth: up to <strong>${esc(String(maxDepth))}</strong> hops traced${p.funder_max_hops ? ` (max ${esc(String(p.funder_max_hops))})` : ''}</p>`;
+    }
+
+    coordLine += `<div class="inv-cross-chain-bundle">${divider}<div class="inv-subhead">Cross-chain &amp; bridge signals</div>${escalationBanner}${statGrid}${depthHtml}${linksHtml}${funderHitsHtml}${mixerPathHitsHtml}${mixerProgHtml}${sharedGroupsHtml}${evmCounterpartiesHtml}${washHtml}${notesHtml}${disc}</div>`;
   }
 
   const topH = (d.top_holders || [])[0];
@@ -997,7 +1047,13 @@ function _invTokenBundleSummaryHtml(d) {
         ? esc(id.category)
         : (id.type ? esc(id.type) : '—');
       let fund = '—';
-      if (h.funder) {
+      const fchain = Array.isArray(h.funder_chain) ? h.funder_chain : [];
+      if (fchain.length >= 2) {
+        fund = fchain.map((a, i) => {
+          const s = String(a).slice(0, 10) + (String(a).length > 10 ? '…' : '');
+          return i < fchain.length - 1 ? s + ' → ' : s;
+        }).join('');
+      } else if (h.funder) {
         const f1 = String(h.funder).slice(0, 12) + (String(h.funder).length > 12 ? '…' : '');
         fund = f1;
         if (h.funder_root) {
@@ -1005,6 +1061,7 @@ function _invTokenBundleSummaryHtml(d) {
           fund = `${f1} → ${f2}`;
         }
       }
+      const depthBadge = h.funder_chain_depth > 2 ? ` <span class="inv-depth-badge" title="${h.funder_chain_depth}-hop trace">${h.funder_chain_depth}h</span>` : '';
       const cl = h.in_focus_cluster ? '<span class="inv-cluster-dot" title="In same-funder cluster">●</span>' : '';
       const xi = h.x_intel;
       let xcell = '—';
@@ -1017,7 +1074,7 @@ function _invTokenBundleSummaryHtml(d) {
           : esc(String(xi.tweet_count)) + ' posts';
         xcell = au ? `${au} · ${inner}` : inner;
       }
-      return `<tr><td class="mono"><span title="${esc(w)}">${esc(short)}</span></td><td>${esc(String(h.pct_supply != null ? h.pct_supply : '—'))}%</td><td>${lab}</td><td>${cat}</td><td>${cl}</td><td class="mono inv-funder-cell" title="Direct funder → 2-hop root">${esc(fund)}</td><td class="inv-x-cell" title="X search: only shown when posts mention this address">${xcell}</td></tr>`;
+      return `<tr><td class="mono"><span title="${esc(w)}">${esc(short)}</span></td><td>${esc(String(h.pct_supply != null ? h.pct_supply : '—'))}%</td><td>${lab}</td><td>${cat}</td><td>${cl}</td><td class="mono inv-funder-cell" title="Funder chain (N-hop trace)">${esc(fund)}${depthBadge}</td><td class="inv-x-cell" title="X search: only shown when posts mention this address">${xcell}</td></tr>`;
     }).join('');
     holders = `<div class="inv-holders"><div class="inv-subhead" style="margin-top:0.75rem">Top holders</div><table class="inv-holders-table"><thead><tr><th>Wallet</th><th>%</th><th>Label</th><th>Category</th><th title="Same-funder cluster">Cl.</th><th>Funder / root</th><th>X (if mentioned)</th></tr></thead><tbody>${rows}</tbody></table><p class="inv-muted" style="font-size:0.65rem;margin-top:0.35rem">Hover wallet for full address. Helius labels; X column only when server search finds posts mentioning the address (set X_API_BEARER_TOKEN or NITTER_BASE_URL).</p></div>`;
   }

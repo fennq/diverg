@@ -50,7 +50,7 @@ MAX_FUNDER_IDENTITY = int(os.environ.get("SOLANA_BUNDLE_MAX_FUNDER_IDENTITY", "5
 MAX_FUNDER_ROOT_IDENTITY = int(os.environ.get("SOLANA_BUNDLE_FUNDER_ROOT_IDENTITY_MAX", "24"))
 # Enhanced tx samples for *funder/root* addresses: detect bridge programs on funding path (0 = off).
 SOLANA_BUNDLE_FUNDER_BRIDGE_ENHANCED_MAX = max(
-    0, min(int(os.environ.get("SOLANA_BUNDLE_FUNDER_BRIDGE_ENHANCED_MAX", "6")), 32)
+    0, min(int(os.environ.get("SOLANA_BUNDLE_FUNDER_BRIDGE_ENHANCED_MAX", "24")), 64)
 )
 # Helius enhanced txs per wallet when sampling mint co-movement / program overlap
 ENHANCED_TX_LIMIT = int(os.environ.get("SOLANA_BUNDLE_ENHANCED_TX_LIMIT", "55"))
@@ -1065,6 +1065,166 @@ def _outbound_receivers_by_wallet(
     return out
 
 
+def _native_transfers_from_enhanced(txs: list[dict]) -> list[dict[str, Any]]:
+    """Extract SOL flow edges {from, to, lamports, signature} from enhanced tx nativeTransfers."""
+    edges: list[dict[str, Any]] = []
+    for tx in txs:
+        if not isinstance(tx, dict):
+            continue
+        sig = tx.get("signature") or ""
+        nts = tx.get("nativeTransfers")
+        if not isinstance(nts, list):
+            continue
+        for nt in nts:
+            if not isinstance(nt, dict):
+                continue
+            frm = nt.get("fromUserAccount")
+            to = nt.get("toUserAccount")
+            lam = _safe_int(nt.get("amount"))
+            if (
+                isinstance(frm, str)
+                and isinstance(to, str)
+                and _ADDR_RE.match(frm)
+                and _ADDR_RE.match(to)
+                and lam is not None
+                and lam > 0
+                and frm != to
+            ):
+                edges.append({"from": frm, "to": to, "lamports": lam, "signature": sig[:90]})
+    return edges
+
+
+def detect_wash_flow_patterns(
+    funder_native_flows: dict[str, list[dict[str, Any]]],
+    funder_chains: dict[str, list[str]],
+    bridge_programs: Optional[dict[str, str]] = None,
+    mixer_programs: Optional[dict[str, str]] = None,
+) -> dict[str, Any]:
+    """Detect circular, split-merge, and relay wash patterns from native SOL flow graphs."""
+    bp = bridge_programs or {}
+    mp = mixer_programs or {}
+    all_chain_addrs: set[str] = set()
+    for ch in funder_chains.values():
+        for a in ch:
+            all_chain_addrs.add(a)
+
+    # Build adjacency from all collected flows
+    out_edges: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    in_edges: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    for addr, flows in funder_native_flows.items():
+        for e in flows:
+            f, t = e.get("from", ""), e.get("to", "")
+            lam = e.get("lamports", 0)
+            if f and t and lam > 0:
+                out_edges[f].append((t, lam))
+                in_edges[t].append((f, lam))
+
+    # 1) Circular flows: A→B→...→A where all nodes are in funder chains
+    circular_hits: list[dict[str, Any]] = []
+    visited_cycles: set[str] = set()
+    for start in sorted(all_chain_addrs)[:200]:
+        if start not in out_edges:
+            continue
+        stack: list[list[str]] = [[start]]
+        while stack:
+            path = stack.pop()
+            if len(path) > 5:
+                continue
+            tip = path[-1]
+            for nxt, _ in out_edges.get(tip, []):
+                if nxt == start and len(path) >= 3:
+                    cycle_key = "->".join(sorted(path))
+                    if cycle_key not in visited_cycles:
+                        visited_cycles.add(cycle_key)
+                        circular_hits.append({
+                            "type": "circular",
+                            "cycle": path + [start],
+                            "depth": len(path),
+                        })
+                elif nxt not in set(path) and nxt in all_chain_addrs and len(path) < 5:
+                    stack.append(path + [nxt])
+            if len(circular_hits) >= 20:
+                break
+
+    # 2) Split-and-merge: single source fans out to N wallets that converge to one dest
+    split_merge_hits: list[dict[str, Any]] = []
+    for src in sorted(all_chain_addrs)[:200]:
+        dests = {t for t, _ in out_edges.get(src, [])}
+        if len(dests) < 3:
+            continue
+        convergence: dict[str, set[str]] = defaultdict(set)
+        for d in dests:
+            for final_dest, _ in out_edges.get(d, []):
+                if final_dest != src:
+                    convergence[final_dest].add(d)
+        for final_d, intermediaries in convergence.items():
+            if len(intermediaries) >= 3:
+                split_merge_hits.append({
+                    "type": "split_merge",
+                    "source": src,
+                    "intermediaries": sorted(intermediaries)[:15],
+                    "destination": final_d,
+                    "fan_out": len(dests),
+                    "converge_count": len(intermediaries),
+                })
+        if len(split_merge_hits) >= 15:
+            break
+
+    # 3) Relay: address receives from bridge/mixer program then sends to a chain address
+    relay_hits: list[dict[str, Any]] = []
+    program_addrs = set(bp.keys()) | set(mp.keys())
+    for addr in sorted(all_chain_addrs)[:200]:
+        inbound_from_program = False
+        program_label = None
+        for src, _ in in_edges.get(addr, []):
+            if src in program_addrs:
+                inbound_from_program = True
+                program_label = bp.get(src) or mp.get(src) or "program"
+                break
+        if not inbound_from_program:
+            continue
+        outbound_to_chain = []
+        for dest, lam in out_edges.get(addr, []):
+            if dest in all_chain_addrs and dest != addr:
+                outbound_to_chain.append(dest)
+        if outbound_to_chain:
+            relay_hits.append({
+                "type": "relay",
+                "relay_address": addr,
+                "program_source": program_label,
+                "forwarded_to": sorted(set(outbound_to_chain))[:10],
+            })
+        if len(relay_hits) >= 15:
+            break
+
+    all_patterns = circular_hits[:10] + split_merge_hits[:10] + relay_hits[:10]
+    confidence = "none"
+    if circular_hits and (split_merge_hits or relay_hits):
+        confidence = "high"
+    elif len(circular_hits) >= 2 or len(split_merge_hits) >= 2:
+        confidence = "high"
+    elif circular_hits or split_merge_hits or relay_hits:
+        confidence = "medium"
+
+    risk_lines: list[str] = []
+    if circular_hits:
+        risk_lines.append(f"{len(circular_hits)} circular SOL flow cycle(s) detected in funder chain graph.")
+    if split_merge_hits:
+        risk_lines.append(f"{len(split_merge_hits)} split-and-merge pattern(s): single source fans out then converges.")
+    if relay_hits:
+        risk_lines.append(f"{len(relay_hits)} relay pattern(s): bridge/mixer program → relay → holder funder chain.")
+
+    return {
+        "confidence": confidence,
+        "circular_flows": circular_hits[:10],
+        "split_merge_flows": split_merge_hits[:10],
+        "relay_flows": relay_hits[:10],
+        "all_patterns": all_patterns[:20],
+        "pattern_count": len(all_patterns),
+        "risk_lines": risk_lines,
+    }
+
+
 def _programs_from_enhanced(tx: dict) -> set[str]:
     progs: set[str] = set()
 
@@ -1088,7 +1248,9 @@ def _programs_from_enhanced(tx: dict) -> set[str]:
     return progs
 
 _BRIDGE_JSON = Path(__file__).resolve().parent / "bridge_programs_solana.json"
+_MIXER_INTEL_JSON = Path(__file__).resolve().parent / "mixer_service_intel.json"
 _bridge_pid_to_label: dict[str, str] = {}
+_mixer_pid_to_label: dict[str, str] = {}
 
 
 def load_bridge_program_allowlist() -> dict[str, str]:
@@ -1113,6 +1275,37 @@ def load_bridge_program_allowlist() -> dict[str, str]:
     return dict(m)
 
 
+def load_mixer_program_allowlist() -> dict[str, str]:
+    """Load known Solana mixer/privacy program IDs from mixer_service_intel.json."""
+    global _mixer_pid_to_label
+    if _mixer_pid_to_label:
+        return dict(_mixer_pid_to_label)
+    m: dict[str, str] = {}
+    _tier_rank = {"unverified_candidate": 0, "verified_analytics": 1, "verified_primary": 2}
+    _min_rank = _tier_rank.get(
+        (os.environ.get("DIVERG_MIXER_MIN_TIER") or "verified_analytics").strip().lower(),
+        1,
+    )
+    try:
+        if _MIXER_INTEL_JSON.exists():
+            raw = json.loads(_MIXER_INTEL_JSON.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                progs = raw.get("solana_mixer_programs")
+                if isinstance(progs, list):
+                    for row in progs:
+                        if not isinstance(row, dict):
+                            continue
+                        pid = row.get("id")
+                        lbl = row.get("label") or "mixer_program"
+                        tier = str(row.get("tier") or "unverified_candidate").strip().lower()
+                        if isinstance(pid, str) and pid and _tier_rank.get(tier, 0) >= _min_rank:
+                            m[pid] = str(lbl)[:120]
+    except Exception:
+        pass
+    _mixer_pid_to_label = m
+    return dict(m)
+
+
 def build_funding_cluster_bridge_mixer(
     *,
     program_sets: dict[str, set[str]],
@@ -1126,12 +1319,15 @@ def build_funding_cluster_bridge_mixer(
     funder_cex_tier: Optional[dict[str, str]] = None,
     shared_outbound: Optional[dict[str, Any]] = None,
     transfers_cache: Optional[dict[str, Optional[dict]]] = None,
+    funder_chain_by_wallet: Optional[dict[str, list[str]]] = None,
 ) -> dict[str, Any]:
     """
     bridge_count_eligible_wallets: when non-empty, only these wallets count toward bridge_adjacent_* and
     shared_bridge_programs (focus-cluster–scoped signal). When None/empty, all lookup_wallets are eligible.
     """
     allow = load_bridge_program_allowlist()
+    mixer_allow = load_mixer_program_allowlist()
+    chains = funder_chain_by_wallet if isinstance(funder_chain_by_wallet, dict) else {}
     eligible: Optional[set[str]] = None
     if bridge_count_eligible_wallets:
         eligible = {str(x).strip() for x in bridge_count_eligible_wallets if x and str(x).strip()}
@@ -1195,6 +1391,57 @@ def build_funding_cluster_bridge_mixer(
         bridge_mixer_confidence_tier = "medium"
     elif bridge_touch_wallets:
         bridge_mixer_confidence_tier = "low"
+
+    # --- On-chain mixer program detection (wallet-level + funder-level) ---
+    mixer_program_wallet_hits: list[dict[str, Any]] = []
+    mixer_program_touch_wallets: list[str] = []
+    for w in lookup_wallets:
+        if eligible is not None and w not in eligible:
+            continue
+        progs = program_sets.get(w) or set()
+        mhits = [{"program_id": pid, "label": mixer_allow[pid]} for pid in progs if pid in mixer_allow]
+        if mhits:
+            mixer_program_touch_wallets.append(w)
+            mixer_program_wallet_hits.append({"wallet": w, "mixer_program_hits": mhits[:8]})
+    funder_mixer_program_hits: list[dict[str, Any]] = []
+    mixer_program_funder_count = 0
+    if funder_program_sets:
+        for addr, progs in funder_program_sets.items():
+            if not isinstance(addr, str) or not progs:
+                continue
+            mhits = [{"program_id": pid, "label": mixer_allow[pid]} for pid in progs if pid in mixer_allow]
+            if mhits:
+                mixer_program_funder_count += 1
+                funder_mixer_program_hits.append({"funder": addr, "mixer_program_hits": mhits[:8]})
+    # Check all addresses in funder chains for mixer program interaction
+    wallets_with_mixer_program_touch: list[str] = []
+    mixer_funder_addrs = {h["funder"] for h in funder_mixer_program_hits if isinstance(h.get("funder"), str)}
+    if mixer_funder_addrs and meta_by_wallet is not None:
+        rm = root_map if isinstance(root_map, dict) else {}
+        for w in lookup_wallets:
+            if eligible is not None and w not in eligible:
+                continue
+            chain_addrs = set(chains.get(w, [])[1:]) if chains else set()
+            if not chain_addrs:
+                meta = (meta_by_wallet or {}).get(w) or {}
+                fund = meta.get("funder")
+                root = rm.get(w)
+                if isinstance(fund, str):
+                    chain_addrs.add(fund)
+                if isinstance(root, str):
+                    chain_addrs.add(root)
+            if chain_addrs & mixer_funder_addrs:
+                wallets_with_mixer_program_touch.append(w)
+    if mixer_program_touch_wallets:
+        risk_lines.append(
+            f"{len(mixer_program_touch_wallets)} wallet(s) interacted with known mixer/privacy program IDs on-chain."
+        )
+        if bridge_mixer_confidence_tier in ("low", "medium"):
+            bridge_mixer_confidence_tier = "high"
+    if mixer_program_funder_count:
+        risk_lines.append(
+            f"{mixer_program_funder_count} funder address(es) show mixer/privacy program interaction in enhanced tx sample."
+        )
 
     # --- Funder / root path: bridge programs in sampled enhanced txs (cross-chain on-ramp hint) ---
     funder_bridge_hits: list[dict[str, Any]] = []
@@ -1331,6 +1578,11 @@ def build_funding_cluster_bridge_mixer(
         "funder_bridge_hits": funder_bridge_hits[:20],
         "wallets_with_bridge_touching_funder": w_bf_n,
         "wallets_with_bridge_touching_funder_sample": w_bf,
+        "mixer_program_wallet_hits": mixer_program_wallet_hits[:30],
+        "mixer_program_touch_wallet_count": len(mixer_program_touch_wallets),
+        "funder_mixer_program_hits": funder_mixer_program_hits[:20],
+        "mixer_program_funder_count": mixer_program_funder_count,
+        "wallets_with_mixer_program_touch": sorted(set(wallets_with_mixer_program_touch))[:40],
         "cex_split_pattern_confidence": cex_split_conf,
         "cex_split_wallet_count": cex_w_n,
         "cex_split_funder_count": len(cex_path_funders),
@@ -1408,14 +1660,17 @@ def compute_coordination_bundle(
     focus_wallets: list[str],
     transfers_cache_preload: Optional[dict[str, Optional[dict]]] = None,
     funder_root_by_wallet: Optional[dict[str, Optional[str]]] = None,
+    funder_chain_by_wallet: Optional[dict[str, list[str]]] = None,
 ) -> dict[str, Any]:
     """
     Run all signals; return structured report + score 0–100.
     If transfers_cache_preload is set (e.g. from run_bundle_snapshot), reuse it to avoid duplicate /transfers calls.
-    funder_root_by_wallet: optional 2-hop root funder per wallet (when distinct from direct); enables CEX/mixer
+    funder_root_by_wallet: optional N-hop root funder per wallet (deepest in chain); enables CEX/mixer
     attribution via root when direct funder is unlabeled.
+    funder_chain_by_wallet: full funder chain per wallet (holder first, then each hop).
     """
     root_map: dict[str, Optional[str]] = funder_root_by_wallet if funder_root_by_wallet else {}
+    chain_map: dict[str, list[str]] = funder_chain_by_wallet if funder_chain_by_wallet else {}
 
     meta_by_wallet: dict[str, dict[str, Any]] = {}
     transfers_cache: dict[str, Optional[dict]] = {}
@@ -1585,6 +1840,10 @@ def compute_coordination_bundle(
     def _sample_funder_addrs() -> set[str]:
         s: set[str] = set()
         for w in lookup_wallets:
+            ch = chain_map.get(w, [])
+            for addr in ch[1:] if len(ch) >= 2 else []:
+                if isinstance(addr, str):
+                    s.add(addr)
             d = meta_by_wallet.get(w, {}).get("funder")
             if isinstance(d, str):
                 s.add(d)
@@ -1595,13 +1854,14 @@ def compute_coordination_bundle(
 
     sample_addrs = _sample_funder_addrs()
     funder_program_sets: dict[str, set[str]] = {}
+    funder_native_flows: dict[str, list[dict[str, Any]]] = {}
     _fb_max = SOLANA_BUNDLE_FUNDER_BRIDGE_ENHANCED_MAX
     if _fb_max > 0:
         fund_pool = sorted(
             a for a in sample_addrs if isinstance(a, str) and _ADDR_RE.match(a)
         )[:_fb_max]
         for i, fa in enumerate(fund_pool):
-            txs = helius_enhanced_transactions(fa, limit=min(28, ENHANCED_TX_LIMIT))
+            txs = helius_enhanced_transactions(fa, limit=min(40, ENHANCED_TX_LIMIT))
             if isinstance(txs, list):
                 acc: set[str] = set()
                 for tx in txs:
@@ -1609,8 +1869,18 @@ def compute_coordination_bundle(
                         acc |= _programs_from_enhanced(tx)
                 if acc:
                     funder_program_sets[fa] = acc
+                flows = _native_transfers_from_enhanced(txs)
+                if flows:
+                    funder_native_flows[fa] = flows[:200]
             if i < len(fund_pool) - 1:
                 time.sleep(0.06)
+
+    wash_flow_patterns = detect_wash_flow_patterns(
+        funder_native_flows,
+        chain_map,
+        bridge_programs=load_bridge_program_allowlist(),
+        mixer_programs=load_mixer_program_allowlist(),
+    )
 
     any_strong_cex = any(funder_cex_tier.get(a) == "strong" for a in sample_addrs)
     any_cex = any(funder_cex_tier.get(a) in ("weak", "strong") for a in sample_addrs)
@@ -1685,6 +1955,7 @@ def compute_coordination_bundle(
         funder_cex_tier=funder_cex_tier,
         shared_outbound=shared_out,
         transfers_cache=transfers_cache,
+        funder_chain_by_wallet=chain_map if chain_map else None,
     )
 
     # Funder/root path parity for mixer signals (same spirit as bridge-path signals)
@@ -1780,6 +2051,24 @@ def compute_coordination_bundle(
     elif _w_mf == 1:
         score += 1.0
         reasons.append("mixer_tag_on_single_funder_path")
+    _mp_w = int(funding_cluster_bridge_mixer.get("mixer_program_touch_wallet_count") or 0)
+    _mp_f = int(funding_cluster_bridge_mixer.get("mixer_program_funder_count") or 0)
+    if _mp_w >= 2:
+        score += min(12.0, 5.0 + 1.5 * _mp_w)
+        reasons.append("mixer_program_onchain_multi_wallet")
+    elif _mp_w == 1:
+        score += 3.0
+        reasons.append("mixer_program_onchain_single_wallet")
+    if _mp_f >= 1:
+        score += min(8.0, 3.0 + 1.0 * _mp_f)
+        reasons.append("mixer_program_on_funder_path")
+    _wash_conf = str(wash_flow_patterns.get("confidence") or "none")
+    if _wash_conf == "high":
+        score += 12.0
+        reasons.append("wash_flow_pattern_high")
+    elif _wash_conf == "medium":
+        score += 6.0
+        reasons.append("wash_flow_pattern_medium")
     _cex_split_tier = str(cex_split_pattern.get("confidence_tier") or "none")
     if _cex_split_tier == "high":
         score += 9.0
@@ -1824,6 +2113,9 @@ def compute_coordination_bundle(
     if funding_cluster_bridge_mixer.get("risk_lines"):
         for line in funding_cluster_bridge_mixer["risk_lines"][:4]:
             archetype_hints.append(line)
+    if wash_flow_patterns.get("risk_lines"):
+        for line in wash_flow_patterns["risk_lines"][:3]:
+            archetype_hints.append(line)
 
     tier_export_keys = sorted(sample_addrs | set(funders) | set(root_addrs))
 
@@ -1849,6 +2141,7 @@ def compute_coordination_bundle(
         "program_overlap_pairs": p_overlap[:20],
         "funding_cluster_bridge_mixer": funding_cluster_bridge_mixer,
         "cex_split_pattern": cex_split_pattern,
+        "wash_flow_patterns": wash_flow_patterns,
         "coordination_score": score,
         "coordination_reasons": reasons,
         "params": {
@@ -1865,5 +2158,6 @@ def compute_coordination_bundle(
             "intel_overrides_loaded": bool((os.environ.get("SOLANA_BUNDLE_INTEL_OVERRIDES_PATH") or "").strip()),
             "funder_bridge_enhanced_max": SOLANA_BUNDLE_FUNDER_BRIDGE_ENHANCED_MAX,
             "funder_bridge_wallets_sampled": len(funder_program_sets),
+            "funder_chain_depths": {w: len(ch) - 1 for w, ch in chain_map.items() if len(ch) >= 2},
         },
     }
