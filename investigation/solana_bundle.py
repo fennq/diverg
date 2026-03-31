@@ -43,6 +43,17 @@ from solana_bundle_signals import (
 
 # Base58 Solana address (rough)
 _ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+_LP_STRONG_MARKERS = (
+    "liquidity pool",
+    "amm pool",
+    "pool vault",
+    "lp vault",
+    "whirlpool",
+    "clmm",
+    "concentrated liquidity",
+)
+_LP_POOL_WORDS = ("pool", "liquidity", "amm", "lp", "vault", "whirlpool", "clmm")
+_LP_DEX_WORDS = ("raydium", "orca", "meteora", "saber", "lifinity", "goosefx", "fluxbeam")
 
 
 def _should_fetch_x_intel(include_x_intel: Optional[bool]) -> bool:
@@ -116,6 +127,46 @@ def _parse_token_account_ui_amount(acc: Optional[dict]) -> float:
         except (TypeError, ValueError, ZeroDivisionError):
             pass
     return 0.0
+
+
+def _identity_blob(ident: Optional[dict]) -> str:
+    if not ident or not isinstance(ident, dict):
+        return ""
+    parts: list[str] = []
+    for k in ("primary_label", "label", "name", "displayName", "type", "category", "entityName"):
+        v = ident.get(k)
+        if isinstance(v, str) and v.strip():
+            parts.append(v.strip().lower())
+    tags = ident.get("tags")
+    if isinstance(tags, list):
+        for t in tags:
+            if isinstance(t, str) and t.strip():
+                parts.append(t.strip().lower())
+    domains = ident.get("domain_names")
+    if isinstance(domains, list):
+        for d in domains:
+            if isinstance(d, str) and d.strip():
+                parts.append(d.strip().lower())
+    return " | ".join(parts)
+
+
+def _looks_like_liquidity_pool_identity(ident: Optional[dict]) -> bool:
+    blob = _identity_blob(ident)
+    if not blob:
+        return False
+    if any(mark in blob for mark in _LP_STRONG_MARKERS):
+        return True
+    has_pool_word = any(w in blob for w in _LP_POOL_WORDS)
+    has_dex_word = any(w in blob for w in _LP_DEX_WORDS)
+    if has_pool_word and has_dex_word:
+        return True
+    cat = str((ident or {}).get("category") or "").strip().lower()
+    typ = str((ident or {}).get("type") or "").strip().lower()
+    if any(x in cat for x in ("pool", "liquidity", "amm", "vault")):
+        return has_pool_word or has_dex_word
+    if any(x in typ for x in ("pool", "liquidity", "amm", "vault")):
+        return has_pool_word or has_dex_word
+    return False
 
 
 def _cluster_key_sources(
@@ -297,8 +348,9 @@ def run_bundle_snapshot(
     - max_funded_by_lookups: Helius funded-by + /transfers per distinct wallet (default 100).
     - scan_all_holders: when True, scan all discovered holder wallets after exclusions.
     - exclude_wallets: optional owner addresses to skip in fund-by scan (e.g. known LP).
-    - skip_liquidity_wallet: if True, drop the #1 holder from scans when they hold >= SOLANA_BUNDLE_LP_SKIP_MIN_PCT
-      of supply (heuristic for pool/vault wallet).
+    - skip_liquidity_wallet: if True, skip probable LP wallets from scans:
+      (a) #1 holder when it owns >= SOLANA_BUNDLE_LP_SKIP_MIN_PCT of supply
+      (b) identity-tagged pool/vault/AMM wallets above SOLANA_BUNDLE_LP_IDENTITY_SKIP_MIN_PCT.
     - include_x_intel: if True, search X for wallet mentions when X_API_BEARER_TOKEN or NITTER_BASE_URL is set.
       False disables; None uses env SOLANA_BUNDLE_X_INTEL (default auto = on when configured).
     """
@@ -382,8 +434,13 @@ def run_bundle_snapshot(
             exclude_norm.add(ax)
 
     excluded_lp: Optional[str] = None
+    excluded_lp_wallets: set[str] = set()
+    excluded_lp_reasons: dict[str, str] = {}
     lp_min_pct = float(os.environ.get("SOLANA_BUNDLE_LP_SKIP_MIN_PCT", "12"))
+    lp_identity_min_pct = float(os.environ.get("SOLANA_BUNDLE_LP_IDENTITY_SKIP_MIN_PCT", "0.2"))
+    lp_identity_probe_n = max(10, min(int(os.environ.get("SOLANA_BUNDLE_LP_IDENTITY_PROBE_N", "60")), 120))
     scan_exclude = set(exclude_norm)
+    prefetched_identity_by_wallet: dict[str, dict[str, Any]] = {}
     if skip_liquidity_wallet and owners_sorted and total_ui > 0:
         top = owners_sorted[0]
         if top not in exclude_norm:
@@ -394,6 +451,30 @@ def run_bundle_snapshot(
             if pct0 >= lp_min_pct:
                 excluded_lp = top
                 scan_exclude.add(top)
+                excluded_lp_wallets.add(top)
+                excluded_lp_reasons[top] = f"top_holder_pct>={round(lp_min_pct, 4)}"
+
+    if skip_liquidity_wallet and owners_sorted:
+        probe_targets = owners_sorted[:lp_identity_probe_n]
+        try:
+            prefetched_identity_by_wallet = normalize_batch_identity_map(helius_batch_identity(probe_targets))
+        except Exception:
+            prefetched_identity_by_wallet = {}
+        for w in probe_targets:
+            if w in exclude_norm or w in scan_exclude:
+                continue
+            try:
+                wpct = 100.0 * float(owner_amount.get(w, 0.0)) / float(total_ui)
+            except (TypeError, ValueError, ZeroDivisionError):
+                wpct = 0.0
+            if wpct < lp_identity_min_pct:
+                continue
+            if _looks_like_liquidity_pool_identity(prefetched_identity_by_wallet.get(w)):
+                scan_exclude.add(w)
+                excluded_lp_wallets.add(w)
+                excluded_lp_reasons[w] = f"identity_lp_pool_tag_pct>={round(lp_identity_min_pct, 4)}"
+                if excluded_lp is None:
+                    excluded_lp = w
 
     # funded-by: seed + top holders until cap (skip LP / excluded wallets for API load)
     lookup_order: list[str] = []
@@ -454,66 +535,87 @@ def run_bundle_snapshot(
                     funded_by[w0] = None
                     transfers_by[w0] = None
 
-    hop_funded_by: dict[str, Optional[dict]] = {}
-    hop_transfers_by: dict[str, Any] = {}
-    hop_max = max(0, int(os.environ.get("SOLANA_BUNDLE_FUNDER_HOP2_MAX", "56")))
-    hop_targets: list[str] = []
-    if hop_max > 0:
-        funder_counts: Counter[str] = Counter()
-        for w in lookup_order:
-            d = effective_funder_address(funded_by.get(w), transfers_by.get(w))
-            if d:
-                funder_counts[d] += 1
-        hop_targets = [a for a, _ in funder_counts.most_common(hop_max)]
+    # N-hop recursive funder chain walk (replaces fixed 2-hop)
+    max_hops = max(1, min(int(os.environ.get("SOLANA_BUNDLE_FUNDER_MAX_HOPS", "4")), 6))
+    hop_budget = max(0, int(os.environ.get("SOLANA_BUNDLE_FUNDER_HOP2_MAX", "56")))
 
-        def _fetch_hop_intel(addr: str) -> tuple[str, Optional[dict], Any]:
+    all_funded_by: dict[str, Optional[dict]] = dict(funded_by)
+    all_transfers_by: dict[str, Any] = dict(transfers_by)
+
+    funder_chain_by_wallet: dict[str, list[str]] = {}
+    for w in lookup_order:
+        chain: list[str] = [w]
+        d = effective_funder_address(all_funded_by.get(w), all_transfers_by.get(w))
+        if d and d != w:
+            chain.append(d)
+        funder_chain_by_wallet[w] = chain
+
+    total_hop_fetches = 0
+    for _hop_level in range(2, max_hops + 1):
+        if hop_budget <= 0:
+            break
+        tip_counts: Counter[str] = Counter()
+        for _cw, _chain in funder_chain_by_wallet.items():
+            if len(_chain) < _hop_level:
+                continue
+            tip = _chain[-1]
+            if tip not in all_funded_by:
+                tip_counts[tip] += 1
+        if not tip_counts:
+            break
+        tips_to_fetch = [a for a, _ in tip_counts.most_common(hop_budget)]
+        if not tips_to_fetch:
+            break
+
+        def _fetch_hop_n(addr: str) -> tuple[str, Optional[dict], Any]:
             fb = helius_wallet_funded_by(addr)
             tr = helius_transfers(addr, limit=tr_limit)
             fb_d = fb if isinstance(fb, dict) else None
-            if isinstance(tr, dict):
-                tr_o: Any = tr
-            elif isinstance(tr, list):
-                tr_o = tr
-            else:
-                tr_o = None
+            tr_o: Any = tr if isinstance(tr, (dict, list)) else None
             return addr, fb_d, tr_o
 
-        if hop_targets:
-            hw = min(12, max(3, len(hop_targets)))
-            with concurrent.futures.ThreadPoolExecutor(max_workers=hw) as pool:
-                hfuts = {pool.submit(_fetch_hop_intel, a): a for a in hop_targets}
-                for fut in concurrent.futures.as_completed(hfuts, timeout=420):
-                    a0 = hfuts[fut]
+        if len(tips_to_fetch) == 1:
+            _ha, _hfb, _htr = _fetch_hop_n(tips_to_fetch[0])
+            all_funded_by[_ha] = _hfb
+            all_transfers_by[_ha] = _htr
+        else:
+            _hw = min(12, max(3, len(tips_to_fetch)))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=_hw) as pool:
+                _hfuts = {pool.submit(_fetch_hop_n, a): a for a in tips_to_fetch}
+                for fut in concurrent.futures.as_completed(_hfuts, timeout=max(420, len(tips_to_fetch) * 8)):
+                    _a0 = _hfuts[fut]
                     try:
-                        aa, fb_d, tr_o = fut.result(timeout=120)
-                        hop_funded_by[aa] = fb_d
-                        hop_transfers_by[aa] = tr_o
+                        _ha, _hfb, _htr = fut.result(timeout=180)
+                        all_funded_by[_ha] = _hfb
+                        all_transfers_by[_ha] = _htr
                     except Exception:
-                        hop_funded_by[a0] = None
-                        hop_transfers_by[a0] = None
+                        all_funded_by[_a0] = None
+                        all_transfers_by[_a0] = None
+        total_hop_fetches += len(tips_to_fetch)
 
-    # Build clusters (ultimate funder when 2-hop data ties intermediaries to one source)
+        for _cw, _chain in funder_chain_by_wallet.items():
+            if len(_chain) < _hop_level:
+                continue
+            tip = _chain[-1]
+            nxt = effective_funder_address(all_funded_by.get(tip), all_transfers_by.get(tip))
+            if nxt and nxt not in set(_chain):
+                _chain.append(nxt)
+
+    # Backward-compat dicts for legacy helpers
+    hop_funded_by: dict[str, Optional[dict]] = {k: v for k, v in all_funded_by.items() if k not in funded_by}
+    hop_transfers_by: dict[str, Any] = {k: v for k, v in all_transfers_by.items() if k not in transfers_by}
+
+    # Build clusters using full funder chain terminal
     cluster_members: dict[str, set[str]] = defaultdict(set)
     for w in lookup_order:
-        fk = _cluster_key_sources(
-            w,
-            funded_by.get(w),
-            transfers_by.get(w),
-            hop_funded=hop_funded_by,
-            hop_transfers=hop_transfers_by,
-        )
-        cluster_members[fk].add(w)
+        _ch = funder_chain_by_wallet.get(w, [w])
+        _ck = f"funder:{_ch[-1]}" if len(_ch) >= 2 else f"singleton:{w}"
+        cluster_members[_ck].add(w)
 
-    # Focus cluster
     focus_cluster_key: Optional[str] = None
     if sw:
-        focus_cluster_key = _cluster_key_sources(
-            sw,
-            funded_by.get(sw),
-            transfers_by.get(sw),
-            hop_funded=hop_funded_by,
-            hop_transfers=hop_transfers_by,
-        )
+        _sw_ch = funder_chain_by_wallet.get(sw, [sw])
+        focus_cluster_key = f"funder:{_sw_ch[-1]}" if len(_sw_ch) >= 2 else f"singleton:{sw}"
     else:
         # Largest multi-wallet cluster by supply
         best_key = None
@@ -539,14 +641,9 @@ def run_bundle_snapshot(
         if seed_balance_ui is None:
             seed_balance_ui = owner_amount.get(sw)
         if focus_cluster_key and sw not in focus_members:
-            fk = _cluster_key_sources(
-                sw,
-                funded_by.get(sw),
-                transfers_by.get(sw),
-                hop_funded=hop_funded_by,
-                hop_transfers=hop_transfers_by,
-            )
-            if fk == focus_cluster_key:
+            _swc = funder_chain_by_wallet.get(sw, [sw])
+            _swk = f"funder:{_swc[-1]}" if len(_swc) >= 2 else f"singleton:{sw}"
+            if _swk == focus_cluster_key:
                 focus_members.add(sw)
 
     def supply_pct(amount: float) -> float:
@@ -577,20 +674,18 @@ def run_bundle_snapshot(
         id_targets.add(sw)
     id_addrs = sorted(id_targets)[:100]
     identities: Optional[list] = None
-    identity_by_wallet: dict[str, dict[str, Any]] = {}
+    identity_by_wallet: dict[str, dict[str, Any]] = dict(prefetched_identity_by_wallet)
     if id_addrs:
-        identities = helius_batch_identity(id_addrs)
-        identity_by_wallet = normalize_batch_identity_map(identities)
+        missing_id_addrs = [a for a in id_addrs if a not in identity_by_wallet]
+        if missing_id_addrs:
+            identities = helius_batch_identity(missing_id_addrs)
+            identity_by_wallet.update(normalize_batch_identity_map(identities))
 
     holders_out = []
     for w in owners_sorted[:20]:
-        d_fund, r_fund = _direct_and_root_funder(
-            w,
-            funded_by.get(w),
-            transfers_by.get(w),
-            hop_funded_by,
-            hop_transfers_by,
-        )
+        _hch = funder_chain_by_wallet.get(w, [w])
+        d_fund = _hch[1] if len(_hch) >= 2 else None
+        r_fund = _hch[-1] if len(_hch) >= 3 and _hch[-1] != _hch[1] else None
         idrow = identity_by_wallet.get(w)
         ident_payload: Optional[dict[str, Any]] = None
         if idrow and idrow.get("primary_label"):
@@ -632,6 +727,8 @@ def run_bundle_snapshot(
                 "pct_supply": supply_pct(owner_amount[w]),
                 "funder": d_fund,
                 "funder_root": r_fund,
+                "funder_chain": _hch[1:] if len(_hch) >= 2 else [],
+                "funder_chain_depth": len(_hch) - 1,
                 "in_focus_cluster": w in focus_members if focus_members else False,
                 "identity": ident_payload,
             }
@@ -666,9 +763,9 @@ def run_bundle_snapshot(
             pass
 
     disclaimer = (
-        "Heuristic only: clusters prefer a shared *2-hop* ultimate funder when Helius returns funding data "
-        "for intermediate wallets (otherwise direct first inbound SOL / funded-by). Coordination signals "
-        "sample more transfers and enhanced txs by default (slower, deeper). Not financial advice."
+        f"Heuristic only: clusters prefer a shared ultimate funder traced up to {max_hops} hops when Helius "
+        "returns funding data for intermediaries (otherwise direct first inbound SOL / funded-by). "
+        "Coordination signals sample more transfers and enhanced txs by default (slower, deeper). Not financial advice."
     )
 
     focus_note: Optional[str] = None
@@ -680,14 +777,11 @@ def run_bundle_snapshot(
 
     funder_root_by_wallet: dict[str, Optional[str]] = {}
     for w in lookup_order:
-        _d_f, _r_f = _direct_and_root_funder(
-            w,
-            funded_by.get(w),
-            transfers_by.get(w),
-            hop_funded_by,
-            hop_transfers_by,
-        )
-        funder_root_by_wallet[w] = _r_f if (_r_f and _d_f and _r_f != _d_f) else None
+        _rch = funder_chain_by_wallet.get(w, [w])
+        if len(_rch) >= 3:
+            funder_root_by_wallet[w] = _rch[-1]
+        else:
+            funder_root_by_wallet[w] = None
 
     bundle_signals: Optional[dict[str, Any]] = None
     try:
@@ -699,6 +793,7 @@ def run_bundle_snapshot(
             focus_wallets=sorted(focus_members),
             transfers_cache_preload=transfers_by,
             funder_root_by_wallet=funder_root_by_wallet,
+            funder_chain_by_wallet=funder_chain_by_wallet,
         )
     except Exception as e:
         bundle_signals = {
@@ -728,7 +823,7 @@ def run_bundle_snapshot(
             "summary": {"kind": "error", "error": str(_xc_err), "candidate_count": 0, "sources": [], "explorer_links": [], "has_high_tier": False},
         }
 
-    # Fetch live Wormhole bridge transfer history for bridge-adjacent wallets
+    # Fetch live Wormhole bridge transfer history for bridge-adjacent + funder chain addresses
     _bridge_transfers: dict[str, Any] = {}
     try:
         from wormhole_scan_client import resolve_counterparties as _wh_resolve
@@ -737,9 +832,14 @@ def run_bundle_snapshot(
         if isinstance(bundle_signals, dict):
             _fc_raw = bundle_signals.get("funding_cluster_bridge_mixer")
             if isinstance(_fc_raw, dict):
-                _bridge_adj = (_fc_raw.get("bridge_adjacent_wallets") or [])[:6]
-        if _bridge_adj:
-            _bridge_transfers = _wh_resolve(_bridge_adj)
+                _bridge_adj = list(_fc_raw.get("bridge_adjacent_wallets") or [])
+        _funder_chain_addrs: set[str] = set()
+        for _fch in funder_chain_by_wallet.values():
+            for _fa in _fch[1:]:
+                _funder_chain_addrs.add(_fa)
+        _wh_targets = list(dict.fromkeys(_bridge_adj + sorted(_funder_chain_addrs)))
+        if _wh_targets:
+            _bridge_transfers = _wh_resolve(_wh_targets)
     except Exception:
         _bridge_transfers = {}
 
@@ -773,6 +873,10 @@ def run_bundle_snapshot(
         "top_holders": holders_out,
         "identities": identities,
         "excluded_liquidity_wallet": excluded_lp,
+        "excluded_liquidity_wallets": sorted(excluded_lp_wallets),
+        "excluded_liquidity_wallet_reasons": excluded_lp_reasons,
+        "funder_chain_by_wallet": {w: ch[1:] for w, ch in funder_chain_by_wallet.items() if len(ch) >= 2},
+        "funder_chain_max_depth": max((len(ch) - 1 for ch in funder_chain_by_wallet.values()), default=0),
         "params": {
             "max_holders": mh,
             "max_funded_by_lookups": mf,
@@ -786,8 +890,11 @@ def run_bundle_snapshot(
             "das_token_account_rows": len(das_rows) if holder_source == "das" else 0,
             "unique_holders_sampled": len(owners_sorted),
             "lp_skip_min_pct": lp_min_pct,
-            "funder_hop2_max": hop_max,
-            "funder_hop2_wallets_fetched": len(hop_targets),
+            "lp_identity_skip_min_pct": lp_identity_min_pct,
+            "lp_identity_probe_n": lp_identity_probe_n,
+            "funder_max_hops": max_hops,
+            "funder_hop_budget": hop_budget,
+            "funder_hop_fetches_total": total_hop_fetches,
             "deep_bundle_scan": True,
             "include_x_intel": include_x_intel,
             "x_intel_wallets_with_hits": len(x_intel_by_wallet),

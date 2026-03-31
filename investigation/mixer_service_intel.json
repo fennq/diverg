@@ -286,5 +286,24 @@
         ]
       }
     ]
-  }
+  },
+  "solana_mixer_programs": [
+    {
+      "id": "9fhQBbumKEFuXtMBDw8AaQyAjCorLGJQiS3skWZdQyQD",
+      "label": "Privacy Cash",
+      "tier": "verified_analytics",
+      "sources": [
+        "https://orbmarkets.io/address/9fhQBbumKEFuXtMBDw8AaQyAjCorLGJQiS3skWZdQyQD/history",
+        "https://privacycash.us/"
+      ]
+    },
+    {
+      "id": "AWexibGxNFKTa1b5R5MN4PJr9HWnWRwf8EW9g8cLx3dM",
+      "label": "Privacy Cash Upgrade Authority",
+      "tier": "unverified_candidate",
+      "sources": [
+        "https://orbmarkets.io/address/9fhQBbumKEFuXtMBDw8AaQyAjCorLGJQiS3skWZdQyQD/history"
+      ]
+    }
+  ]
 }
