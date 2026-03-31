@@ -101,4 +101,5 @@ Authorized testing and professional use only. Verify everything that matters on-
 ## Related in this repo
 
 - [Scan diffing](scan-diffing.md) — what changed between two runs for the same target  
+- Social copy variants: [`docs/TWEET_AUTOMATION_VS_MANUAL.md`](../TWEET_AUTOMATION_VS_MANUAL.md)  
 - Cross-chain / bundle context: [`docs/TWEET_CROSS_CHAIN_INVESTIGATION.md`](../TWEET_CROSS_CHAIN_INVESTIGATION.md) (high-level product note)
