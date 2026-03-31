@@ -402,6 +402,10 @@
               <input type="checkbox" id="tokenBundleSkipX">
               Skip X mention search (faster; otherwise server uses X API / Nitter when configured)
             </label>
+            <label class="inv-check" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;font-size:0.85rem;color:var(--muted)">
+              <input type="checkbox" id="tokenBundleAllHolders" checked>
+              Scan every holder wallet (slowest, highest coverage for funder/bridge/mixer checks)
+            </label>
             <p class="inv-hint">Risk / coordination score, shared-funder cluster, parallel CEX and privacy-mixer funder patterns, bridge-program touches on holders and funders (cross-chain on-ramp hints), registry-based token mappings to other chains, Helius labels, optional X posts that mention a holder address.</p>
             <button class="btn btn-secondary" onclick="runTokenBundle()">Analyze token bundle</button>
             <div id="tokenBundleOut" class="inv-out inv-out-empty">

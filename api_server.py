@@ -1181,6 +1181,22 @@ def investigation_solana_bundle():
     elif isinstance(x_raw, str) and x_raw.strip().lower() in ("false", "0", "no"):
         include_x_intel = False
 
+    all_raw = data.get("scan_all_holders")
+    if all_raw is True or all_raw is False:
+        scan_all_holders = bool(all_raw)
+    elif isinstance(all_raw, str):
+        scan_all_holders = all_raw.strip().lower() in ("true", "1", "yes", "on")
+    else:
+        scan_all_holders = False
+
+    max_funded_by_lookups = None
+    mf_raw = data.get("max_funded_by_lookups")
+    if mf_raw is not None:
+        try:
+            max_funded_by_lookups = max(5, min(int(mf_raw), 5000))
+        except (TypeError, ValueError):
+            max_funded_by_lookups = None
+
     inv_dir = ROOT / "investigation"
     inv_path = str(inv_dir)
     if inv_path not in sys.path:
@@ -1200,7 +1216,8 @@ def investigation_solana_bundle():
                 mint,
                 wallet,
                 max_holders=120,
-                max_funded_by_lookups=120,
+                max_funded_by_lookups=max_funded_by_lookups if max_funded_by_lookups is not None else 120,
+                scan_all_holders=scan_all_holders,
                 exclude_wallets=exclude_wallets,
                 include_x_intel=include_x_intel,
             )
