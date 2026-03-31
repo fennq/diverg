@@ -693,6 +693,31 @@ function _invSetOut(wrapId, sumId, rawId, emptyClass, summaryHtml, rawObj) {
   if (raw) raw.textContent = rawObj !== undefined && rawObj !== null ? JSON.stringify(rawObj, null, 2) : '';
 }
 
+function _invTokenBundleLoadingHtml(stepIdx, elapsedSec) {
+  const steps = [
+    'Loading token metadata and supply',
+    'Mapping top holders and liquidity-sized wallets',
+    'Tracing first funders and 2-hop roots',
+    'Running coordination and split-pattern checks',
+    'Merging bridge/mixer/cross-chain signals',
+  ];
+  const active = Math.max(0, Math.min(stepIdx, steps.length - 1));
+  const items = steps.map((s, i) => {
+    const cls = i < active ? 'done' : (i === active ? 'active' : '');
+    const mark = i < active ? '✓' : (i === active ? '●' : '·');
+    return `<li class="inv-scan-step ${cls}"><span class="inv-scan-step-mark">${mark}</span>${esc(s)}</li>`;
+  }).join('');
+  return `<div class="inv-scan-live">
+    <div class="inv-scan-head">
+      <span class="inv-scan-dot" aria-hidden="true"></span>
+      <span>Bundle scan in progress (${elapsedSec}s)</span>
+    </div>
+    <div class="inv-scan-bar"><span class="inv-scan-bar-fill" style="width:${Math.min(96, 16 + active * 19)}%"></span></div>
+    <ul class="inv-scan-steps">${items}</ul>
+    <p class="inv-muted" style="margin-top:0.45rem">Live scan view: this updates while checks run.</p>
+  </div>`;
+}
+
 function _invFindingsHtml(findings) {
   const list = findings || [];
   if (!list.length) {
@@ -1016,8 +1041,22 @@ async function runTokenBundle() {
   if (!mint) { toast('Enter token mint', 'err'); return; }
   const key = (localStorage.getItem('diverg_helius_key') || '').trim();
   if (!key) { toast('Add Helius API key in Settings', 'err'); return; }
-  _invSetOut('tokenBundleOut', 'tokenBundleSummary', 'tokenBundleRaw', 'inv-out-empty',
-    '<p class="inv-muted">Deep bundle scan: paginated holders, up to 120 wallets + 2-hop funder graph, coordination signals (many Helius calls). Often 2–6+ minutes — do not refresh.</p>', null);
+  const t0 = Date.now();
+  let step = 0;
+  _invSetOut(
+    'tokenBundleOut',
+    'tokenBundleSummary',
+    'tokenBundleRaw',
+    'inv-out-empty',
+    _invTokenBundleLoadingHtml(step, 0),
+    null
+  );
+  const ticker = setInterval(() => {
+    step = (step + 1) % 5;
+    const elapsed = Math.max(1, Math.floor((Date.now() - t0) / 1000));
+    const sum = document.getElementById('tokenBundleSummary');
+    if (sum) sum.innerHTML = _invTokenBundleLoadingHtml(step, elapsed);
+  }, 1400);
   try {
     const body = { mint, helius_api_key: key };
     if (wallet) body.wallet = wallet;
@@ -1033,6 +1072,8 @@ async function runTokenBundle() {
     _invSetOut('tokenBundleOut', 'tokenBundleSummary', 'tokenBundleRaw', 'inv-out-empty',
       `<p class="inv-err">${esc(e.message)}</p>`, { error: e.message });
     toast(e.message, 'err');
+  } finally {
+    clearInterval(ticker);
   }
 }
 
