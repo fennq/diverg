@@ -1,11 +1,19 @@
 """
 Heuristic Web3 / wallet-abuse signals for comment-stripped client JS.
 
-These are intelligence hints, not verdicts: severity uses confidence=heuristic.
-Correlates with crypto_security TRUST_RISK_PATTERNS where keys/signing appear.
+Legitimacy / limits (read before relying on output):
+- Outputs are **pattern matches**, not malware verdicts. Titles and confidence=heuristic
+  mean “worth human review in context,” not “this script is a drainer.”
+- **Third-party** is host equality against `base_origin` after normalizing `www.`;
+  subdomains (e.g. app.example.com vs example.com) count as third-party — intentional.
+- **Allowlist**: any substring hit against `WALLET_SDK_HOST_FRAGMENTS` suppresses *all*
+  drainer heuristics for that third-party script (noise tradeoff). That includes generic
+  CDNs mirrored from `client_surface.THIRD_PARTY_ALLOWLIST` (e.g. jsDelivr, unpkg):
+  compromised or malicious packages on those hosts would **not** be reported here —
+  use supply-chain review, SRI, and lockfiles in addition to this signal.
+- Callers should pass `base_origin` as scheme + netloc (e.g. https://example.com).
 
-Allowlist: extends client_surface.THIRD_PARTY_ALLOWLIST with common wallet SDK/CDN
-hosts. Extend the frozenset when adding vetted vendors; substring match on host.
+Correlates with crypto_security TRUST_RISK_PATTERNS where keys/signing appear.
 Authorized scanning only.
 """
 
@@ -19,7 +27,8 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(Path(__file__).parent))
 from client_surface import THIRD_PARTY_ALLOWLIST, Finding
 
-# Substring allowlist on normalized script host (same convention as client_surface).
+# Substring allowlist on normalized script host. Merging THIRD_PARTY_ALLOWLIST reduces
+# false positives from common JS CDNs; see module docstring for the security tradeoff.
 WALLET_SDK_HOST_FRAGMENTS: frozenset[str] = frozenset(THIRD_PARTY_ALLOWLIST) | frozenset(
     (
         "walletconnect.com",

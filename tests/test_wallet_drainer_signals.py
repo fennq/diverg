@@ -37,6 +37,7 @@ def test_malicious_third_party_approval_and_send_tx_heuristic() -> None:
 
 
 def test_allowlisted_cdn_suppressed() -> None:
+    """Encodes a deliberate trust tradeoff: generic CDNs in allowlist skip heuristics."""
     import wallet_drainer_signals as wds
 
     base = "https://example.com"
@@ -47,6 +48,29 @@ def test_allowlisted_cdn_suppressed() -> None:
     """
     out = wds.analyze_wallet_abuse_js(content, js_url, base, deep=False)
     assert out == []
+
+
+def test_wallet_vendor_host_suppressed() -> None:
+    import wallet_drainer_signals as wds
+
+    base = "https://example.com"
+    js_url = "https://explorer.walletconnect.com/bundle.js"
+    content = """
+    token.approve(attacker, amount);
+    eth_sendTransaction({});
+    """
+    assert wds.analyze_wallet_abuse_js(content, js_url, base, deep=False) == []
+
+
+def test_subdomain_mismatch_is_third_party() -> None:
+    """Different subdomains → third-party for this module (stricter than cookie same-site)."""
+    import wallet_drainer_signals as wds
+
+    base = "https://example.com"
+    js_url = "https://cdn.example.com/static/drain-shaped.js"
+    content = "token.approve(x, y);"
+    out = wds.analyze_wallet_abuse_js(content, js_url, base, deep=False)
+    assert any("Third-party" in f.title for f in out)
 
 
 def test_third_party_obfuscation_only_in_deep_scan() -> None:
