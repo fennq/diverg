@@ -112,7 +112,7 @@ class Finding:
     evidence: str
     impact: str
     remediation: str
-    confidence: str = "suspected"  # confirmed | suspected — zero FP: only confirmed when we have usage correlation
+    confidence: str = "suspected"  # confirmed | suspected | heuristic (heuristic = pattern-only, not usage correlation)
 
 
 def _strip_js_comments(js: str) -> str:
