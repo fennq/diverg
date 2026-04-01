@@ -379,86 +379,30 @@
 
           <div class="settings-card inv-blockchain-card">
             <div class="settings-h">
-              <h4>On-chain</h4>
-              <p>Three separate tools: fast RPC check, deep analyst report, or Solana token-holder bundle.</p>
+              <h4>Blockchain</h4>
+              <p>Wallet RPC lookup &amp; Solana token bundle (extension parity)</p>
             </div>
 
             <div class="inv-tool-block">
               <div class="inv-tool-kicker">1 · Quick check</div>
               <h5 class="inv-tool-title">Wallet or contract snapshot</h5>
-              <p class="inv-tool-dek">Balance, Solana account shape, recent signatures (or EVM nonce + optional Etherscan txs). Fast — uses your Helius key from Settings for Solana.</p>
+              <p class="inv-tool-dek">Balance, Solana account shape, recent signatures (or EVM nonce + optional Etherscan txs). Uses your Helius key from Settings for Solana.</p>
               <div class="settings-f">
                 <label class="inv-field-label" for="chainAddr">Address</label>
-                <input type="text" id="chainAddr" placeholder="Solana wallet · 0x wallet/contract · Solana program…" class="input" style="font-family:var(--mono)" autocomplete="off" spellcheck="false">
+                <input type="text" id="chainAddr" placeholder="0x… or Solana address" class="input" style="font-family:var(--mono)" autocomplete="off" spellcheck="false">
               </div>
-              <p class="inv-hint">Ethereum <span class="mono">0x…</span> uses public RPC; if the server has <span class="mono">ETHERSCAN_API_KEY</span>, recent mainnet transfers appear in the summary.</p>
-              <button class="btn btn-primary" onclick="runChainLookup()">Run quick lookup</button>
+              <p class="inv-hint">Solana balance uses your Helius key from Settings. Ethereum <span class="mono">0x…</span>: public RPC (balance / nonce); when <span class="mono">ETHERSCAN_API_KEY</span> is set on the server, recent mainnet txs are included.</p>
+              <button class="btn btn-primary" onclick="runChainLookup()">Look up address</button>
               <div id="chainOut" class="inv-out inv-out-empty">
-                <div class="inv-summary" id="chainSummary">Enter an address and run quick lookup.</div>
+                <div class="inv-summary" id="chainSummary">Enter an address to look up.</div>
                 <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="chainRaw"></pre></details>
               </div>
             </div>
 
             <div class="inv-tool-block">
-              <div class="inv-tool-kicker">2 · Analyst report</div>
-              <h5 class="inv-tool-title">Full chain investigation</h5>
-              <p class="inv-tool-dek">Uses the <strong>address in step 1</strong> as the main wallet/contract/deployer (or paste extra token mints/contracts below). Runs the server <strong>blockchain_investigation</strong> skill — not a court-ready report; intelligence for <strong>authorized</strong> follow-up.</p>
-              <details class="inv-what-details">
-                <summary>What you’ll see in the results panel</summary>
-                <ul class="inv-what-list">
-                  <li><strong>Verdict line</strong> — risk band (high / elevated / moderate-low) plus short reasons (e.g. CEX exposure, high-severity findings).</li>
-                  <li><strong>Summary</strong> — numeric risk score (0–100), finding counts, evidence quality; may note sniper/LP/CEX themes when data supports them.</li>
-                  <li><strong>On-chain data</strong> — one line from the server on whether Solscan/Etherscan data was used or skipped (keys missing).</li>
-                  <li><strong>Focus address / deployer</strong> — address, label, explorer button, named counterparties when labels exist.</li>
-                  <li><strong>Tokens tied to this pass</strong> — discovered mints/contracts and mint/freeze-authority warnings when present.</li>
-                  <li><strong>Chronology</strong> — dated money-flow lines from transfer edges when the graph is populated.</li>
-                  <li><strong>Flow highlights</strong> — counterparty notes, CEX routing, outflow snippets.</li>
-                  <li><strong>Red flags</strong> — checklist-style signals (LP removal, mint authority, etc.) — heuristics, not accusations.</li>
-                  <li><strong>Explorer links</strong> — Solscan / Etherscan (or chain explorer) for graph-related addresses.</li>
-                  <li><strong>Flow edges + Mermaid</strong> — sample hops; use &quot;Copy flow as Mermaid&quot; for diagrams elsewhere.</li>
-                  <li><strong>Findings</strong> — full structured list (severity, evidence, source) under the summary blocks.</li>
-                </ul>
-              </details>
-              <p class="inv-hint" style="margin-top:0.5rem">If <span class="mono">SOLSCAN_PRO_API_KEY</span> / <span class="mono">ETHERSCAN_API_KEY</span> (and related keys) are missing on the server, on-chain sections will be thin or skipped — check <strong>Full JSON</strong> → <span class="mono">crime_report.data_sources</span> and errors.</p>
-              <div class="settings-f" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:flex-end">
-                <div>
-                  <label class="inv-field-label" for="chainFullChain">Chain</label>
-                  <select id="chainFullChain" class="input" style="max-width:11rem" title="Chain">
-                    <option value="solana">Solana</option>
-                    <option value="ethereum">Ethereum</option>
-                    <option value="base">Base</option>
-                    <option value="bsc">BSC</option>
-                    <option value="polygon">Polygon</option>
-                    <option value="arbitrum">Arbitrum</option>
-                  </select>
-                </div>
-                <div>
-                  <label class="inv-field-label" for="chainFullDepth">Flow depth</label>
-                  <select id="chainFullDepth" class="input" style="max-width:9rem" title="Flow depth">
-                    <option value="full">Full</option>
-                    <option value="deep">Deep (slower)</option>
-                  </select>
-                </div>
-              </div>
-              <div class="settings-f" style="margin-top:0.5rem">
-                <label class="inv-field-label" for="chainFullTargetUrl">Optional site URL</label>
-                <input type="text" id="chainFullTargetUrl" placeholder="https://… — scrape launchpad / fee copy for context" class="input" style="font-family:var(--mono)" autocomplete="off" spellcheck="false">
-              </div>
-              <div class="settings-f" style="margin-top:0.5rem">
-                <label class="inv-field-label" for="chainFullTokens">Extra token mints / contracts</label>
-                <input type="text" id="chainFullTokens" placeholder="Comma-separated — only if you need tokens in addition to the address above" class="input" style="font-family:var(--mono)" autocomplete="off" spellcheck="false">
-              </div>
-              <button class="btn btn-secondary" onclick="runFullChainInvestigation()">Run full investigation</button>
-              <div id="chainFullOut" class="inv-out inv-out-empty" style="margin-top:0.75rem">
-                <div class="inv-summary" id="chainFullSummary">Run the investigation to see verdict, summary, chronology, flow highlights, red flags, explorer links, and findings — or open Full JSON if the panel is empty (often missing API keys).</div>
-                <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="chainFullRaw"></pre></details>
-              </div>
-            </div>
-
-            <div class="inv-tool-block">
-              <div class="inv-tool-kicker">3 · Solana token only</div>
+              <div class="inv-tool-kicker">2 · Solana token only</div>
               <h5 class="inv-tool-title">Token bundle &amp; holder risk</h5>
-              <p class="inv-tool-dek">Different from steps 1–2: paste the <strong>SPL mint</strong> (token contract), not the wallet from step 1. Holder sampling, same-funder clusters, coordination score — same logic as the browser extension bundle.</p>
+              <p class="inv-tool-dek">Paste the <strong>SPL mint</strong> (token contract), not the wallet from step 1. Holder sampling, same-funder clusters, coordination score — same logic as the browser extension bundle.</p>
               <div class="settings-f">
                 <label class="inv-field-label" for="tokenMint">SPL mint address</label>
                 <input type="text" id="tokenMint" placeholder="Token mint (SPL)" class="input" style="font-family:var(--mono)" autocomplete="off" spellcheck="false">
@@ -476,7 +420,7 @@
               <p class="inv-hint">Outputs risk score, cluster %, bridge/mixer-style signals on funders, optional X mentions of holders.</p>
               <button class="btn btn-secondary" onclick="runTokenBundle()">Analyze token bundle</button>
               <div id="tokenBundleOut" class="inv-out inv-out-empty">
-                <div class="inv-summary" id="tokenBundleSummary">Enter a mint and analyze, or use steps 1–2 for a single wallet/contract.</div>
+                <div class="inv-summary" id="tokenBundleSummary">Enter a mint to analyze, or use step 1 for a wallet/contract snapshot.</div>
                 <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="tokenBundleRaw"></pre></details>
               </div>
             </div>
