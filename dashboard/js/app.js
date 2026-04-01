@@ -26,10 +26,28 @@ function navigate(page) {
 
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
 function toggleUserMenu() { document.getElementById('userMenu').classList.toggle('show'); }
-function logout() { localStorage.removeItem('dv_session'); window.location.reload(); }
+function logout() {
+  localStorage.removeItem('dv_session');
+  localStorage.removeItem('diverg_token');
+  localStorage.removeItem('diverg_user');
+  window.location.href = '/dashboard/login';
+}
+
+function getSessionToken() {
+  return localStorage.getItem('dv_session') || localStorage.getItem('diverg_token') || '';
+}
 
 // ── Init ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  const token = getSessionToken();
+  if (!token) {
+    window.location.href = '/dashboard/login';
+    return;
+  }
+  if (!localStorage.getItem('dv_session') && token) {
+    localStorage.setItem('dv_session', token);
+  }
+
   document.querySelectorAll('.nav-item').forEach(item =>
     item.addEventListener('click', () => navigate(item.dataset.page))
   );
@@ -561,7 +579,7 @@ function updateAnalytics() { updateStats(); renderFindingsPage(); }
 function loadRewards() {
   const apiUrl = getApiUrl();
   fetch(apiUrl + '/api/rewards/me', {
-    headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('dv_session') || '') }
+    headers: { 'Authorization': 'Bearer ' + getSessionToken() }
   })
     .then(r => r.ok ? r.json() : Promise.reject(r))
     .then(data => {
@@ -584,7 +602,7 @@ function loadRewards() {
 function loadLeaderboard(win) {
   const apiUrl = getApiUrl();
   fetch(apiUrl + '/api/rewards/leaderboard?window=' + (win || 'all'), {
-    headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('dv_session') || '') }
+    headers: { 'Authorization': 'Bearer ' + getSessionToken() }
   })
     .then(r => r.ok ? r.json() : Promise.reject(r))
     .then(data => {
