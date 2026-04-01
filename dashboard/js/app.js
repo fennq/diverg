@@ -631,6 +631,61 @@ function runPoc() {
     .catch((err) => termLine(out, ts() + ' PoC failed: ' + err.message, 'red'));
 }
 
+function runBagsIntel() {
+  const mint = document.getElementById('bagsIntelMint').value.trim();
+  if (!mint) return;
+  const out = document.getElementById('bagsIntelOut');
+  out.style.display = 'block'; out.innerHTML = '';
+  termLine(out, ts() + ' Validating mint address...', 'dim');
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
+    termLine(out, ts() + ' Warning: mint format looks unusual (continuing)', 'yellow');
+  }
+  termLine(out, ts() + ' Running Bags Launch Intelligence...', 'accent');
+  termLine(out, ts() + ' Analyzing creator forensics, fee behavior, holder coordination...', 'dim');
+  withProgress(out, 'Bags Launch Intel', () => apiJson('/api/investigation/bags-launch-intel', { mint }))
+    .then((data) => {
+      termLine(out, '', null);
+      termLine(out, ts() + ' Backend responded', 'green');
+      termLine(out, 'Mint       : ' + (data.token_mint || mint), null);
+      if (data.error) {
+        termLine(out, 'Error      : ' + data.error, 'red');
+        return;
+      }
+      const risk = data.risk_assessment || {};
+      const verdict = risk.verdict || 'Unknown';
+      const score = risk.composite_score !== undefined ? risk.composite_score : '?';
+      const verdictCls = /minimal/i.test(verdict) ? 'green' : /low/i.test(verdict) ? 'green' : /moderate/i.test(verdict) ? 'yellow' : 'red';
+      termLine(out, 'Verdict    : ' + verdict + ' (' + score + '/100)', verdictCls);
+
+      const scores = risk.component_scores || {};
+      if (scores.creator !== undefined) termLine(out, 'Creator    : ' + scores.creator + '/100', scores.creator >= 40 ? 'red' : scores.creator >= 15 ? 'yellow' : 'green');
+      if (scores.fee_behavior !== undefined) termLine(out, 'Fees       : ' + scores.fee_behavior + '/100', scores.fee_behavior >= 40 ? 'red' : scores.fee_behavior >= 15 ? 'yellow' : 'green');
+      if (scores.bundle !== undefined) termLine(out, 'Bundle     : ' + scores.bundle + '/100', scores.bundle >= 50 ? 'red' : scores.bundle >= 28 ? 'yellow' : 'green');
+
+      const creator = data.creator_intel || {};
+      const creators = creator.creators || {};
+      if (creators.count !== undefined) termLine(out, 'Creators   : ' + creators.count, null);
+      const handles = (creators.handles || []).slice(0, 3);
+      if (handles.length) termLine(out, 'Handles    : ' + handles.join(', '), 'dim');
+
+      const prevLaunches = (creator.previous_launches || {}).total_previous_launches;
+      if (prevLaunches !== undefined) termLine(out, 'Prev Tokens: ' + prevLaunches, prevLaunches >= 5 ? 'red' : prevLaunches >= 2 ? 'yellow' : 'green');
+
+      const fee = data.fee_behavior || {};
+      const feeFlags = (fee.combined_flags || []).slice(0, 4);
+      feeFlags.forEach((f, i) => termLine(out, 'Fee Flag   : ' + f, 'yellow'));
+
+      const evidence = (risk.evidence || []).slice(0, 5);
+      evidence.forEach((ev, i) => {
+        const cls = /critical/i.test(ev.severity) ? 'red' : /high/i.test(ev.severity) ? 'red' : 'yellow';
+        termLine(out, 'Evidence   : [' + (ev.severity || 'Info') + '] ' + (ev.detail || ev.signal), cls);
+      });
+
+      if (data.duration_sec) termLine(out, 'Duration   : ' + data.duration_sec + 's', 'dim');
+    })
+    .catch((err) => termLine(out, ts() + ' Bags Intel failed: ' + err.message, 'red'));
+}
+
 // ── History & Stats ──────────────────────────────────────────────────────
 function addToHistory(url, scope, findingsCount, score, critCount, highCount) {
   const scans = JSON.parse(localStorage.getItem('dv_scans') || '[]');
@@ -823,6 +878,7 @@ function formatReason(reason) {
     scan_complete: 'Scan Completed', investigation_blockchain: 'Blockchain Investigation',
     investigation_blockchain_full: 'Full Chain Investigation', investigation_domain: 'Domain Investigation',
     investigation_reputation: 'Reputation Check', investigation_solana_bundle: 'Solana Bundle Analysis',
+    investigation_bags_launch_intel: 'Bags Launch Intel',
     poc_simulate: 'PoC Simulation', referral_signup_referrer: 'Referral (You)',
     referral_signup_referee: 'Referral Bonus', referral_first_scan: 'Referral First Scan',
   };

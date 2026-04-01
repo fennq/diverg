@@ -1450,6 +1450,77 @@ def investigation_solana_bundle():
         )
 
 
+_bags_intel_lock = Lock()
+
+BAGS_INTEL_HTTP_TIMEOUT_SEC = max(60, int(os.environ.get("DIVERG_BAGS_INTEL_TIMEOUT_SEC", "180")))
+
+
+@app.route("/api/investigation/bags-launch-intel", methods=["OPTIONS"])
+def investigation_bags_launch_intel_options():
+    return "", 204
+
+
+@app.route("/api/investigation/bags-launch-intel", methods=["POST"])
+@require_auth
+def investigation_bags_launch_intel():
+    """
+    Bags Launch Intelligence — full forensic report on a Bags.fm token launch.
+    Creator forensics, fee behavior analysis, bundle coordination, composite risk score.
+    """
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json(silent=True) or {}
+    mint = sanitize_text(data.get("mint") or "", 128).strip()
+    if not mint:
+        return jsonify({"error": "Missing mint address"}), 400
+    if not re.match(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$", mint):
+        return jsonify({"error": "Invalid Solana mint address format"}), 400
+
+    scan_type = sanitize_text(data.get("scan_type") or "full", 16).lower().strip()
+    if scan_type not in ("full", "quick"):
+        scan_type = "full"
+
+    skills_path = str(ROOT / "skills")
+    inv_path = str(ROOT / "investigation")
+    for p in (skills_path, inv_path):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+
+    log = logging.getLogger("diverg.api")
+    log.info("bags_launch_intel user_id=%s mint=%s scan_type=%s", g.user.get("id"), mint, scan_type)
+
+    def _invoke_skill() -> str:
+        import bags_launch_intel as bli
+
+        return bli.run(token_mint=mint, scan_type=scan_type)
+
+    try:
+        with _bags_intel_lock:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                fut = pool.submit(_invoke_skill)
+                raw_json = fut.result(timeout=float(BAGS_INTEL_HTTP_TIMEOUT_SEC))
+    except concurrent.futures.TimeoutError:
+        log.warning("bags_launch_intel timeout user_id=%s mint=%s", g.user.get("id"), mint)
+        return jsonify({"error": "Bags intel investigation timed out. Try again or use scan_type=quick."}), 504
+    except Exception as e:
+        log.exception("bags_launch_intel failed: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+    try:
+        payload = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid investigation output"}), 500
+
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Unexpected investigation shape"}), 500
+
+    _reward_investigation(g.user["id"], "bags_launch_intel")
+    try:
+        return jsonify(payload)
+    except TypeError:
+        return Response(json.dumps(payload, default=str), mimetype="application/json")
+
+
 # ── Shared API helpers (history, rewards) ───────────────────────────────────
 
 def _safe_int(val, default: int, minimum: int = 0, maximum: int = 999999) -> int:
