@@ -33,6 +33,16 @@ Dashboard endpoints:
   GET  /api/stats                Aggregate dashboard statistics
   GET  /api/health               Health check
 
+Continuous Threat Monitor (CTM):
+  POST /api/watches                    Create a watch target
+  GET  /api/watches                    List user's watches
+  GET  /api/watches/<id>               Get watch details
+  PATCH /api/watches/<id>              Update watch (cadence, scope, status, webhook)
+  DELETE /api/watches/<id>             Delete a watch
+  GET  /api/watches/<id>/runs          List recent runs with diffs
+  GET  /api/watches/<id>/trend         Risk score trend data
+  POST /api/watches/<id>/trigger       Manually trigger a run now
+
 Dashboard static files:
   GET  /dashboard/               Serve dashboard/index.html
   GET  /dashboard/<path>         Serve dashboard static assets
@@ -99,6 +109,16 @@ try:
     import requests
 except ImportError:
     requests = None
+
+try:
+    from watch_manager import (
+        init_watch_tables, create_watch, get_watch, list_watches, update_watch,
+        delete_watch, list_runs, get_trend, WatchScheduler, VALID_CADENCES,
+    )
+    WATCH_AVAILABLE = True
+except Exception as _we:
+    print(f"Warning: Watch manager not available: {_we}")
+    WATCH_AVAILABLE = False
 
 # ── Config ────────────────────────────────────────────────────────────────
 
@@ -246,6 +266,9 @@ def init_db():
                ON points_ledger (user_id, reason, IFNULL(ref_type,''), ref_id)
                WHERE ref_id IS NOT NULL"""
         )
+        # CTM tables
+        if WATCH_AVAILABLE:
+            init_watch_tables(conn)
 
 
 def _count_severity(findings: list, level: str) -> int:
@@ -399,6 +422,17 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_SIZE
 VALID_SCOPES = ("full", "quick", "crypto", "recon", "web", "api", "passive", "attack")
 
 init_db()
+
+# ── CTM scheduler ────────────────────────────────────────────────────────────
+
+_watch_scheduler: WatchScheduler | None = None
+if WATCH_AVAILABLE and SCANNER_AVAILABLE:
+    _watch_scheduler = WatchScheduler(
+        db_factory=_db,
+        scan_fn=run_web_scan,
+        save_scan_fn=save_scan,
+    )
+    _watch_scheduler.start()
 
 
 @app.after_request
@@ -1631,6 +1665,186 @@ def stats():
     })
 
 
+# ── CTM Watch endpoints ──────────────────────────────────────────────────────
+
+@app.route("/api/watches", methods=["OPTIONS"])
+def watches_options():
+    return "", 204
+
+
+@app.route("/api/watches", methods=["POST"])
+@require_auth
+def watches_create():
+    if not WATCH_AVAILABLE:
+        return jsonify({"error": "Watch module not available"}), 503
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json(silent=True) or {}
+
+    target = sanitize_text(data.get("url") or data.get("target_url") or "", 500)
+    if not target:
+        return jsonify({"error": "url is required"}), 400
+    if not target.startswith("http"):
+        target = f"https://{target}"
+
+    scope = (data.get("scope") or "quick").strip().lower()
+    if scope not in VALID_SCOPES:
+        return jsonify({"error": f"Invalid scope. Choose from: {', '.join(VALID_SCOPES)}"}), 400
+
+    cadence = (data.get("cadence") or "daily").strip().lower()
+    if cadence not in VALID_CADENCES:
+        return jsonify({"error": f"Invalid cadence. Choose from: {', '.join(VALID_CADENCES)}"}), 400
+
+    webhook_url = sanitize_text(data.get("webhook_url") or "", 500)
+
+    try:
+        with _db() as conn:
+            watch = create_watch(conn, g.user["id"], target, scope, cadence, webhook_url)
+        return jsonify(watch), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/watches", methods=["GET"])
+@require_auth
+def watches_list():
+    if not WATCH_AVAILABLE:
+        return jsonify({"error": "Watch module not available"}), 503
+    with _db() as conn:
+        watches = list_watches(conn, g.user["id"])
+    return jsonify({"watches": watches, "total": len(watches)})
+
+
+@app.route("/api/watches/<watch_id>", methods=["GET"])
+@require_auth
+def watches_get(watch_id):
+    if not WATCH_AVAILABLE:
+        return jsonify({"error": "Watch module not available"}), 503
+    with _db() as conn:
+        watch = get_watch(conn, watch_id, g.user["id"])
+    if not watch:
+        return jsonify({"error": "Watch not found"}), 404
+    return jsonify(watch)
+
+
+@app.route("/api/watches/<watch_id>", methods=["PATCH", "OPTIONS"])
+@require_auth
+def watches_update(watch_id):
+    if request.method == "OPTIONS":
+        return "", 204
+    if not WATCH_AVAILABLE:
+        return jsonify({"error": "Watch module not available"}), 503
+    data = request.get_json(silent=True) or {}
+
+    try:
+        with _db() as conn:
+            watch = update_watch(
+                conn, watch_id, g.user["id"],
+                cadence=data.get("cadence"),
+                webhook_url=data.get("webhook_url"),
+                scope=data.get("scope"),
+                status=data.get("status"),
+            )
+        if not watch:
+            return jsonify({"error": "Watch not found"}), 404
+        return jsonify(watch)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/watches/<watch_id>", methods=["DELETE"])
+@require_auth
+def watches_delete(watch_id):
+    if not WATCH_AVAILABLE:
+        return jsonify({"error": "Watch module not available"}), 503
+    with _db() as conn:
+        deleted = delete_watch(conn, watch_id, g.user["id"])
+    if not deleted:
+        return jsonify({"error": "Watch not found"}), 404
+    return jsonify({"deleted": True})
+
+
+@app.route("/api/watches/<watch_id>/runs", methods=["GET"])
+@require_auth
+def watches_runs(watch_id):
+    if not WATCH_AVAILABLE:
+        return jsonify({"error": "Watch module not available"}), 503
+    limit = _safe_int(request.args.get("limit"), 30, 1, 100)
+    with _db() as conn:
+        watch = get_watch(conn, watch_id, g.user["id"])
+        if not watch:
+            return jsonify({"error": "Watch not found"}), 404
+        runs = list_runs(conn, watch_id, limit)
+    # Parse diff_json for each run
+    for r in runs:
+        if r.get("diff_json"):
+            try:
+                r["diff"] = json.loads(r["diff_json"])
+            except (json.JSONDecodeError, TypeError):
+                r["diff"] = None
+        else:
+            r["diff"] = None
+        r.pop("diff_json", None)
+    return jsonify({"watch_id": watch_id, "runs": runs, "total": len(runs)})
+
+
+@app.route("/api/watches/<watch_id>/trend", methods=["GET"])
+@require_auth
+def watches_trend(watch_id):
+    if not WATCH_AVAILABLE:
+        return jsonify({"error": "Watch module not available"}), 503
+    limit = _safe_int(request.args.get("limit"), 30, 1, 100)
+    with _db() as conn:
+        watch = get_watch(conn, watch_id, g.user["id"])
+        if not watch:
+            return jsonify({"error": "Watch not found"}), 404
+        points = get_trend(conn, watch_id, limit)
+    # Compute overall trend direction
+    scores = [p["risk_score"] for p in points if p.get("risk_score") is not None]
+    trend = "insufficient_data"
+    if len(scores) >= 2:
+        first_half = scores[:len(scores) // 2]
+        second_half = scores[len(scores) // 2:]
+        avg_first = sum(first_half) / len(first_half)
+        avg_second = sum(second_half) / len(second_half)
+        delta = avg_second - avg_first
+        if delta > 5:
+            trend = "improving"
+        elif delta < -5:
+            trend = "degrading"
+        else:
+            trend = "stable"
+    return jsonify({
+        "watch_id": watch_id,
+        "target_url": watch["target_url"],
+        "trend": trend,
+        "data_points": points,
+    })
+
+
+@app.route("/api/watches/<watch_id>/trigger", methods=["POST", "OPTIONS"])
+@require_auth
+def watches_trigger(watch_id):
+    """Manually trigger a watch run immediately."""
+    if request.method == "OPTIONS":
+        return "", 204
+    if not WATCH_AVAILABLE or not SCANNER_AVAILABLE:
+        return jsonify({"error": "Watch/scanner module not available"}), 503
+    with _db() as conn:
+        watch = get_watch(conn, watch_id, g.user["id"])
+    if not watch:
+        return jsonify({"error": "Watch not found"}), 404
+    if not _watch_scheduler:
+        return jsonify({"error": "Scheduler not running"}), 503
+    try:
+        result = _watch_scheduler.run_now(watch, _db)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Health ────────────────────────────────────────────────────────────────────
 
 @app.route("/api/health", methods=["GET"])
@@ -1641,13 +1855,22 @@ def health():
             user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     except Exception:
         pass
+    watch_count = 0
+    if WATCH_AVAILABLE:
+        try:
+            with _db() as conn:
+                watch_count = conn.execute("SELECT COUNT(*) FROM watches WHERE status = 'active'").fetchone()[0]
+        except Exception:
+            pass
     return jsonify({
         "status": "ok",
         "service": "diverg-console",
-        "version": "2.3",
+        "version": "2.4",
         "db_path": str(DB_PATH),
         "db_exists": DB_PATH.exists(),
         "users": user_count,
+        "ctm_enabled": WATCH_AVAILABLE and SCANNER_AVAILABLE,
+        "ctm_active_watches": watch_count,
     })
 
 
