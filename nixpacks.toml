@@ -2,7 +2,9 @@
 providers = ["python"]
 
 [phases.setup]
-aptPkgs = ["...", "nmap"]
+# Keep setup minimal for Railway build speed/stability.
+# Recon degrades gracefully when nmap binary is unavailable.
+aptPkgs = []
 
 [start]
 cmd = "python3 api_server.py"
