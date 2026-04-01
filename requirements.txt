@@ -7,7 +7,8 @@ cloudscraper>=1.2.0
 beautifulsoup4>=4.12.0
 cryptography>=42.0.0
 python-telegram-bot>=21.0
-Wappalyzer>=0.3.1
+# Optional: keep recon running even when tech fingerprint package is unavailable
+# Wappalyzer>=0.3.1
 openapi-spec-validator>=0.7.0
 aiohttp>=3.9.0
 openai>=1.30.0
