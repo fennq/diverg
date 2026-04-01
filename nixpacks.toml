@@ -3,9 +3,9 @@ providers = ["python"]
 [phases.setup]
 aptPkgs = []
 
-[phases.install]
-cmds = ["python3 -m pip install --prefer-binary --no-compile -r requirements.txt"]
-cacheDirectories = ["/root/.cache/pip"]
+[variables]
+PIP_PREFER_BINARY = "1"
+PIP_NO_COMPILE = "1"
 
 [start]
 cmd = "python3 api_server.py"
