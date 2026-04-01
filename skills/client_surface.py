@@ -449,6 +449,8 @@ def run(target_url: str, scan_type: str = "full") -> str:
 
     deep = (scan_type or "").lower() == "deep"
     max_js = 24 if deep else MAX_JS_FILES
+    from wallet_drainer_signals import analyze_wallet_abuse_js
+
     js_urls = _collect_js_urls(target_url, run_start, max_files=max_js)
     report.js_files_scanned = len(js_urls)
     all_endpoints: set[str] = set()
@@ -497,6 +499,12 @@ def run(target_url: str, scan_type: str = "full") -> str:
             if key not in seen_sink_findings:
                 seen_sink_findings.add(key)
                 report.findings.append(f)
+        if not _over_budget(run_start):
+            for f in analyze_wallet_abuse_js(content_stripped, js_url, base, deep=deep):
+                key = (f.title, js_url)
+                if key not in seen_sink_findings:
+                    seen_sink_findings.add(key)
+                    report.findings.append(f)
 
     report.extracted_endpoints = sorted(all_endpoints)[:80]
     if report.extracted_endpoints and not any("extracted_endpoints" in f.evidence for f in report.findings):

@@ -241,7 +241,10 @@ def _scan_weak_crypto_js(base_url: str, run_start: float) -> list[Finding]:
                         category="Crypto / Trust",
                         evidence="Client-side key or signing. Could enable theft or backdoor if keys are exfiltrated or logic is malicious.",
                         impact="Verify key custody and intent; client-side handling is high risk for crypto/wallet apps.",
-                        remediation="Prefer backend signing and key custody; audit for exfil and malicious logic.",
+                        remediation=(
+                            "Prefer backend signing and key custody; audit for exfil and malicious logic. "
+                            "Also review client_surface Web3 drainer heuristics on the same URLs."
+                        ),
                     ))
                     break
     except requests.RequestException:

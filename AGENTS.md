@@ -20,7 +20,7 @@ Diverg is an AI-assisted security testing platform. See `README.md` for full det
 
 ### Testing
 
-- **Unit tests**: `python -m pytest tests/ -v` — 38 tests covering points ledger, Solana bundle signals, and fact/accuracy checks.
+- **Unit tests**: `python -m pytest tests/ -v` — covers points ledger, Solana bundle signals, fact/accuracy checks, and Web3 drainer heuristics (`test_wallet_drainer_signals`).
 - **Functional checks**: `python scripts/verify_functional.py` — cache, attack plan, skill execution, and accuracy tests. The "Real skill run" check may fail in sandboxed environments due to DNS restrictions; this is expected.
 - **diverg-recon (Rust)**: `cd native/diverg-recon && cargo test` — CI also builds this crate on changes under `native/diverg-recon/`.
 - **Security tests**: `python test_security.py` — requires the Flask server to be running on port 5000.
@@ -34,3 +34,4 @@ Diverg is an AI-assisted security testing platform. See `README.md` for full det
 - **SSL errors in sandboxed environments**: Domain investigations may show SSL certificate verification errors due to missing CA certificates in the sandbox. This doesn't affect core functionality.
 - **`.env` file**: Copy `.env.example` to `.env`. At minimum set `OPENAI_API_KEY` for full scan features. See `.env.example` for all optional keys.
 - **The Flask server does NOT hot-reload by default**. Restart the process after code changes.
+- **Web3 drainer signals** (`wallet_drainer_signals` via `client_surface`): heuristic pattern matches only — not proof of malicious intent. Use for authorized assessments; combine with manual review.
