@@ -1,0 +1,98 @@
+name: "Diverg Security Scan"
+description: "Run a Diverg security scan and optionally upload SARIF to GitHub Security tab"
+branding:
+  icon: "shield"
+  color: "red"
+
+inputs:
+  target:
+    description: "URL to scan (e.g. https://example.com)"
+    required: true
+  scope:
+    description: "Scan profile: full, quick, crypto, recon, web, api, passive"
+    required: false
+    default: "quick"
+  fail-on:
+    description: "Fail the step if any finding meets or exceeds this severity (critical, high, medium, low). Leave empty to never fail."
+    required: false
+    default: "high"
+  sarif-upload:
+    description: "Upload SARIF results to GitHub Code Scanning"
+    required: false
+    default: "true"
+  python-version:
+    description: "Python version to use"
+    required: false
+    default: "3.12"
+
+outputs:
+  sarif-file:
+    description: "Path to the generated SARIF file"
+    value: ${{ steps.scan.outputs.sarif-file }}
+  findings-count:
+    description: "Total number of findings"
+    value: ${{ steps.scan.outputs.findings-count }}
+  gate-passed:
+    description: "Whether the severity gate passed (true/false)"
+    value: ${{ steps.scan.outputs.gate-passed }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        pip install -q -r ${{ github.action_path }}/requirements.txt
+
+    - name: Run Diverg scan
+      id: scan
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        SARIF_FILE="${RUNNER_TEMP}/diverg-results.sarif"
+        echo "sarif-file=${SARIF_FILE}" >> "$GITHUB_OUTPUT"
+
+        FAIL_ARG=""
+        if [ -n "${{ inputs.fail-on }}" ]; then
+          FAIL_ARG="--fail-on ${{ inputs.fail-on }}"
+        fi
+
+        set +e
+        python orchestrator.py \
+          --target "${{ inputs.target }}" \
+          --scope "${{ inputs.scope }}" \
+          --output sarif \
+          --output-file "${SARIF_FILE}" \
+          ${FAIL_ARG}
+        EXIT_CODE=$?
+        set -e
+
+        COUNT=$(python -c "
+        import json, sys
+        try:
+            data = json.load(open('${SARIF_FILE}'))
+            print(len(data.get('runs', [{}])[0].get('results', [])))
+        except Exception:
+            print('0')
+        ")
+        echo "findings-count=${COUNT}" >> "$GITHUB_OUTPUT"
+
+        if [ $EXIT_CODE -eq 0 ]; then
+          echo "gate-passed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "gate-passed=false" >> "$GITHUB_OUTPUT"
+        fi
+
+        exit $EXIT_CODE
+
+    - name: Upload SARIF to GitHub Security
+      if: always() && inputs.sarif-upload == 'true'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.scan.outputs.sarif-file }}
+        category: diverg-security-scan

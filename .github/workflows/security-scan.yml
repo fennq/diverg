@@ -1,0 +1,66 @@
+name: Diverg Security Scan
+
+on:
+  # Run on pushes to main and on pull requests
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Allow manual trigger with custom target
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "URL to scan"
+        required: true
+        default: "https://example.com"
+      scope:
+        description: "Scan scope"
+        required: false
+        default: "quick"
+      fail-on:
+        description: "Fail on severity (critical, high, medium, low)"
+        required: false
+        default: "high"
+
+permissions:
+  security-events: write
+  contents: read
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -q -r requirements.txt
+
+      - name: Run Diverg scan
+        id: scan
+        continue-on-error: true
+        run: |
+          python orchestrator.py \
+            --target "${{ github.event.inputs.target || 'https://example.com' }}" \
+            --scope "${{ github.event.inputs.scope || 'quick' }}" \
+            --output sarif \
+            --output-file "${{ runner.temp }}/diverg-results.sarif" \
+            --fail-on "${{ github.event.inputs.fail-on || 'high' }}"
+
+      - name: Upload SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ runner.temp }}/diverg-results.sarif
+          category: diverg-security-scan
+
+      - name: Check gate result
+        if: steps.scan.outcome == 'failure'
+        run: |
+          echo "::error::Diverg security gate failed — findings at or above threshold"
+          exit 1

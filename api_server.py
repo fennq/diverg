@@ -120,8 +120,19 @@ def api_scan():
     scope = (data.get("scope") or "full").strip().lower()
     if scope not in ("full", "quick", "crypto", "recon", "web", "api", "passive", "attack"):
         scope = "full"
+    output_format = (data.get("format") or "json").strip().lower()
     try:
         result = run_web_scan(url, scope=scope, goal=goal)
+
+        if output_format == "sarif":
+            from sarif_output import findings_to_sarif
+            sarif = findings_to_sarif(
+                result["findings"],
+                target_url=result["target_url"],
+                scanned_at=result["scanned_at"],
+            )
+            return jsonify(sarif)
+
         return jsonify({
             "target_url": result["target_url"],
             "findings": result["findings"],

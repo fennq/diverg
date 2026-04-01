@@ -1691,7 +1691,15 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
     yield {"event": "done", "report": report}
 
 
-def run_direct(target: str, scope: str, report_type: str) -> None:
+def run_direct(
+    target: str,
+    scope: str,
+    report_type: str,
+    *,
+    output_format: str = "text",
+    output_file: str | None = None,
+    fail_on: str | None = None,
+) -> None:
     skills_to_run = SCAN_PROFILES.get(scope, SCAN_PROFILES["full"])
 
     domain, target_url = _extract_scan_target(target)
@@ -1720,38 +1728,88 @@ def run_direct(target: str, scope: str, report_type: str) -> None:
 
     findings = aggregate_findings(results)
     company_surfaces = aggregate_company_surfaces(results)
-    print_summary(findings, target)
+    scan_timestamp = datetime.now(timezone.utc).isoformat()
 
-    # Save raw results to JSON
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    output_dir = Path(__file__).parent / "reports"
-    output_dir.mkdir(exist_ok=True)
-    report_path = output_dir / f"sectester_{domain}_{timestamp}.json"
+    # --- Structured output (SARIF / JSON) ---
+    if output_format in ("sarif", "json"):
+        if output_format == "sarif":
+            from sarif_output import findings_to_sarif
+            payload = findings_to_sarif(findings, target_url=target_url, scanned_at=scan_timestamp)
+        else:
+            payload = {
+                "target": target,
+                "scope": scope,
+                "timestamp": scan_timestamp,
+                "summary": {
+                    "total_findings": len(findings),
+                    "critical": sum(1 for f in findings if f.get("severity") == "Critical"),
+                    "high": sum(1 for f in findings if f.get("severity") == "High"),
+                    "medium": sum(1 for f in findings if f.get("severity") == "Medium"),
+                    "low": sum(1 for f in findings if f.get("severity") == "Low"),
+                    "info": sum(1 for f in findings if f.get("severity") == "Info"),
+                },
+                "findings": findings,
+            }
 
-    full_report = {
-        "target": target,
-        "scope": scope,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "summary": {
-            "total_findings": len(findings),
-            "critical": sum(1 for f in findings if f.get("severity") == "Critical"),
-            "high": sum(1 for f in findings if f.get("severity") == "High"),
-            "medium": sum(1 for f in findings if f.get("severity") == "Medium"),
-            "low": sum(1 for f in findings if f.get("severity") == "Low"),
-            "info": sum(1 for f in findings if f.get("severity") == "Info"),
-            "company_surfaces": len(company_surfaces),
-        },
-        "findings": findings,
-        "company_surfaces": company_surfaces,
-        "openclaw_manifest": build_openclaw_manifest(target, scope, report_type),
-        "raw_results": results,
-    }
+        output_text = json.dumps(payload, indent=2, default=str)
+        if output_file:
+            Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+            Path(output_file).write_text(output_text)
+            print(f"  Output written to {output_file}", file=sys.stderr)
+        else:
+            print(output_text)
 
-    report_path.write_text(json.dumps(full_report, indent=2, default=str))
-    print(f"  Report saved: {report_path}")
+    # --- Default text output (original behaviour) ---
+    else:
+        print_summary(findings, target)
 
-    # Send to Telegram
-    send_telegram_report(findings, target, report_type)
+        ts_file = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        output_dir = Path(__file__).parent / "reports"
+        output_dir.mkdir(exist_ok=True)
+        report_path = output_dir / f"sectester_{domain}_{ts_file}.json"
+
+        full_report = {
+            "target": target,
+            "scope": scope,
+            "timestamp": scan_timestamp,
+            "summary": {
+                "total_findings": len(findings),
+                "critical": sum(1 for f in findings if f.get("severity") == "Critical"),
+                "high": sum(1 for f in findings if f.get("severity") == "High"),
+                "medium": sum(1 for f in findings if f.get("severity") == "Medium"),
+                "low": sum(1 for f in findings if f.get("severity") == "Low"),
+                "info": sum(1 for f in findings if f.get("severity") == "Info"),
+                "company_surfaces": len(company_surfaces),
+            },
+            "findings": findings,
+            "company_surfaces": company_surfaces,
+            "openclaw_manifest": build_openclaw_manifest(target, scope, report_type),
+            "raw_results": results,
+        }
+
+        report_path.write_text(json.dumps(full_report, indent=2, default=str))
+        print(f"  Report saved: {report_path}")
+        send_telegram_report(findings, target, report_type)
+
+    # --- Severity gate ---
+    if fail_on:
+        from sarif_output import check_severity_gate
+        if check_severity_gate(findings, fail_on):
+            count = sum(1 for f in findings if f.get("severity", "").lower() in _gate_severities(fail_on))
+            print(f"  Gate FAILED: {count} finding(s) at or above '{fail_on}' severity", file=sys.stderr)
+            sys.exit(1)
+        else:
+            print(f"  Gate passed: no findings at or above '{fail_on}' severity", file=sys.stderr)
+
+
+def _gate_severities(fail_on: str) -> set[str]:
+    """Return the set of severity names at or above the threshold."""
+    order = ["low", "medium", "high", "critical"]
+    try:
+        idx = order.index(fail_on.lower())
+    except ValueError:
+        return set()
+    return set(order[idx:])
 
 
 # ---------------------------------------------------------------------------
@@ -1769,18 +1827,26 @@ def main() -> None:
                         help="Telegram report format (default: summary)")
     parser.add_argument("--use-openclaw", action="store_true",
                         help="Use optional OpenClaw multi-agent session instead of running skills directly")
+    parser.add_argument("--output", default="text", choices=["text", "json", "sarif"],
+                        help="Output format: text (default), json, or sarif")
+    parser.add_argument("--output-file", default=None, metavar="PATH",
+                        help="Write output to file instead of stdout")
+    parser.add_argument("--fail-on", default=None, choices=["critical", "high", "medium", "low"],
+                        help="Exit with code 1 if any finding meets or exceeds this severity")
 
     args = parser.parse_args()
 
-    print(f"  Target:  {args.target}")
-    print(f"  Scope:   {args.scope}")
-    print(f"  Profile: {', '.join(SCAN_PROFILES[args.scope])}")
-    print(f"  Report:  {args.report}")
+    print(f"  Target:  {args.target}", file=sys.stderr)
+    print(f"  Scope:   {args.scope}", file=sys.stderr)
+    print(f"  Profile: {', '.join(SCAN_PROFILES[args.scope])}", file=sys.stderr)
+    print(f"  Report:  {args.report}", file=sys.stderr)
 
     if args.use_openclaw:
         asyncio.run(run_via_openclaw(args.target, args.scope, args.report))
     else:
-        run_direct(args.target, args.scope, args.report)
+        run_direct(args.target, args.scope, args.report,
+                   output_format=args.output, output_file=args.output_file,
+                   fail_on=args.fail_on)
 
 
 if __name__ == "__main__":
