@@ -57,6 +57,7 @@ from datetime import datetime, timezone, timedelta
 from functools import wraps
 from pathlib import Path
 from threading import Lock
+
 import copy
 
 ROOT = Path(__file__).resolve().parent
@@ -869,7 +870,6 @@ _blockchain_full_lock = Lock()
 
 _ETH_ADDR_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
-# Full skill can run ~55s internally; allow headroom for slow RPCs.
 BLOCKCHAIN_FULL_HTTP_TIMEOUT_SEC = max(60, int(os.environ.get("DIVERG_BLOCKCHAIN_FULL_TIMEOUT_SEC", "120")))
 BLOCKCHAIN_FULL_MAX_FINDINGS = min(500, max(40, int(os.environ.get("DIVERG_BLOCKCHAIN_FULL_MAX_FINDINGS", "120"))))
 BLOCKCHAIN_FULL_MAX_FLOW_EDGES = min(300, max(40, int(os.environ.get("DIVERG_BLOCKCHAIN_FULL_MAX_FLOW_EDGES", "150"))))
