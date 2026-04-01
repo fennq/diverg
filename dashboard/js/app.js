@@ -95,7 +95,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 function getApiUrl() {
-  return (localStorage.getItem('dv_api_url') || 'http://127.0.0.1:5000').replace(/\/+$/, '');
+  const stored = (localStorage.getItem('dv_api_url') || '').trim();
+  const currentOrigin = window.location.origin.replace(/\/+$/, '');
+  const isCurrentLocal = /localhost|127\.0\.0\.1/i.test(window.location.hostname);
+  const isStoredLocal = /localhost|127\.0\.0\.1/i.test(stored);
+
+  // Prevent production dashboards from accidentally pointing at local dev API.
+  if (!isCurrentLocal && isStoredLocal) {
+    localStorage.setItem('dv_api_url', currentOrigin);
+    return currentOrigin;
+  }
+
+  return (stored || currentOrigin).replace(/\/+$/, '');
 }
 
 function ts() {
@@ -709,7 +720,7 @@ function copyReferral() {
 function saveSettings() { localStorage.setItem('dv_api_url', document.getElementById('apiUrl').value.trim()); alert('Saved'); }
 
 function testConnection() {
-  const u = document.getElementById('apiUrl').value.trim() || 'http://127.0.0.1:5000';
+  const u = document.getElementById('apiUrl').value.trim() || getApiUrl();
   fetch(u + '/api/health').then(r => r.ok ? alert('Connected') : alert('Error')).catch(() => alert('Failed'));
 }
 
@@ -725,7 +736,7 @@ function testHelius() {
 }
 
 function loadSettings() {
-  document.getElementById('apiUrl').value = localStorage.getItem('dv_api_url') || 'http://127.0.0.1:5000';
+  document.getElementById('apiUrl').value = getApiUrl();
   document.getElementById('heliusKey').value = localStorage.getItem('dv_helius_key') || '';
   document.getElementById('heliusNetwork').value = localStorage.getItem('dv_helius_network') || 'mainnet';
 }
