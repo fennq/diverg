@@ -30,7 +30,7 @@ function logout() {
   localStorage.removeItem('dv_session');
   localStorage.removeItem('diverg_token');
   localStorage.removeItem('diverg_user');
-  window.location.href = '/dashboard/login';
+  window.location.href = '/dashboard/login.html';
 }
 
 function getSessionToken() {
@@ -41,7 +41,7 @@ function getSessionToken() {
 document.addEventListener('DOMContentLoaded', () => {
   const token = getSessionToken();
   if (!token) {
-    window.location.href = '/dashboard/login';
+    window.location.href = '/dashboard/login.html';
     return;
   }
   if (!localStorage.getItem('dv_session') && token) {
