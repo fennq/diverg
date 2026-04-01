@@ -5,7 +5,7 @@
   const API = window.location.origin;
   let isRegister = false;
 
-  if (localStorage.getItem('diverg_token')) {
+  if (localStorage.getItem('diverg_token') || localStorage.getItem('dv_session')) {
     window.location.href = '/dashboard/';
     return;
   }
@@ -106,7 +106,9 @@
         return;
       }
 
+      // Keep both keys in sync for backward compatibility.
       localStorage.setItem('diverg_token', data.token);
+      localStorage.setItem('dv_session', data.token);
       localStorage.setItem('diverg_user', JSON.stringify(data.user));
       try {
         sessionStorage.removeItem('diverg_ref');
