@@ -501,28 +501,54 @@ function launchScan() {
   progressBox.classList.add('show');
   document.getElementById('scanResults').style.display = 'none';
 
-  termLine(terminal, ts() + ' ─── Diverg Scan Engine (live) ───', 'accent');
+  termLine(terminal, ts() + ' ─── Diverg Scan Engine ───', 'accent');
   termLine(terminal, ts() + ' Target: ' + url, null);
   termLine(terminal, ts() + ' Scope:  ' + scope.toUpperCase(), null);
-  termLine(terminal, ts() + ' Calling /api/scan ...', 'dim');
+  termLine(terminal, ts() + ' Connecting to scan engine...', 'dim');
+
+  let apiDone = false;
+  let apiResult = null;
+  let apiError = null;
 
   apiJson('/api/scan', { url, scope })
-    .then((data) => {
-      const findings = Array.isArray(data.findings) ? data.findings : [];
-      const attackPaths = Array.isArray(data.attack_paths) ? data.attack_paths : [];
-      termLine(terminal, ts() + ' Scan complete.', 'green');
-      termLine(terminal, ts() + ' Findings: ' + findings.length, findings.length ? 'yellow' : 'dim');
-      if (typeof data.risk_score === 'number') {
-        termLine(terminal, ts() + ' Risk score: ' + data.risk_score + (data.risk_verdict ? ' (' + data.risk_verdict + ')' : ''), 'accent');
+    .then((data) => { apiResult = data; })
+    .catch((err) => { apiError = err; })
+    .finally(() => { apiDone = true; });
+
+  const steps = getScanSteps(scope);
+  let i = 0;
+  function next() {
+    if (apiDone) {
+      if (apiError) {
+        termLine(terminal, ts() + ' Scan failed: ' + apiError.message, 'red');
+        progressBox.classList.remove('show');
+      } else if (apiResult) {
+        const findings = Array.isArray(apiResult.findings) ? apiResult.findings : [];
+        const attackPaths = Array.isArray(apiResult.attack_paths) ? apiResult.attack_paths : [];
+        termLine(terminal, ts() + ' Scan complete.', 'green');
+        termLine(terminal, ts() + ' Findings: ' + findings.length, findings.length ? 'yellow' : 'dim');
+        if (typeof apiResult.risk_score === 'number') {
+          termLine(terminal, ts() + ' Risk score: ' + apiResult.risk_score + (apiResult.risk_verdict ? ' (' + apiResult.risk_verdict + ')' : ''), 'accent');
+        }
+        if (Array.isArray(apiResult.skills_run) && apiResult.skills_run.length) {
+          termLine(terminal, ts() + ' Skills: ' + apiResult.skills_run.join(', '), 'dim');
+        }
+        progressBox.classList.remove('show');
+        showScanResults(url, scope, findings, attackPaths, apiResult.risk_score);
+        syncDashboardData();
       }
-      progressBox.classList.remove('show');
-      showScanResults(url, scope, findings, attackPaths, data.risk_score);
-      syncDashboardData();
-    })
-    .catch((err) => {
-      termLine(terminal, ts() + ' Scan failed: ' + err.message, 'red');
-      progressBox.classList.remove('show');
-    });
+      return;
+    }
+    if (i < steps.length) {
+      termLine(terminal, ts() + ' ' + steps[i].msg, steps[i].cls);
+      i++;
+      setTimeout(next, steps[i - 1].delay);
+    } else {
+      termLine(terminal, ts() + ' Engine processing — waiting for results...', 'dim');
+      setTimeout(next, 2000);
+    }
+  }
+  setTimeout(next, 400);
 }
 
 function showScanResults(url, scope, findingsInput, pathsInput, scoreInput) {
@@ -613,8 +639,8 @@ function runChainLookup() {
   if (!addr) return;
   const out = document.getElementById('chainOut');
   out.style.display = 'block'; out.innerHTML = '';
-  termLine(out, ts() + ' Preflight: validating address + session', 'dim');
-  termLine(out, ts() + ' Querying /api/investigation/blockchain ...', 'accent');
+  termLine(out, ts() + ' Validating address...', 'dim');
+  termLine(out, ts() + ' Running blockchain lookup...', 'accent');
   const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
   withProgress(out, 'Blockchain lookup', () => apiJson('/api/investigation/blockchain', {
     address: addr,
@@ -644,16 +670,16 @@ function runTokenBundle() {
   if (!mint) return;
   const out = document.getElementById('tokenOut');
   out.style.display = 'block'; out.innerHTML = '';
-  termLine(out, ts() + ' Preflight: validating mint + API key + session', 'dim');
+  termLine(out, ts() + ' Validating mint address...', 'dim');
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
     termLine(out, ts() + ' Warning: mint format looks unusual (continuing)', 'yellow');
   }
   const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
   if (!heliusApiKey) {
-    termLine(out, ts() + ' Missing Helius key: set it in Settings for full bundle scan', 'red');
+    termLine(out, ts() + ' Missing Helius API key — add it in Settings to run bundle analysis', 'red');
     return;
   }
-  termLine(out, ts() + ' Calling /api/investigation/solana-bundle (full bundle mode) ...', 'accent');
+  termLine(out, ts() + ' Running full token bundle analysis...', 'accent');
   withProgress(out, 'Token bundle analysis', () => apiJson('/api/investigation/solana-bundle', {
     mint,
     helius_api_key: heliusApiKey,
@@ -712,8 +738,8 @@ function runOsint() {
   if (!domain) return;
   const out = document.getElementById('osintOut');
   out.style.display = 'block'; out.innerHTML = '';
-  termLine(out, ts() + ' Preflight: validating domain + session', 'dim');
-  termLine(out, ts() + ' Calling /api/investigation/domain ...', 'accent');
+  termLine(out, ts() + ' Validating domain...', 'dim');
+  termLine(out, ts() + ' Running domain investigation...', 'accent');
   withProgress(out, 'Domain OSINT', () => apiJson('/api/investigation/domain', { domain }))
     .then((data) => {
       termLine(out, '', null);
@@ -740,8 +766,8 @@ function runPoc() {
   const out = document.getElementById('pocOut');
   out.style.display = 'block'; out.innerHTML = '';
   const apiType = type === 'unauth' ? 'unauthenticated' : type;
-  termLine(out, ts() + ' Preflight: validating URL + PoC type + session', 'dim');
-  termLine(out, ts() + ' Calling /api/poc/simulate (' + apiType + ') ...', 'accent');
+  termLine(out, ts() + ' Validating target URL & PoC type...', 'dim');
+  termLine(out, ts() + ' Running PoC simulation (' + apiType + ')...', 'accent');
   withProgress(out, 'PoC simulation', () => apiJson('/api/poc/simulate', { type: apiType, url, verbose: true }))
     .then((data) => {
       termLine(out, '', null);
