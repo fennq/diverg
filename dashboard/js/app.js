@@ -817,6 +817,42 @@ function _invChainFullSummaryHtml(data) {
   if (cr.risk_score != null) {
     h += `<div class="inv-kv"><span>Risk score</span> ${esc(String(cr.risk_score))}/100</div>`;
   }
+  const dep = cr.deployer_section;
+  if (dep && typeof dep === 'object' && (dep.address || (Array.isArray(dep.counterparties) && dep.counterparties.length))) {
+    h += '<div class="inv-subhead" style="margin-top:0.75rem">Focus address / deployer</div>';
+    if (dep.address) {
+      h += `<div class="inv-kv"><span>Address</span> <span class="mono">${esc(String(dep.address))}</span></div>`;
+    }
+    if (dep.label) {
+      h += `<div class="inv-kv"><span>Label</span> ${esc(String(dep.label))}</div>`;
+    }
+    if (dep.explorer_url) {
+      h += `<div style="margin-top:0.35rem"><a class="btn btn-secondary" style="font-size:0.68rem;padding:0.28rem 0.55rem" href="${esc(String(dep.explorer_url))}" target="_blank" rel="noopener noreferrer">Open in explorer</a></div>`;
+    }
+    const cps = dep.counterparties;
+    if (Array.isArray(cps) && cps.length) {
+      h += '<ul class="inv-bundle-archetype" style="margin-top:0.4rem">';
+      cps.slice(0, 10).forEach((x) => { h += `<li class="inv-muted">${esc(String(x))}</li>`; });
+      h += '</ul>';
+    }
+  }
+  const tok = cr.tokens_section;
+  if (tok && typeof tok === 'object' && (tok.count > 0 || (Array.isArray(tok.mints) && tok.mints.length))) {
+    h += '<div class="inv-subhead" style="margin-top:0.75rem">Tokens tied to this pass</div>';
+    if (tok.count != null) {
+      h += `<div class="inv-kv"><span>Discovered</span> ${esc(String(tok.count))} token(s)</div>`;
+    }
+    const mints = tok.mints;
+    if (Array.isArray(mints) && mints.length) {
+      h += '<ul class="inv-bundle-archetype">';
+      mints.slice(0, 8).forEach((m) => { h += `<li class="inv-muted mono">${esc(String(m))}</li>`; });
+      h += '</ul>';
+    }
+    const ar = tok.authority_risks;
+    if (Array.isArray(ar) && ar.length) {
+      h += '<div class="inv-muted" style="font-size:0.78rem;margin-top:0.35rem">Authority signals: ' + ar.slice(0, 4).map((t) => esc(String(t))).join(' · ') + '</div>';
+    }
+  }
   const narr = cr.chronological_narrative;
   if (Array.isArray(narr) && narr.length) {
     h += '<div class="inv-subhead" style="margin-top:0.75rem">Chronology (sample)</div><ul class="inv-bundle-archetype">';
