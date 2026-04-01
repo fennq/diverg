@@ -754,8 +754,24 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
   color: var(--dim);
   margin-bottom: 0.35rem;
 }
+.inv-what-details {
+  margin: 0 0 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem 0.65rem;
+  background: var(--surface);
+}
+.inv-what-details > summary {
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent);
+  list-style: none;
+}
+.inv-what-details > summary::-webkit-details-marker { display: none; }
+.inv-what-details[open] > summary { margin-bottom: 0.45rem; }
 .inv-what-list {
-  margin: 0 0 0.85rem;
+  margin: 0;
   padding-left: 1.15rem;
   font-size: 0.8125rem;
   color: var(--muted);
