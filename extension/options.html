@@ -56,6 +56,14 @@
     <button type="button" id="save-helius" class="btn-save">Save Helius key</button>
   </section>
 
+  <section class="options-section">
+    <h2>Chain investigation (optional)</h2>
+    <label for="diverg-jwt">Dashboard JWT (Bearer)</label>
+    <p>Paste the same token the web console stores after login (<code>diverg_token</code> in localStorage). Used only from this browser for <strong>Full API</strong> in the popup address harvester. On the server, set <code>DIVERG_ALLOW_EXTENSION_CORS=1</code> so Chrome can call your API from the extension origin.</p>
+    <input type="password" id="diverg-jwt" autocomplete="off" spellcheck="false" placeholder="eyJ…" />
+    <button type="button" id="save-jwt" class="btn-save">Save JWT</button>
+  </section>
+
   <p id="status" class="status" role="status"></p>
   <script src="options.js"></script>
 </body>
