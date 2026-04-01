@@ -37,6 +37,10 @@ function getSessionToken() {
   return localStorage.getItem('dv_session') || localStorage.getItem('diverg_token') || '';
 }
 
+let serverScans = [];
+let serverFindings = [];
+let serverSummary = null;
+
 // ── Init ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   const token = getSessionToken();
@@ -86,8 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   loadSettings();
-  updateStats();
-  renderHistory();
+  syncDashboardData();
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -415,12 +418,14 @@ function renderFindings(newFindings, url) {
 }
 
 function renderFindingsPage() {
-  const findings = JSON.parse(localStorage.getItem('dv_findings') || '[]');
+  const findings = serverFindings.length
+    ? serverFindings
+    : JSON.parse(localStorage.getItem('dv_findings') || '[]');
   const body = document.getElementById('findingsBody');
   if (!body || !findings.length) return;
 
   body.innerHTML = findings.slice(0, 50).map((f, i) =>
-    `<tr><td class="col-num">${i + 1}</td><td class="col-primary">${f.title}</td><td><span class="badge badge-${f.severity}">${f.severity}</span></td><td>${f.category}</td><td class="col-mono" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;">${f.target || ''}</td><td class="col-mono">${f.date || ''}</td></tr>`
+    `<tr><td class="col-num">${i + 1}</td><td class="col-primary">${f.title}</td><td><span class="badge badge-${(f.severity || 'low').toLowerCase()}">${f.severity}</span></td><td>${f.category}</td><td class="col-mono" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;">${f.target || ''}</td><td class="col-mono">${f.date || ''}</td></tr>`
   ).join('');
 }
 
@@ -508,7 +513,9 @@ function addToHistory(url, scope, findingsCount, score, critCount, highCount) {
 }
 
 function renderHistory() {
-  const scans = JSON.parse(localStorage.getItem('dv_scans') || '[]');
+  const scans = serverScans.length
+    ? serverScans
+    : JSON.parse(localStorage.getItem('dv_scans') || '[]');
   if (!scans.length) return;
 
   const makeRows = (list) => list.map((s, i) =>
@@ -521,25 +528,31 @@ function renderHistory() {
   if (hsb) hsb.innerHTML = makeRows(scans.slice(0, 8));
 
   const rf = document.getElementById('homeRecentFindings');
-  const findings = JSON.parse(localStorage.getItem('dv_findings') || '[]').slice(0, 5);
+  const findings = (serverFindings.length ? serverFindings : JSON.parse(localStorage.getItem('dv_findings') || '[]')).slice(0, 5);
   if (rf && findings.length) {
     rf.innerHTML = findings.map(f =>
-      `<tr><td class="col-primary" style="font-size:0.75rem;">${f.title}</td><td><span class="badge badge-${f.severity}">${f.severity}</span></td><td class="col-mono" style="font-size:0.625rem;color:var(--text-dim);">${f.date || ''}</td></tr>`
+      `<tr><td class="col-primary" style="font-size:0.75rem;">${f.title}</td><td><span class="badge badge-${(f.severity || 'low').toLowerCase()}">${f.severity}</span></td><td class="col-mono" style="font-size:0.625rem;color:var(--text-dim);">${f.date || ''}</td></tr>`
     ).join('');
   }
 }
 
 function updateStats() {
-  const scans = JSON.parse(localStorage.getItem('dv_scans') || '[]');
-  const findings = JSON.parse(localStorage.getItem('dv_findings') || '[]');
+  const scans = serverScans.length
+    ? serverScans
+    : JSON.parse(localStorage.getItem('dv_scans') || '[]');
+  const findings = serverFindings.length
+    ? serverFindings
+    : JSON.parse(localStorage.getItem('dv_findings') || '[]');
   const n = scans.length;
   const targets = new Set(scans.map(s => s.url)).size;
-  const avg = n ? Math.round(scans.reduce((a, s) => a + (s.score || 0), 0) / n) : 0;
+  const avg = serverSummary && typeof serverSummary.avg_risk_score === 'number'
+    ? Math.round(serverSummary.avg_risk_score)
+    : (n ? Math.round(scans.reduce((a, s) => a + (s.score || 0), 0) / n) : 0);
 
-  const totalCrit = scans.reduce((a, s) => a + (s.critical || 0), 0);
-  const totalHigh = scans.reduce((a, s) => a + (s.high || 0), 0);
-  const totalMed = findings.filter(f => f.severity === 'medium').length;
-  const totalLow = findings.filter(f => f.severity === 'low').length;
+  const totalCrit = serverSummary?.severity?.critical ?? scans.reduce((a, s) => a + (s.critical || 0), 0);
+  const totalHigh = serverSummary?.severity?.high ?? scans.reduce((a, s) => a + (s.high || 0), 0);
+  const totalMed = serverSummary?.severity?.medium ?? findings.filter(f => (f.severity || '').toLowerCase() === 'medium').length;
+  const totalLow = serverSummary?.severity?.low ?? findings.filter(f => (f.severity || '').toLowerCase() === 'low').length;
   const totalFindings = findings.length;
 
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
@@ -574,6 +587,61 @@ function updateStats() {
 }
 
 function updateAnalytics() { updateStats(); renderFindingsPage(); }
+
+async function syncDashboardData() {
+  const apiUrl = getApiUrl();
+  const token = getSessionToken();
+  if (!token) return;
+  try {
+    const [historyRes, findingsRes, summaryRes] = await Promise.all([
+      fetch(apiUrl + '/api/history?limit=120', { headers: { Authorization: 'Bearer ' + token } }),
+      fetch(apiUrl + '/api/findings?scan_limit=120&finding_limit=2000', { headers: { Authorization: 'Bearer ' + token } }),
+      fetch(apiUrl + '/api/analytics/summary?limit=120', { headers: { Authorization: 'Bearer ' + token } }),
+    ]);
+
+    if (historyRes.ok) {
+      const historyData = await historyRes.json();
+      serverScans = (historyData.scans || []).map(s => ({
+        id: s.id,
+        url: s.target_url,
+        scope: (s.scope || 'full').toLowerCase(),
+        findings: Number(s.total || 0),
+        score: Number(s.risk_score || 0),
+        critical: Number(s.critical || 0),
+        high: Number(s.high || 0),
+        date: s.scanned_at || s.created_at || '',
+      }));
+      localStorage.setItem('dv_scans', JSON.stringify(serverScans.slice(0, 120)));
+    }
+
+    if (findingsRes.ok) {
+      const findingsData = await findingsRes.json();
+      serverFindings = (findingsData.findings || []).map(row => {
+        const f = row.finding || {};
+        const sev = String(f.severity || 'low').toLowerCase();
+        return {
+          title: f.title || 'Untitled finding',
+          severity: sev,
+          category: f.category || 'Other',
+          target: row.target_url || '',
+          date: row.scanned_at || '',
+          confidence: f.confidence || '',
+        };
+      });
+      localStorage.setItem('dv_findings', JSON.stringify(serverFindings.slice(0, 2000)));
+    }
+
+    if (summaryRes.ok) {
+      serverSummary = await summaryRes.json();
+    }
+  } catch (_) {
+    // Fallback to local cache already handled by render functions.
+  }
+
+  renderHistory();
+  renderFindingsPage();
+  updateStats();
+}
 
 // ── Rewards ──────────────────────────────────────────────────────────────
 function loadRewards() {
