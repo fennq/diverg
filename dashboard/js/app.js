@@ -628,9 +628,15 @@ function runTokenBundle() {
   if (!mint) return;
   const out = document.getElementById('tokenOut');
   out.style.display = 'block'; out.innerHTML = '';
-  termLine(out, ts() + ' Calling /api/investigation/solana-bundle ...', 'accent');
+  termLine(out, ts() + ' Calling /api/investigation/solana-bundle (full bundle mode) ...', 'accent');
   const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
-  apiJson('/api/investigation/solana-bundle', { mint, helius_api_key: heliusApiKey })
+  apiJson('/api/investigation/solana-bundle', {
+    mint,
+    helius_api_key: heliusApiKey,
+    scan_all_holders: true,
+    max_funded_by_lookups: 1200,
+    include_x_intel: true,
+  })
     .then((data) => {
       termLine(out, '', null);
       termLine(out, 'Mint       : ' + mint, null);
@@ -638,15 +644,40 @@ function runTokenBundle() {
         termLine(out, 'Error      : ' + data.error, 'red');
         return;
       }
-      const holders = data.total_holders || data.holder_count || data.holders_count;
-      if (holders !== undefined) termLine(out, 'Holders    : ' + holders, null);
-      if (data.cluster_count !== undefined) termLine(out, 'Bundles    : ' + data.cluster_count + ' clusters', 'yellow');
-      if (data.risk_label || data.risk_score !== undefined) {
-        const riskLabel = data.risk_label || '';
-        const riskScore = data.risk_score !== undefined ? (' (' + data.risk_score + ')') : '';
-        termLine(out, 'Risk       : ' + riskLabel + riskScore, riskLabel.toLowerCase().includes('low') ? 'green' : 'yellow');
+      const holderCount =
+        data.params?.unique_holders_sampled ??
+        data.top_holders?.length ??
+        data.holder_count ??
+        data.holders_count;
+      if (holderCount !== undefined) termLine(out, 'Holders    : ' + holderCount, null);
+
+      const clusterWalletCount = data.cluster_wallet_count ?? (Array.isArray(data.focus_cluster_wallets) ? data.focus_cluster_wallets.length : undefined);
+      if (clusterWalletCount !== undefined) termLine(out, 'Cluster    : ' + clusterWalletCount + ' wallets', 'yellow');
+
+      if (data.cluster_pct_supply !== undefined) {
+        termLine(out, 'Cluster %  : ' + data.cluster_pct_supply + '% supply', 'yellow');
       }
-      if (data.summary) termLine(out, 'Summary    : ' + String(data.summary).slice(0, 180), 'dim');
+
+      if (data.risk_verdict || data.risk_score !== undefined) {
+        const riskVerdict = data.risk_verdict || 'Unknown';
+        const riskScore = data.risk_score !== undefined ? (' (' + data.risk_score + '/100)') : '';
+        const riskCls = /lower/i.test(riskVerdict) ? 'green' : /elevated|moderate/i.test(riskVerdict) ? 'yellow' : 'dim';
+        termLine(out, 'Risk       : ' + riskVerdict + riskScore, riskCls);
+      }
+
+      if (data.risk_summary) {
+        termLine(out, 'Summary    : ' + String(data.risk_summary).slice(0, 220), 'dim');
+      }
+
+      const reasons = Array.isArray(data.risk_signals) ? data.risk_signals.slice(0, 3) : [];
+      reasons.forEach((r, i) => termLine(out, 'Signal ' + (i + 1) + '  : ' + String(r).slice(0, 200), 'dim'));
+
+      const topHolders = Array.isArray(data.top_holders) ? data.top_holders.slice(0, 3) : [];
+      topHolders.forEach((h, i) => {
+        const owner = h.owner || h.wallet || 'unknown';
+        const pct = h.pct_supply ?? h.pct ?? '';
+        termLine(out, 'Top ' + (i + 1) + '      : ' + owner.slice(0, 12) + '...' + owner.slice(-6) + (pct !== '' ? (' (' + pct + '%)') : ''), 'dim');
+      });
     })
     .catch((err) => termLine(out, ts() + ' Bundle analysis failed: ' + err.message, 'red'));
 }
