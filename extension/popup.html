@@ -118,6 +118,12 @@
         </svg>
       </a>
     </section>
+
+    <section class="chain-handoff-section" style="margin-top:14px;padding-top:12px;border-top:1px solid #30363d">
+      <p style="font-size:11px;color:#8b949e;margin:0 0 8px;line-height:1.45">On-chain: detect <span style="font-family:ui-monospace,monospace">0x</span> and Solana-shaped addresses in the visible page; open the Diverg dashboard or run a full server investigation (needs JWT in Options).</p>
+      <button type="button" id="diverg-harvest-addresses" class="btn-primary" style="width:100%;font-size:12px;padding:8px">Find addresses on this page</button>
+      <div id="diverg-harvest-out" style="margin-top:10px;font-size:11px;color:#e7e9ea;min-height:1em"></div>
+    </section>
     </div>
 
     <div id="popup-panel-sol" class="popup-panel popup-panel-sol hidden">
@@ -179,6 +185,7 @@
   <script src="api.js"></script>
   <script src="scan.js"></script>
   <script src="solana_bundle.js"></script>
+  <script src="address_handoff.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
