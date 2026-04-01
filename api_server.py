@@ -660,6 +660,11 @@ def dashboard_static(filename):
     return send_from_directory(str(DASHBOARD_DIR), filename)
 
 
+@app.route("/favicon.ico")
+def dashboard_favicon():
+    return send_from_directory(str(DASHBOARD_DIR), "logo.png")
+
+
 @app.route("/login")
 @app.route("/login/")
 def login_page():

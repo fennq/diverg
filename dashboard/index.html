@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Diverg Console</title>
+  <link rel="icon" href="/dashboard/logo.png" type="image/png">
+  <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
   <link rel="stylesheet" href="/dashboard/css/dashboard.css">
 </head>
 <body>
@@ -62,12 +64,15 @@
 
       <div class="nav-bottom">
         <div class="user" onclick="toggleUserMenu()">
-          <div class="user-avatar">DV</div>
-          <div class="user-name">Operator</div>
+          <div class="user-avatar" id="userAvatar">DV</div>
+          <div class="user-name" id="userName">Operator</div>
         </div>
         <div class="user-menu" id="userMenu">
+          <button class="user-menu-item" onclick="customizeAvatar()">Customize avatar</button>
+          <button class="user-menu-item" onclick="resetAvatar()">Reset avatar</button>
           <button class="user-menu-item" onclick="logout()">Sign out</button>
         </div>
+        <input type="file" id="avatarFileInput" accept="image/png,image/jpeg,image/webp" style="display:none;">
       </div>
     </div>
   </aside>
