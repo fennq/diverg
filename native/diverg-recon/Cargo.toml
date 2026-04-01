@@ -1,0 +1,16 @@
+[package]
+name = "diverg-recon"
+version = "0.1.0"
+edition = "2021"
+description = "Async TCP port probe and DNS brute helper for Diverg recon skill (JSON stdin/stdout)"
+license = "MIT"
+
+[[bin]]
+name = "diverg-recon"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "io-util", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }

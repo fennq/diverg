@@ -13,6 +13,9 @@ venv/
 .venv/
 env/
 
+# Rust (diverg-recon helper)
+native/diverg-recon/target/
+
 # Python
 __pycache__/
 *.py[cod]

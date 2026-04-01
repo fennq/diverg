@@ -9,22 +9,30 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import json
+import os
 import re
+import shutil
 import socket
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Strict internal budget so we never hit bot SKILL_TIMEOUT (120s)
 RUN_BUDGET_SEC = 25
-PORT_SCAN_MAX_SEC = 6  # hard cap so total recon stays under RUN_BUDGET_SEC
+# Native diverg-recon usually finishes in <2s; nmap fallback still capped.
+PORT_SCAN_MAX_SEC = 5
+PORT_SCAN_MAX_SEC_TOP1000_NATIVE = 12
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent))
 import stealth
 from typing import Optional
 
 import dns.resolver
+from port_lists import parse_custom_port_list, ports_for_native_scan
 import nmap
 import requests
 try:
@@ -33,6 +41,149 @@ except ModuleNotFoundError:
     from wappalyzer import Wappalyzer, WebPage
 
 SESSION: stealth.StealthSession = stealth.get_session()
+
+
+def _diverg_recon_path() -> Optional[Path]:
+    """Path to diverg-recon binary if present (release build or PATH)."""
+    env = os.environ.get("DIVERG_RECON_BIN", "").strip()
+    if env:
+        p = Path(env).expanduser()
+        if p.is_file() and os.access(p, os.X_OK):
+            return p
+    root = Path(__file__).resolve().parents[2]
+    for name in ("diverg-recon", "diverg-recon.exe"):
+        p = root / "native" / "diverg-recon" / "target" / "release" / name
+        if p.is_file() and os.access(p, os.X_OK):
+            return p
+    which = shutil.which("diverg-recon")
+    if which:
+        wp = Path(which)
+        if wp.is_file() and os.access(wp, os.X_OK):
+            return wp
+    return None
+
+
+def _host_for_scan(target: str) -> str:
+    """Strip URL / path / port to hostname or IP for port scan / DNS."""
+    t = (target or "").strip()
+    if not t:
+        return t
+    if "://" in t:
+        parsed = urlparse(t)
+        host = parsed.hostname or ""
+        return host or t.split("://", 1)[-1].split("/")[0].split(":")[0]
+    return t.split("/")[0].split(":")[0]
+
+
+def _scan_ports_native(target: str, port_range: str) -> Optional[list[PortResult]]:
+    """Run diverg-recon ports (JSON stdin). Returns None on any failure → use nmap/socket."""
+    exe = _diverg_recon_path()
+    if not exe:
+        return None
+    host = _host_for_scan(target)
+    if not host:
+        return None
+    ports = ports_for_native_scan(port_range)
+    if not ports:
+        ports = parse_custom_port_list(port_range) or []
+    if not ports:
+        return None
+    pr = port_range.strip().lower()
+    if pr == "top1000":
+        deadline_ms = min(10_000, max(3000, len(ports) * 25))
+        sub_timeout = float(PORT_SCAN_MAX_SEC_TOP1000_NATIVE)
+    else:
+        deadline_ms = min(4500, max(2000, len(ports) * 40))
+        sub_timeout = float(PORT_SCAN_MAX_SEC)
+    payload = {
+        "host": host,
+        "ports": ports,
+        "connect_timeout_ms": 450,
+        "deadline_ms": deadline_ms,
+        "max_in_flight": 96,
+    }
+    try:
+        proc = subprocess.run(
+            [str(exe), "ports"],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=sub_timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+    out: list[PortResult] = []
+    for row in data.get("open") or []:
+        try:
+            out.append(
+                PortResult(
+                    port=int(row["port"]),
+                    state=str(row.get("state", "open")),
+                    service=str(row.get("service", "unknown")),
+                    version=str(row.get("version", "")),
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _dns_brute_native(
+    domain: str,
+    prefixes: list[str],
+    deadline_ms: int,
+    max_in_flight: int = 48,
+) -> Optional[list[SubdomainResult]]:
+    exe = _diverg_recon_path()
+    if not exe:
+        return None
+    payload = {
+        "domain": domain.strip().lower().rstrip("."),
+        "prefixes": prefixes,
+        "deadline_ms": max(500, min(deadline_ms, 60_000)),
+        "max_in_flight": max_in_flight,
+    }
+    try:
+        proc = subprocess.run(
+            [str(exe), "dns-brute"],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=min(90.0, deadline_ms / 1000.0 + 3.0),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+    hits: list[SubdomainResult] = []
+    for row in data.get("hits") or []:
+        try:
+            hits.append(
+                SubdomainResult(
+                    subdomain=str(row["subdomain"]),
+                    ip=row.get("ip"),
+                    source="dns",
+                )
+            )
+        except (KeyError, TypeError):
+            continue
+    return hits
 
 
 # ---------------------------------------------------------------------------
@@ -118,16 +269,25 @@ COMMON_PORTS = [
 
 
 def scan_ports(target: str, port_range: str = "top100", host_timeout: int = 20) -> list[PortResult]:
+    native = _scan_ports_native(target, port_range)
+    if native is not None:
+        return native
+
     results: list[PortResult] = []
+    scan_host = _host_for_scan(target)
     try:
         scanner = nmap.PortScanner()
-        if port_range == "top100":
+        pr = port_range.strip().lower()
+        if pr == "top100":
             args = f"-sT -T4 --top-ports 50 --host-timeout {min(host_timeout, 20)}"
-        elif port_range == "top1000":
+        elif pr == "top10":
+            plist = ",".join(str(p) for p in ports_for_native_scan("top10"))
+            args = f"-sT -T4 -p {plist} --host-timeout {min(host_timeout, 20)}"
+        elif pr == "top1000":
             args = f"-sV -T4 --top-ports 1000 --host-timeout {min(host_timeout, 90)}"
         else:
             args = f"-sV -T4 -p {port_range} --host-timeout {min(host_timeout, 60)}"
-        scanner.scan(target, arguments=args)
+        scanner.scan(scan_host, arguments=args)
 
         for host in scanner.all_hosts():
             for proto in scanner[host].all_protocols():
@@ -140,18 +300,19 @@ def scan_ports(target: str, port_range: str = "top100", host_timeout: int = 20) 
                         version=info.get("version", ""),
                     ))
     except nmap.PortScannerError:
-        results = _fallback_port_scan(target)
+        results = _fallback_port_scan(scan_host)
     return results
 
 
 def _fallback_port_scan(target: str) -> list[PortResult]:
     """TCP connect fallback when nmap binary is unavailable."""
     results: list[PortResult] = []
+    host = _host_for_scan(target)
     for port in COMMON_PORTS:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(1.5)
-                if sock.connect_ex((target, port)) == 0:
+                if sock.connect_ex((host, port)) == 0:
                     try:
                         service = socket.getservbyport(port)
                     except OSError:
@@ -428,22 +589,35 @@ def enumerate_subdomains(
     resolver.lifetime = 1.5
 
     wordlist = stealth.randomize_order(SUBDOMAIN_WORDLIST)
-    if max_prefixes is not None:
-        wordlist = wordlist[:max_prefixes]
-    for prefix in wordlist:
-        if timeout_sec and (time.time() - start) > timeout_sec:
-            break
-        fqdn = f"{prefix}.{domain}"
-        if fqdn in seen:
-            continue
-        try:
-            answers = resolver.resolve(fqdn, "A")
-            ip = str(answers[0]) if answers else None
-            seen.add(fqdn)
-            results.append(SubdomainResult(subdomain=fqdn, ip=ip, source="dns"))
-        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer,
-                dns.resolver.NoNameservers, dns.exception.Timeout):
-            continue
+    eff_cap = max_prefixes
+    if eff_cap is not None and _diverg_recon_path():
+        eff_cap = min(len(SUBDOMAIN_WORDLIST), eff_cap * 2)
+    if eff_cap is not None:
+        wordlist = wordlist[:eff_cap]
+
+    remaining_ms = int((timeout_sec - (time.time() - start)) * 1000) if timeout_sec else 14_000
+    remaining_ms = max(800, min(remaining_ms, 55_000))
+    dns_native = _dns_brute_native(domain, wordlist, remaining_ms, max_in_flight=56)
+    if dns_native is not None:
+        for r in dns_native:
+            if r.subdomain not in seen:
+                seen.add(r.subdomain)
+                results.append(r)
+    else:
+        for prefix in wordlist:
+            if timeout_sec and (time.time() - start) > timeout_sec:
+                break
+            fqdn = f"{prefix}.{domain}"
+            if fqdn in seen:
+                continue
+            try:
+                answers = resolver.resolve(fqdn, "A")
+                ip = str(answers[0]) if answers else None
+                seen.add(fqdn)
+                results.append(SubdomainResult(subdomain=fqdn, ip=ip, source="dns"))
+            except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer,
+                    dns.resolver.NoNameservers, dns.exception.Timeout):
+                continue
 
     # Resolve IPs for crt.sh results that don't have one yet (quick pass)
     for r in results:
@@ -1135,9 +1309,15 @@ def run(
     # Port scan last with hard cap so it never blows the budget
     if scan_type in ("full", "ports", "quick") and not _over_budget():
         try:
+            pr_key = (port_range or "top100").strip().lower()
+            port_wait = (
+                PORT_SCAN_MAX_SEC_TOP1000_NATIVE
+                if pr_key == "top1000" and _diverg_recon_path()
+                else PORT_SCAN_MAX_SEC
+            )
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(scan_ports, target, port_range, host_timeout=12)
-                report.ports = future.result(timeout=PORT_SCAN_MAX_SEC)
+                report.ports = future.result(timeout=port_wait)
         except concurrent.futures.TimeoutError:
             report.ports = []
             report.errors.append("Port scan skipped (over time budget)")
