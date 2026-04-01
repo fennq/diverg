@@ -37,8 +37,12 @@ import nmap
 import requests
 try:
     from Wappalyzer import Wappalyzer, WebPage
-except ModuleNotFoundError:
-    from wappalyzer import Wappalyzer, WebPage
+except Exception:
+    try:
+        from wappalyzer import Wappalyzer, WebPage
+    except Exception:
+        Wappalyzer = None
+        WebPage = None
 
 SESSION: stealth.StealthSession = stealth.get_session()
 
@@ -1176,7 +1180,7 @@ def fingerprint_tech(
             results.append(TechResult(name=name, categories=categories, version=version))
 
     # Wappalyzer detection (can be slow)
-    if not _over():
+    if not _over() and Wappalyzer and WebPage:
         try:
             wappalyzer = Wappalyzer.latest()
             resp = SESSION.get(url, timeout=8, allow_redirects=True)
