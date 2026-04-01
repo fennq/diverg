@@ -236,6 +236,22 @@ function termLine(el, text, cls) {
   el.scrollTop = el.scrollHeight;
 }
 
+async function apiJson(path, body) {
+  const res = await fetch(getApiUrl() + path, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + getSessionToken(),
+    },
+    body: JSON.stringify(body || {}),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || ('HTTP ' + res.status));
+  }
+  return data;
+}
+
 // ── Finding Databases (scope-aware) ──────────────────────────────────────
 const FINDING_DB = {
   common: [
@@ -471,31 +487,41 @@ function launchScan() {
   progressBox.classList.add('show');
   document.getElementById('scanResults').style.display = 'none';
 
-  termLine(terminal, ts() + ' ─── Diverg Scan Engine v2.4 ───', 'accent');
+  termLine(terminal, ts() + ' ─── Diverg Scan Engine (live) ───', 'accent');
   termLine(terminal, ts() + ' Target: ' + url, null);
   termLine(terminal, ts() + ' Scope:  ' + scope.toUpperCase(), null);
-  termLine(terminal, '', null);
+  termLine(terminal, ts() + ' Calling /api/scan ...', 'dim');
 
-  const steps = getScanSteps(scope);
-  let i = 0;
-  function next() {
-    if (i < steps.length) {
-      termLine(terminal, ts() + ' ' + steps[i].msg, steps[i].cls);
-      i++;
-      setTimeout(next, steps[i - 1].delay);
-    } else {
-      setTimeout(() => { progressBox.classList.remove('show'); showScanResults(url, scope); }, 300);
-    }
-  }
-  setTimeout(next, 300);
+  apiJson('/api/scan', { url, scope })
+    .then((data) => {
+      const findings = Array.isArray(data.findings) ? data.findings : [];
+      const attackPaths = Array.isArray(data.attack_paths) ? data.attack_paths : [];
+      termLine(terminal, ts() + ' Scan complete.', 'green');
+      termLine(terminal, ts() + ' Findings: ' + findings.length, findings.length ? 'yellow' : 'dim');
+      if (typeof data.risk_score === 'number') {
+        termLine(terminal, ts() + ' Risk score: ' + data.risk_score + (data.risk_verdict ? ' (' + data.risk_verdict + ')' : ''), 'accent');
+      }
+      progressBox.classList.remove('show');
+      showScanResults(url, scope, findings, attackPaths, data.risk_score);
+      syncDashboardData();
+    })
+    .catch((err) => {
+      termLine(terminal, ts() + ' Scan failed: ' + err.message, 'red');
+      progressBox.classList.remove('show');
+    });
 }
 
-function showScanResults(url, scope) {
+function showScanResults(url, scope, findingsInput, pathsInput, scoreInput) {
   const container = document.getElementById('scanResults');
   const body = document.getElementById('scanResultsBody');
   const countEl = document.getElementById('scanFindingsCount');
 
-  const findings = getFindingsForScope(scope);
+  const findings = (Array.isArray(findingsInput) && findingsInput.length ? findingsInput : getFindingsForScope(scope)).map((f) => ({
+    title: f.title || 'Untitled finding',
+    severity: String(f.severity || 'low').toLowerCase(),
+    category: f.category || 'Other',
+    confidence: f.confidence || '',
+  }));
   const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
   findings.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
 
@@ -507,7 +533,7 @@ function showScanResults(url, scope) {
 
   container.style.display = 'block';
 
-  const paths = getAttackPaths(scope);
+  const paths = Array.isArray(pathsInput) && pathsInput.length ? pathsInput : getAttackPaths(scope);
   const pathsCard = document.getElementById('attackPathsCard');
   const pathsBody = document.getElementById('attackPathsBody');
   const pathsCount = document.getElementById('attackPathsCount');
@@ -515,8 +541,15 @@ function showScanResults(url, scope) {
   if (paths.length > 0) {
     pathsCount.textContent = paths.length + ' chains';
     pathsBody.innerHTML = paths.map(p => {
-      const chain = p.steps.map(s => `<span class="step">${s}</span>`).join('<span class="arrow">→</span>');
-      return `<div class="attack-path"><div><div class="attack-path-chain">${chain}</div><div class="attack-path-impact">${p.impact}</div></div><div class="attack-path-severity"><span class="badge badge-${p.severity}">${p.severity}</span></div></div>`;
+      const steps = Array.isArray(p.steps)
+        ? p.steps
+        : Array.isArray(p.path)
+          ? p.path
+          : [p.title || p.description || 'Attack path'];
+      const chain = steps.map(s => `<span class="step">${String(s)}</span>`).join('<span class="arrow">→</span>');
+      const sev = String(p.severity || 'medium').toLowerCase();
+      const impact = p.impact || p.summary || p.description || '';
+      return `<div class="attack-path"><div><div class="attack-path-chain">${chain}</div><div class="attack-path-impact">${impact}</div></div><div class="attack-path-severity"><span class="badge badge-${sev}">${sev}</span></div></div>`;
     }).join('');
     pathsCard.style.display = 'block';
   } else {
@@ -526,7 +559,9 @@ function showScanResults(url, scope) {
   const totalFindings = findings.length;
   const critCount = findings.filter(f => f.severity === 'critical').length;
   const highCount = findings.filter(f => f.severity === 'high').length;
-  const score = Math.max(0, 100 - critCount * 25 - highCount * 15 - (totalFindings - critCount - highCount) * 5);
+  const score = typeof scoreInput === 'number'
+    ? scoreInput
+    : Math.max(0, 100 - critCount * 25 - highCount * 15 - (totalFindings - critCount - highCount) * 5);
 
   addToHistory(url, scope, totalFindings, score, critCount, highCount);
   updateStats();
@@ -564,15 +599,28 @@ function runChainLookup() {
   if (!addr) return;
   const out = document.getElementById('chainOut');
   out.style.display = 'block'; out.innerHTML = '';
-  termLine(out, ts() + ' Looking up ' + addr.substring(0, 24) + '...', 'accent');
-  setTimeout(() => {
-    termLine(out, '', null);
-    termLine(out, 'Address : ' + addr, null);
-    termLine(out, 'Chain   : ' + (addr.length > 42 ? 'Solana' : 'EVM'), null);
-    termLine(out, 'Balance : 1.234 SOL', 'green');
-    termLine(out, 'Txns    : 42', null);
-    termLine(out, 'Status  : Active', 'green');
-  }, 800);
+  termLine(out, ts() + ' Querying /api/investigation/blockchain ...', 'accent');
+  const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
+  apiJson('/api/investigation/blockchain', {
+    address: addr,
+    network: (localStorage.getItem('dv_helius_network') || 'mainnet'),
+    helius_api_key: heliusApiKey,
+  })
+    .then((data) => {
+      termLine(out, '', null);
+      termLine(out, 'Address : ' + (data.address || addr), null);
+      termLine(out, 'Chain   : ' + (data.chain || 'unknown'), null);
+      const s = data.summary || {};
+      if (data.chain === 'evm') {
+        if (s.balance_eth) termLine(out, 'Balance : ' + s.balance_eth + ' ETH', 'green');
+        if (s.tx_count !== undefined) termLine(out, 'Txns    : ' + s.tx_count, null);
+      } else {
+        if (s.balance_sol !== undefined) termLine(out, 'Balance : ' + s.balance_sol + ' SOL', 'green');
+        if (s.recent_signatures !== undefined) termLine(out, 'Txns    : ' + s.recent_signatures, null);
+      }
+      if (data.error) termLine(out, 'Note    : ' + data.error, 'yellow');
+    })
+    .catch((err) => termLine(out, ts() + ' Lookup failed: ' + err.message, 'red'));
 }
 
 function runTokenBundle() {
@@ -580,15 +628,27 @@ function runTokenBundle() {
   if (!mint) return;
   const out = document.getElementById('tokenOut');
   out.style.display = 'block'; out.innerHTML = '';
-  termLine(out, ts() + ' Analyzing token ' + mint.substring(0, 20) + '...', 'accent');
-  setTimeout(() => {
-    termLine(out, '', null);
-    termLine(out, 'Mint     : ' + mint, null);
-    termLine(out, 'Supply   : 1,000,000', null);
-    termLine(out, 'Holders  : 1,234', null);
-    termLine(out, 'Bundles  : 3 clusters detected', 'yellow');
-    termLine(out, 'Risk     : LOW', 'green');
-  }, 800);
+  termLine(out, ts() + ' Calling /api/investigation/solana-bundle ...', 'accent');
+  const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
+  apiJson('/api/investigation/solana-bundle', { mint, helius_api_key: heliusApiKey })
+    .then((data) => {
+      termLine(out, '', null);
+      termLine(out, 'Mint       : ' + mint, null);
+      if (data.error) {
+        termLine(out, 'Error      : ' + data.error, 'red');
+        return;
+      }
+      const holders = data.total_holders || data.holder_count || data.holders_count;
+      if (holders !== undefined) termLine(out, 'Holders    : ' + holders, null);
+      if (data.cluster_count !== undefined) termLine(out, 'Bundles    : ' + data.cluster_count + ' clusters', 'yellow');
+      if (data.risk_label || data.risk_score !== undefined) {
+        const riskLabel = data.risk_label || '';
+        const riskScore = data.risk_score !== undefined ? (' (' + data.risk_score + ')') : '';
+        termLine(out, 'Risk       : ' + riskLabel + riskScore, riskLabel.toLowerCase().includes('low') ? 'green' : 'yellow');
+      }
+      if (data.summary) termLine(out, 'Summary    : ' + String(data.summary).slice(0, 180), 'dim');
+    })
+    .catch((err) => termLine(out, ts() + ' Bundle analysis failed: ' + err.message, 'red'));
 }
 
 function runOsint() {
@@ -596,15 +656,23 @@ function runOsint() {
   if (!domain) return;
   const out = document.getElementById('osintOut');
   out.style.display = 'block'; out.innerHTML = '';
-  termLine(out, ts() + ' Investigating ' + domain + '...', 'accent');
-  setTimeout(() => {
-    termLine(out, '', null);
-    termLine(out, 'Domain     : ' + domain, null);
-    termLine(out, 'Registrar  : Cloudflare, Inc.', null);
-    termLine(out, 'Created    : 2020-03-15', null);
-    termLine(out, 'NS         : ns1.cloudflare.com', null);
-    termLine(out, 'SSL        : Valid', 'green');
-  }, 800);
+  termLine(out, ts() + ' Calling /api/investigation/domain ...', 'accent');
+  apiJson('/api/investigation/domain', { domain })
+    .then((data) => {
+      termLine(out, '', null);
+      termLine(out, 'Domain      : ' + (data.domain || domain), null);
+      termLine(out, 'Findings    : ' + (data.findings_count || (Array.isArray(data.findings) ? data.findings.length : 0)), 'yellow');
+      const os = data.osint || {};
+      const rc = data.recon || {};
+      const hs = data.headers_ssl || {};
+      if (os.registrar) termLine(out, 'Registrar   : ' + os.registrar, null);
+      if (os.created || os.creation_date) termLine(out, 'Created     : ' + (os.created || os.creation_date), null);
+      if (rc.subdomains_found !== undefined) termLine(out, 'Subdomains  : ' + rc.subdomains_found, null);
+      if (hs.ssl_valid !== undefined) termLine(out, 'SSL Valid   : ' + hs.ssl_valid, hs.ssl_valid ? 'green' : 'red');
+      const top = Array.isArray(data.findings) ? data.findings.slice(0, 3) : [];
+      top.forEach((f, i) => termLine(out, 'Top ' + (i + 1) + '      : ' + (f.title || f.category || 'Finding'), 'dim'));
+    })
+    .catch((err) => termLine(out, ts() + ' OSINT failed: ' + err.message, 'red'));
 }
 
 function runPoc() {
@@ -613,12 +681,20 @@ function runPoc() {
   if (!url) return;
   const out = document.getElementById('pocOut');
   out.style.display = 'block'; out.innerHTML = '';
-  termLine(out, ts() + ' Running ' + type.toUpperCase() + ' test on ' + url, 'accent');
-  setTimeout(() => {
-    termLine(out, '', null);
-    termLine(out, 'RESULT   : ' + (type === 'idor' ? 'IDOR Vulnerability Detected' : 'Unauthenticated Access Found'), 'red');
-    termLine(out, 'Severity : HIGH', 'red');
-  }, 1200);
+  const apiType = type === 'unauth' ? 'unauthenticated' : type;
+  termLine(out, ts() + ' Calling /api/poc/simulate (' + apiType + ') ...', 'accent');
+  apiJson('/api/poc/simulate', { type: apiType, url, verbose: true })
+    .then((data) => {
+      termLine(out, '', null);
+      termLine(out, 'Success    : ' + !!data.success, data.success ? 'green' : 'red');
+      if (data.status_code !== undefined && data.status_code !== null) {
+        termLine(out, 'HTTP       : ' + data.status_code, null);
+      }
+      if (data.conclusion) termLine(out, 'Conclusion : ' + data.conclusion, data.success ? 'green' : 'yellow');
+      if (data.error) termLine(out, 'Error      : ' + data.error, 'red');
+      if (data.body_preview) termLine(out, 'Preview    : ' + String(data.body_preview).slice(0, 220), 'dim');
+    })
+    .catch((err) => termLine(out, ts() + ' PoC failed: ' + err.message, 'red'));
 }
 
 // ── History & Stats ──────────────────────────────────────────────────────
