@@ -252,6 +252,20 @@ async function apiJson(path, body) {
   return data;
 }
 
+function withProgress(out, label, promiseFactory) {
+  const started = Date.now();
+  let tick = 0;
+  const timer = setInterval(() => {
+    tick += 1;
+    const sec = Math.round((Date.now() - started) / 1000);
+    const dots = '.'.repeat((tick % 3) + 1);
+    termLine(out, ts() + ' ' + label + ' still running' + dots + ' (' + sec + 's)', 'dim');
+  }, 2200);
+
+  return promiseFactory()
+    .finally(() => clearInterval(timer));
+}
+
 // ── Finding Databases (scope-aware) ──────────────────────────────────────
 const FINDING_DB = {
   common: [
@@ -599,15 +613,17 @@ function runChainLookup() {
   if (!addr) return;
   const out = document.getElementById('chainOut');
   out.style.display = 'block'; out.innerHTML = '';
+  termLine(out, ts() + ' Preflight: validating address + session', 'dim');
   termLine(out, ts() + ' Querying /api/investigation/blockchain ...', 'accent');
   const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
-  apiJson('/api/investigation/blockchain', {
+  withProgress(out, 'Blockchain lookup', () => apiJson('/api/investigation/blockchain', {
     address: addr,
     network: (localStorage.getItem('dv_helius_network') || 'mainnet'),
     helius_api_key: heliusApiKey,
-  })
+  }))
     .then((data) => {
       termLine(out, '', null);
+      termLine(out, ts() + ' Backend responded', 'green');
       termLine(out, 'Address : ' + (data.address || addr), null);
       termLine(out, 'Chain   : ' + (data.chain || 'unknown'), null);
       const s = data.summary || {};
@@ -628,17 +644,26 @@ function runTokenBundle() {
   if (!mint) return;
   const out = document.getElementById('tokenOut');
   out.style.display = 'block'; out.innerHTML = '';
-  termLine(out, ts() + ' Calling /api/investigation/solana-bundle (full bundle mode) ...', 'accent');
+  termLine(out, ts() + ' Preflight: validating mint + API key + session', 'dim');
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
+    termLine(out, ts() + ' Warning: mint format looks unusual (continuing)', 'yellow');
+  }
   const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
-  apiJson('/api/investigation/solana-bundle', {
+  if (!heliusApiKey) {
+    termLine(out, ts() + ' Missing Helius key: set it in Settings for full bundle scan', 'red');
+    return;
+  }
+  termLine(out, ts() + ' Calling /api/investigation/solana-bundle (full bundle mode) ...', 'accent');
+  withProgress(out, 'Token bundle analysis', () => apiJson('/api/investigation/solana-bundle', {
     mint,
     helius_api_key: heliusApiKey,
     scan_all_holders: true,
     max_funded_by_lookups: 1200,
     include_x_intel: true,
-  })
+  }))
     .then((data) => {
       termLine(out, '', null);
+      termLine(out, ts() + ' Backend responded', 'green');
       termLine(out, 'Mint       : ' + mint, null);
       if (data.error) {
         termLine(out, 'Error      : ' + data.error, 'red');
@@ -687,10 +712,12 @@ function runOsint() {
   if (!domain) return;
   const out = document.getElementById('osintOut');
   out.style.display = 'block'; out.innerHTML = '';
+  termLine(out, ts() + ' Preflight: validating domain + session', 'dim');
   termLine(out, ts() + ' Calling /api/investigation/domain ...', 'accent');
-  apiJson('/api/investigation/domain', { domain })
+  withProgress(out, 'Domain OSINT', () => apiJson('/api/investigation/domain', { domain }))
     .then((data) => {
       termLine(out, '', null);
+      termLine(out, ts() + ' Backend responded', 'green');
       termLine(out, 'Domain      : ' + (data.domain || domain), null);
       termLine(out, 'Findings    : ' + (data.findings_count || (Array.isArray(data.findings) ? data.findings.length : 0)), 'yellow');
       const os = data.osint || {};
@@ -713,10 +740,12 @@ function runPoc() {
   const out = document.getElementById('pocOut');
   out.style.display = 'block'; out.innerHTML = '';
   const apiType = type === 'unauth' ? 'unauthenticated' : type;
+  termLine(out, ts() + ' Preflight: validating URL + PoC type + session', 'dim');
   termLine(out, ts() + ' Calling /api/poc/simulate (' + apiType + ') ...', 'accent');
-  apiJson('/api/poc/simulate', { type: apiType, url, verbose: true })
+  withProgress(out, 'PoC simulation', () => apiJson('/api/poc/simulate', { type: apiType, url, verbose: true }))
     .then((data) => {
       termLine(out, '', null);
+      termLine(out, ts() + ' Backend responded', 'green');
       termLine(out, 'Success    : ' + !!data.success, data.success ? 'green' : 'red');
       if (data.status_code !== undefined && data.status_code !== null) {
         termLine(out, 'HTTP       : ' + data.status_code, null);
