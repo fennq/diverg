@@ -4,7 +4,7 @@ providers = ["python"]
 aptPkgs = []
 
 [phases.install]
-cmds = ["pip install --prefer-binary --no-compile -r requirements.txt"]
+cmds = ["python3 -m pip install --prefer-binary --no-compile -r requirements.txt"]
 cacheDirectories = ["/root/.cache/pip"]
 
 [start]
