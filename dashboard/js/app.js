@@ -794,6 +794,13 @@ function _invChainFullSummaryHtml(data) {
   }
   const cr = data.crime_report || {};
   let h = '';
+  const ds = cr.data_sources;
+  if (ds && typeof ds === 'object') {
+    const ocr = ds.on_chain_reason != null ? String(ds.on_chain_reason) : '';
+    if (ocr) {
+      h += `<p class="inv-muted" style="margin-bottom:0.65rem"><strong>On-chain data:</strong> ${esc(ocr)}</p>`;
+    }
+  }
   if (data._truncated_findings != null) {
     h += `<p class="inv-muted">Response truncated (${esc(String(data._truncated_findings))} findings omitted). See <strong>Full JSON</strong>.</p>`;
   }
