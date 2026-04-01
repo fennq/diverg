@@ -14,6 +14,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 # Project root and skills for import x_search, web_search
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -21,6 +23,22 @@ sys.path.insert(0, str(ROOT / "skills"))
 os.chdir(ROOT)
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test")
 os.environ.setdefault("OPENAI_API_KEY", "test")
+
+
+def _bot_imports_available() -> bool:
+    """bot.py pulls openai + telegram; skip format_scan_results tests without full deps."""
+    try:
+        import openai  # noqa: F401
+        import telegram  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+skip_without_bot_deps = pytest.mark.skipif(
+    not _bot_imports_available(),
+    reason="Install project requirements (openai, python-telegram-bot) to run bot format_scan_results tests",
+)
 
 
 def test_x_search_empty_query_returns_zero_results() -> None:
@@ -81,6 +99,7 @@ def test_web_search_valid_json_shape() -> None:
         assert any(k in r for k in ("title", "snippet", "url"))
 
 
+@skip_without_bot_deps
 def test_format_scan_results_blockchain_no_invention() -> None:
     """format_scan_results must not show verdict/red_flags when they are absent in payload."""
     from bot import format_scan_results
@@ -100,6 +119,7 @@ def test_format_scan_results_blockchain_no_invention() -> None:
     assert "skipped" in text.lower() or "no API key" in text.lower()
 
 
+@skip_without_bot_deps
 def test_format_scan_results_blockchain_verdict_only_when_present() -> None:
     """When crime_report has verdict, it appears; when it doesn't, it must not be invented."""
     from bot import format_scan_results
@@ -129,6 +149,7 @@ def test_format_scan_results_blockchain_verdict_only_when_present() -> None:
     assert "*Verdict:*" not in text2
 
 
+@skip_without_bot_deps
 def test_format_scan_results_x_search_uses_actual_count() -> None:
     """X search summary must use result_count from data, not a made-up number."""
     from bot import format_scan_results
@@ -147,6 +168,7 @@ def test_format_scan_results_x_search_uses_actual_count() -> None:
     assert "u1" in text or "u2" in text
 
 
+@skip_without_bot_deps
 def test_format_scan_results_web_search_uses_actual_count() -> None:
     """Web search summary must use result_count from data."""
     from bot import format_scan_results
@@ -162,6 +184,7 @@ def test_format_scan_results_web_search_uses_actual_count() -> None:
     assert "2" in text
 
 
+@skip_without_bot_deps
 def test_blockchain_report_error_payload_not_success() -> None:
     """When blockchain skill returns error, format_scan_results must show error, not success."""
     from bot import format_scan_results
@@ -177,12 +200,19 @@ def run_all() -> list[str]:
         test_x_search_valid_json_shape,
         test_web_search_empty_query_returns_empty_results,
         test_web_search_valid_json_shape,
-        test_format_scan_results_blockchain_no_invention,
-        test_format_scan_results_blockchain_verdict_only_when_present,
-        test_format_scan_results_x_search_uses_actual_count,
-        test_format_scan_results_web_search_uses_actual_count,
-        test_blockchain_report_error_payload_not_success,
     ]
+    if _bot_imports_available():
+        tests.extend(
+            [
+                test_format_scan_results_blockchain_no_invention,
+                test_format_scan_results_blockchain_verdict_only_when_present,
+                test_format_scan_results_x_search_uses_actual_count,
+                test_format_scan_results_web_search_uses_actual_count,
+                test_blockchain_report_error_payload_not_success,
+            ]
+        )
+    else:
+        print("[SKIP] bot format_scan_results tests (install openai + python-telegram-bot)")
     failed: list[str] = []
     for fn in tests:
         name = fn.__name__
