@@ -40,6 +40,7 @@ function getSessionToken() {
 let serverScans = [];
 let serverFindings = [];
 let serverSummary = null;
+let currentUser = null;
 
 // ── Init ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -50,6 +51,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   if (!localStorage.getItem('dv_session') && token) {
     localStorage.setItem('dv_session', token);
+  }
+  if (!localStorage.getItem('diverg_token') && token) {
+    localStorage.setItem('diverg_token', token);
   }
 
   document.querySelectorAll('.nav-item').forEach(item =>
@@ -81,6 +85,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!e.target.closest('.user') && !e.target.closest('.user-menu'))
       document.getElementById('userMenu').classList.remove('show');
   });
+  const avatarFileInput = document.getElementById('avatarFileInput');
+  if (avatarFileInput) {
+    avatarFileInput.addEventListener('change', onAvatarFileSelected);
+  }
 
   document.getElementById('quickUrl').addEventListener('keydown', e => {
     if (e.key === 'Enter') {
@@ -90,8 +98,113 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   loadSettings();
+  loadUserProfile();
   syncDashboardData();
 });
+
+function getAvatarStorageKey(userId) {
+  return 'dv_avatar_' + (userId || 'anon');
+}
+
+function nameToInitials(name) {
+  const clean = String(name || '').trim();
+  if (!clean) return 'DV';
+  const parts = clean.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+function applyUserProfileUI(user) {
+  const avatarEl = document.getElementById('userAvatar');
+  const nameEl = document.getElementById('userName');
+  if (!avatarEl || !nameEl) return;
+
+  const displayName = (user && user.name) || (user && user.email ? user.email.split('@')[0] : 'Operator');
+  nameEl.textContent = displayName;
+
+  const avatarKey = getAvatarStorageKey(user && user.id);
+  const customAvatar = localStorage.getItem(avatarKey) || '';
+  const backendAvatar = (user && user.avatar_url) || '';
+  const avatarUrl = customAvatar || backendAvatar;
+
+  avatarEl.style.backgroundImage = '';
+  avatarEl.style.backgroundSize = '';
+  avatarEl.style.backgroundPosition = '';
+  avatarEl.style.backgroundRepeat = '';
+  avatarEl.textContent = nameToInitials(displayName);
+
+  if (avatarUrl) {
+    avatarEl.style.backgroundImage = 'url("' + avatarUrl + '")';
+    avatarEl.style.backgroundSize = 'cover';
+    avatarEl.style.backgroundPosition = 'center';
+    avatarEl.style.backgroundRepeat = 'no-repeat';
+    avatarEl.textContent = '';
+  }
+}
+
+async function loadUserProfile() {
+  const token = getSessionToken();
+  if (!token) return;
+  const apiUrl = getApiUrl();
+
+  try {
+    const localUser = JSON.parse(localStorage.getItem('diverg_user') || '{}');
+    if (localUser && (localUser.name || localUser.email)) {
+      currentUser = localUser;
+      applyUserProfileUI(currentUser);
+    }
+  } catch (_) {
+    // Ignore parse issues and continue with API source of truth.
+  }
+
+  try {
+    const res = await fetch(apiUrl + '/api/auth/me', {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && data.user) {
+      currentUser = data.user;
+      localStorage.setItem('diverg_user', JSON.stringify(currentUser));
+      applyUserProfileUI(currentUser);
+    }
+  } catch (_) {
+    // Keep whatever we have locally.
+  }
+}
+
+function customizeAvatar() {
+  const input = document.getElementById('avatarFileInput');
+  if (!input) return;
+  input.value = '';
+  input.click();
+}
+
+function onAvatarFileSelected(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file || !currentUser || !currentUser.id) return;
+  if (file.size > 2 * 1024 * 1024) {
+    alert('Avatar file is too large (max 2MB).');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = String(reader.result || '');
+    if (!dataUrl) return;
+    localStorage.setItem(getAvatarStorageKey(currentUser.id), dataUrl);
+    applyUserProfileUI(currentUser);
+    document.getElementById('userMenu').classList.remove('show');
+  };
+  reader.readAsDataURL(file);
+}
+
+function resetAvatar() {
+  if (!currentUser || !currentUser.id) return;
+  localStorage.removeItem(getAvatarStorageKey(currentUser.id));
+  applyUserProfileUI(currentUser);
+  document.getElementById('userMenu').classList.remove('show');
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 function getApiUrl() {
