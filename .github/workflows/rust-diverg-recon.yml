@@ -1,0 +1,23 @@
+name: diverg-recon
+
+on:
+  push:
+    paths:
+      - "native/diverg-recon/**"
+      - ".github/workflows/rust-diverg-recon.yml"
+  pull_request:
+    paths:
+      - "native/diverg-recon/**"
+      - ".github/workflows/rust-diverg-recon.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native/diverg-recon
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --verbose
+      - run: cargo build --release --verbose

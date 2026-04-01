@@ -53,7 +53,7 @@ Set `HELIUS_API_KEY` on the server or pass/configure the key in the console **Se
 
 - **Python 3.11+**
 - **OpenAI API key** for LLM-backed steps (`OPENAI_API_KEY` in `.env`)
-- Optional: [nmap](https://nmap.org/) for recon; Docker only if using OpenClaw integration
+- Optional: `diverg-recon` Rust helper (`cargo build --release` in `native/diverg-recon`) for faster port/DNS in recon; else [nmap](https://nmap.org/) for recon fallbacks. Docker only if using OpenClaw integration
 
 ### Setup
 
