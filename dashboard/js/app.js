@@ -266,230 +266,37 @@ function withProgress(out, label, promiseFactory) {
     .finally(() => clearInterval(timer));
 }
 
-// ── Finding Databases (scope-aware) ──────────────────────────────────────
-const FINDING_DB = {
-  common: [
-    { title: 'Missing Content-Security-Policy', severity: 'medium', category: 'Headers', confidence: 'high' },
-    { title: 'X-Frame-Options Not Set', severity: 'low', category: 'Headers', confidence: 'high' },
-    { title: 'Strict-Transport-Security Missing', severity: 'medium', category: 'Headers', confidence: 'high' },
-  ],
-  web: [
-    { title: 'Reflected XSS via Search Parameter', severity: 'high', category: 'Injection', confidence: 'high' },
-    { title: 'DOM-Based XSS in Client Router', severity: 'high', category: 'Injection', confidence: 'medium' },
-    { title: 'Open Redirect on Login Callback', severity: 'medium', category: 'Redirect', confidence: 'high' },
-    { title: 'CORS Wildcard Origin Allowed', severity: 'high', category: 'CORS', confidence: 'high' },
-    { title: 'Sensitive Data in Local Storage', severity: 'medium', category: 'Data Exposure', confidence: 'medium' },
-    { title: 'Insecure Cookie (missing HttpOnly)', severity: 'medium', category: 'Cookies', confidence: 'high' },
-  ],
-  api: [
-    { title: 'Broken Object-Level Authorization', severity: 'critical', category: 'BOLA', confidence: 'high' },
-    { title: 'Rate Limiting Not Enforced', severity: 'medium', category: 'API Abuse', confidence: 'high' },
-    { title: 'Verbose Error Messages Leak Stack Trace', severity: 'medium', category: 'Info Leak', confidence: 'high' },
-    { title: 'JWT Algorithm None Attack', severity: 'critical', category: 'Auth', confidence: 'medium' },
-    { title: 'Mass Assignment via Unfiltered Params', severity: 'high', category: 'BOLA', confidence: 'medium' },
-    { title: 'GraphQL Introspection Enabled', severity: 'low', category: 'Info Leak', confidence: 'high' },
-  ],
-  crypto: [
-    { title: 'Approval for Unlimited Token Spend', severity: 'critical', category: 'Web3', confidence: 'heuristic' },
-    { title: 'Unverified Contract Interaction', severity: 'high', category: 'Web3', confidence: 'heuristic' },
-    { title: 'Private Key Pattern in Client Bundle', severity: 'critical', category: 'Web3', confidence: 'medium' },
-    { title: 'setApprovalForAll on Unknown Contract', severity: 'high', category: 'Web3', confidence: 'heuristic' },
-    { title: 'Clipboard Hijacking Script Detected', severity: 'high', category: 'Drainer', confidence: 'heuristic' },
-  ],
-  recon: [
-    { title: 'Exposed Admin Panel at /admin', severity: 'high', category: 'Recon', confidence: 'high' },
-    { title: 'Directory Listing Enabled', severity: 'medium', category: 'Recon', confidence: 'high' },
-    { title: 'Outdated Server Software (Apache 2.4.29)', severity: 'medium', category: 'Recon', confidence: 'high' },
-    { title: 'Subdomain Takeover Possible (CNAME dangling)', severity: 'high', category: 'Recon', confidence: 'medium' },
-    { title: 'Open Ports: 22, 80, 443, 8080, 3306', severity: 'low', category: 'Recon', confidence: 'high' },
-  ],
-  attack: [
-    { title: 'SQL Injection (Union-Based) in /api/users', severity: 'critical', category: 'SQLi', confidence: 'high' },
-    { title: 'Remote Code Execution via Template Injection', severity: 'critical', category: 'RCE', confidence: 'medium' },
-    { title: 'Server-Side Request Forgery in Image Proxy', severity: 'high', category: 'SSRF', confidence: 'high' },
-    { title: 'IDOR — Access Other Users\' Records', severity: 'critical', category: 'BOLA', confidence: 'high' },
-    { title: 'Blind XSS Payload Stored via Contact Form', severity: 'high', category: 'XSS', confidence: 'medium' },
-    { title: 'Authentication Bypass via Parameter Pollution', severity: 'critical', category: 'Auth Bypass', confidence: 'high' },
-    { title: 'Path Traversal Reads /etc/passwd', severity: 'high', category: 'Traversal', confidence: 'high' },
-    { title: 'Insecure Deserialization in Session Cookie', severity: 'critical', category: 'RCE', confidence: 'medium' },
-  ],
-  passive: [
-    { title: 'Mixed Content (HTTP Resources on HTTPS)', severity: 'low', category: 'TLS', confidence: 'high' },
-    { title: 'Deprecated TLS 1.0 Supported', severity: 'medium', category: 'TLS', confidence: 'high' },
-    { title: 'Information Disclosure in HTTP Headers', severity: 'low', category: 'Info Leak', confidence: 'high' },
-  ],
+// ── Skill labels for terminal output ─────────────────────────────────────
+const SKILL_LABELS = {
+  osint: 'External intelligence & DNS recon',
+  recon: 'Subdomain & port enumeration',
+  headers_ssl: 'Security headers & TLS analysis',
+  crypto_security: 'Cryptographic controls (JWT, TLS, ciphers)',
+  data_leak_risks: 'Data leak & exposure checks',
+  company_exposure: 'Admin panels, staging, docs, storage',
+  web_vulns: 'Injection & web vulnerability tests',
+  auth_test: 'Authentication & session security',
+  api_test: 'API endpoint discovery & abuse',
+  high_value_flaws: 'IDOR, secret exposure, payment tampering',
+  workflow_probe: 'Business logic & workflow abuse',
+  race_condition: 'Concurrency & race condition tests',
+  payment_financial: 'Payment manipulation & refund abuse',
+  client_surface: 'Client-side JS analysis & script intel',
+  dependency_audit: 'Dependency versions & CVE checks',
+  logic_abuse: 'Numeric bounds & parameter abuse',
+  entity_reputation: 'Entity reputation & fraud research',
+  chain_validation_abuse: 'Batch validation & path abuse',
 };
 
-const ATTACK_PATHS_DB = [
-  {
-    steps: ['Recon: Admin Panel', 'Brute Force Login', 'SQL Injection /admin/query', 'DB Dump (users table)', 'Credential Reuse → AWS Console'],
-    severity: 'critical',
-    impact: 'Full database access, cloud takeover via leaked credentials'
-  },
-  {
-    steps: ['SSRF in Image Proxy', 'Access Internal Metadata', 'Leak IAM Credentials', 'Pivot to S3 Buckets'],
-    severity: 'critical',
-    impact: 'Cloud infrastructure compromise via metadata endpoint'
-  },
-  {
-    steps: ['XSS in Search', 'Steal Admin Session Cookie', 'Impersonate Admin', 'Modify Application Config'],
-    severity: 'high',
-    impact: 'Account takeover via stored session hijacking'
-  },
-  {
-    steps: ['Open Redirect on /login', 'Phishing Landing Page', 'Credential Harvest', 'Lateral Movement'],
-    severity: 'high',
-    impact: 'Social engineering chain leading to credential compromise'
-  },
-  {
-    steps: ['IDOR on /api/users/:id', 'Enumerate All User Profiles', 'Extract PII (email, phone)', 'Targeted Spear Phishing'],
-    severity: 'high',
-    impact: 'Mass data exfiltration via broken access control'
-  },
-  {
-    steps: ['Template Injection in /render', 'Achieve RCE', 'Reverse Shell', 'Privilege Escalation'],
-    severity: 'critical',
-    impact: 'Full server compromise via template injection to RCE'
-  },
-  {
-    steps: ['Clipboard Hijack Script', 'Replace Wallet Address', 'Drain User Funds'],
-    severity: 'critical',
-    impact: 'Direct financial loss via Web3 address replacement'
-  },
-  {
-    steps: ['Unverified Contract Call', 'setApprovalForAll', 'Drain NFT Collection'],
-    severity: 'critical',
-    impact: 'NFT collection drained via unlimited approval'
-  },
-];
-
-function getFindingsForScope(scope) {
-  let pool = [...FINDING_DB.common];
-  switch (scope) {
-    case 'full':
-      pool = pool.concat(FINDING_DB.web, FINDING_DB.api, FINDING_DB.recon, FINDING_DB.attack.slice(0, 3));
-      break;
-    case 'quick':
-      pool = pool.concat(FINDING_DB.web.slice(0, 2));
-      break;
-    case 'web':
-      pool = pool.concat(FINDING_DB.web);
-      break;
-    case 'api':
-      pool = pool.concat(FINDING_DB.api);
-      break;
-    case 'crypto':
-      pool = pool.concat(FINDING_DB.crypto);
-      break;
-    case 'recon':
-      pool = pool.concat(FINDING_DB.recon);
-      break;
-    case 'attack':
-      pool = pool.concat(FINDING_DB.attack, FINDING_DB.web.slice(0, 2), FINDING_DB.api.slice(0, 2));
-      break;
-    case 'passive':
-      pool = pool.concat(FINDING_DB.passive);
-      break;
-  }
-  const shuffled = pool.sort(() => 0.5 - Math.random());
-  const count = Math.min(pool.length, scope === 'quick' ? 4 : scope === 'passive' ? 4 : 6 + Math.floor(Math.random() * 4));
-  return shuffled.slice(0, count);
+function skillLabel(name) {
+  if (SKILL_LABELS[name]) return SKILL_LABELS[name];
+  const base = name.split(':')[0];
+  if (SKILL_LABELS[base]) return SKILL_LABELS[base] + ' (' + name.split(':').slice(1).join(':') + ')';
+  return name.replace(/_/g, ' ');
 }
 
-function getAttackPaths(scope) {
-  if (scope === 'passive' || scope === 'quick') return [];
-  let pool;
-  if (scope === 'crypto') {
-    pool = ATTACK_PATHS_DB.filter(p => p.steps.some(s => /Wallet|Clipboard|Contract|Approval/i.test(s)));
-  } else if (scope === 'attack') {
-    pool = [...ATTACK_PATHS_DB];
-  } else {
-    pool = ATTACK_PATHS_DB.filter(p => !/Wallet|Clipboard|Contract|Approval/i.test(p.steps.join(' ')));
-  }
-  const shuffled = pool.sort(() => 0.5 - Math.random());
-  return shuffled.slice(0, scope === 'attack' ? 4 : 2 + Math.floor(Math.random() * 2));
-}
-
-// ── Scanner ──────────────────────────────────────────────────────────────
-function getScanSteps(scope) {
-  const base = [
-    { msg: 'Initializing scan engine...', cls: 'accent', delay: 400 },
-    { msg: 'Resolving target DNS records...', cls: 'dim', delay: 500 },
-  ];
-  const scoped = {
-    full: [
-      { msg: 'Enumerating attack surface (subdomains, ports)...', cls: 'dim', delay: 700 },
-      { msg: 'Crawling application routes — 42 endpoints found', cls: null, delay: 600 },
-      { msg: 'Fingerprinting technologies: React, Express, Node 18', cls: 'dim', delay: 500 },
-      { msg: 'Checking security headers...', cls: 'yellow', delay: 400 },
-      { msg: 'Analyzing client-side scripts (CSP, SRI)...', cls: 'dim', delay: 600 },
-      { msg: 'Running injection tests (XSS, SQLi, SSTI)...', cls: 'yellow', delay: 900 },
-      { msg: 'Testing API authorization controls (BOLA, IDOR)...', cls: 'yellow', delay: 800 },
-      { msg: 'Evaluating TLS/SSL configuration...', cls: 'dim', delay: 400 },
-      { msg: 'Building attack path graph...', cls: 'accent', delay: 600 },
-    ],
-    quick: [
-      { msg: 'Fast header & TLS check...', cls: 'dim', delay: 400 },
-      { msg: 'Quick injection probe...', cls: 'yellow', delay: 500 },
-    ],
-    web: [
-      { msg: 'Crawling application — 38 routes discovered', cls: null, delay: 600 },
-      { msg: 'Testing XSS vectors (reflected, DOM, stored)...', cls: 'yellow', delay: 800 },
-      { msg: 'Checking CORS policy...', cls: 'dim', delay: 400 },
-      { msg: 'Inspecting cookies & storage...', cls: 'dim', delay: 500 },
-      { msg: 'Evaluating redirect chains...', cls: 'dim', delay: 400 },
-    ],
-    api: [
-      { msg: 'Discovering API endpoints (/api/*, /graphql)...', cls: 'dim', delay: 600 },
-      { msg: 'Testing BOLA / IDOR patterns...', cls: 'yellow', delay: 800 },
-      { msg: 'Probing rate limits...', cls: 'dim', delay: 500 },
-      { msg: 'Checking JWT handling...', cls: 'yellow', delay: 600 },
-      { msg: 'Testing mass assignment vectors...', cls: 'dim', delay: 500 },
-    ],
-    crypto: [
-      { msg: 'Scanning client bundle for Web3 patterns...', cls: 'dim', delay: 600 },
-      { msg: 'Checking approval/permit function calls...', cls: 'yellow', delay: 800 },
-      { msg: 'Analyzing transaction signing flows...', cls: 'dim', delay: 600 },
-      { msg: 'Running drainer heuristic engine...', cls: 'yellow', delay: 700 },
-      { msg: 'Inspecting clipboard hooks...', cls: 'dim', delay: 400 },
-    ],
-    recon: [
-      { msg: 'Brute-forcing subdomains (10k wordlist)...', cls: 'dim', delay: 900 },
-      { msg: 'Found 7 subdomains (3 with dangling CNAME)', cls: null, delay: 500 },
-      { msg: 'Port scanning top 1000 ports...', cls: 'dim', delay: 800 },
-      { msg: 'Identifying server technologies...', cls: 'dim', delay: 500 },
-      { msg: 'Checking directory listings...', cls: 'dim', delay: 400 },
-    ],
-    attack: [
-      { msg: 'Enumerating attack surface — 56 endpoints', cls: null, delay: 600 },
-      { msg: 'Generating injection payloads (SQLi, XSS, SSTI, RCE)...', cls: 'yellow', delay: 700 },
-      { msg: 'Launching SQL injection probes...', cls: 'red', delay: 900 },
-      { msg: '  ► UNION-based injection confirmed on /api/users', cls: 'red', delay: 400 },
-      { msg: 'Testing template injection vectors...', cls: 'yellow', delay: 800 },
-      { msg: '  ► SSTI confirmed: {{7*7}} → 49 in /render', cls: 'red', delay: 400 },
-      { msg: 'Testing SSRF via image proxy endpoint...', cls: 'yellow', delay: 700 },
-      { msg: '  ► Internal metadata accessible via SSRF', cls: 'red', delay: 400 },
-      { msg: 'Probing authentication bypass vectors...', cls: 'yellow', delay: 600 },
-      { msg: 'Testing IDOR on resource endpoints...', cls: 'yellow', delay: 700 },
-      { msg: '  ► IDOR confirmed: can access other user records', cls: 'red', delay: 400 },
-      { msg: 'Building attack chain graph...', cls: 'accent', delay: 600 },
-      { msg: 'Mapping privilege escalation paths...', cls: 'accent', delay: 500 },
-    ],
-    passive: [
-      { msg: 'Passive analysis (no active probing)...', cls: 'dim', delay: 400 },
-      { msg: 'Checking TLS versions supported...', cls: 'dim', delay: 500 },
-      { msg: 'Inspecting response headers...', cls: 'dim', delay: 400 },
-      { msg: 'Detecting mixed content...', cls: 'dim', delay: 400 },
-    ],
-  };
-  return [
-    ...base,
-    ...(scoped[scope] || scoped.full),
-    { msg: 'Scan complete — compiling results.', cls: 'green', delay: 400 },
-  ];
-}
-
-function launchScan() {
+// ── Scanner (streaming) ─────────────────────────────────────────────────
+async function launchScan() {
   const url = document.getElementById('scanUrl').value.trim();
   if (!url) return;
 
@@ -506,49 +313,90 @@ function launchScan() {
   termLine(terminal, ts() + ' Scope:  ' + scope.toUpperCase(), null);
   termLine(terminal, ts() + ' Connecting to scan engine...', 'dim');
 
-  let apiDone = false;
-  let apiResult = null;
-  let apiError = null;
+  const apiUrl = getApiUrl() + '/api/scan/stream';
+  const token = getSessionToken();
+  let report = null;
 
-  apiJson('/api/scan', { url, scope })
-    .then((data) => { apiResult = data; })
-    .catch((err) => { apiError = err; })
-    .finally(() => { apiDone = true; });
+  try {
+    const res = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + token,
+      },
+      body: JSON.stringify({ url, scope }),
+    });
 
-  const steps = getScanSteps(scope);
-  let i = 0;
-  function next() {
-    if (apiDone) {
-      if (apiError) {
-        termLine(terminal, ts() + ' Scan failed: ' + apiError.message, 'red');
-        progressBox.classList.remove('show');
-      } else if (apiResult) {
-        const findings = Array.isArray(apiResult.findings) ? apiResult.findings : [];
-        const attackPaths = Array.isArray(apiResult.attack_paths) ? apiResult.attack_paths : [];
-        termLine(terminal, ts() + ' Scan complete.', 'green');
-        termLine(terminal, ts() + ' Findings: ' + findings.length, findings.length ? 'yellow' : 'dim');
-        if (typeof apiResult.risk_score === 'number') {
-          termLine(terminal, ts() + ' Risk score: ' + apiResult.risk_score + (apiResult.risk_verdict ? ' (' + apiResult.risk_verdict + ')' : ''), 'accent');
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody.error || 'HTTP ' + res.status);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    const activeSkills = new Set();
+    let totalFindings = 0;
+    const t0 = Date.now();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let ev;
+        try { ev = JSON.parse(line); } catch { continue; }
+
+        if (ev.event === 'scan_start') {
+          termLine(terminal, ts() + ' Scan accepted — engine running...', 'green');
+        } else if (ev.event === 'skill_start') {
+          activeSkills.add(ev.skill);
+          termLine(terminal, ts() + ' ▸ ' + skillLabel(ev.skill), 'yellow');
+        } else if (ev.event === 'skill_done') {
+          activeSkills.delete(ev.skill);
+          const cnt = ev.findings_count || 0;
+          totalFindings += cnt;
+          const cls = ev.error ? 'red' : (cnt > 0 ? 'accent' : 'green');
+          const suffix = ev.error
+            ? ' — error'
+            : (cnt > 0 ? ' — ' + cnt + ' finding' + (cnt > 1 ? 's' : '') : ' — clean');
+          termLine(terminal, ts() + ' ✓ ' + skillLabel(ev.skill) + suffix, cls);
+        } else if (ev.event === 'done') {
+          report = ev.report || ev;
+        } else if (ev.event === 'error') {
+          termLine(terminal, ts() + ' Error: ' + (ev.error || 'unknown'), 'red');
         }
-        if (Array.isArray(apiResult.skills_run) && apiResult.skills_run.length) {
-          termLine(terminal, ts() + ' Skills: ' + apiResult.skills_run.join(', '), 'dim');
-        }
-        progressBox.classList.remove('show');
-        showScanResults(url, scope, findings, attackPaths, apiResult.risk_score);
-        syncDashboardData();
       }
-      return;
     }
-    if (i < steps.length) {
-      termLine(terminal, ts() + ' ' + steps[i].msg, steps[i].cls);
-      i++;
-      setTimeout(next, steps[i - 1].delay);
-    } else {
-      termLine(terminal, ts() + ' Engine processing — waiting for results...', 'dim');
-      setTimeout(next, 2000);
+
+    if (!report) throw new Error('Stream ended without results');
+
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    const findings = Array.isArray(report.findings) ? report.findings : [];
+    const attackPaths = Array.isArray(report.attack_paths) ? report.attack_paths : [];
+
+    termLine(terminal, '', null);
+    termLine(terminal, ts() + ' ─── Scan Complete (' + elapsed + 's) ───', 'green');
+    termLine(terminal, ts() + ' Findings: ' + findings.length, findings.length ? 'yellow' : 'dim');
+    if (typeof report.risk_score === 'number') {
+      termLine(terminal, ts() + ' Risk score: ' + report.risk_score + (report.risk_verdict ? ' (' + report.risk_verdict + ')' : ''), 'accent');
     }
+    if (Array.isArray(report.skills_run) && report.skills_run.length) {
+      termLine(terminal, ts() + ' Skills: ' + report.skills_run.length + ' modules executed', 'dim');
+    }
+
+    progressBox.classList.remove('show');
+    showScanResults(url, scope, findings, attackPaths, report.risk_score);
+    syncDashboardData();
+  } catch (err) {
+    termLine(terminal, ts() + ' Scan failed: ' + err.message, 'red');
+    progressBox.classList.remove('show');
   }
-  setTimeout(next, 400);
 }
 
 function showScanResults(url, scope, findingsInput, pathsInput, scoreInput) {
@@ -556,7 +404,7 @@ function showScanResults(url, scope, findingsInput, pathsInput, scoreInput) {
   const body = document.getElementById('scanResultsBody');
   const countEl = document.getElementById('scanFindingsCount');
 
-  const findings = (Array.isArray(findingsInput) && findingsInput.length ? findingsInput : getFindingsForScope(scope)).map((f) => ({
+  const findings = (Array.isArray(findingsInput) ? findingsInput : []).map((f) => ({
     title: f.title || 'Untitled finding',
     severity: String(f.severity || 'low').toLowerCase(),
     category: f.category || 'Other',
@@ -573,7 +421,7 @@ function showScanResults(url, scope, findingsInput, pathsInput, scoreInput) {
 
   container.style.display = 'block';
 
-  const paths = Array.isArray(pathsInput) && pathsInput.length ? pathsInput : getAttackPaths(scope);
+  const paths = Array.isArray(pathsInput) ? pathsInput : [];
   const pathsCard = document.getElementById('attackPathsCard');
   const pathsBody = document.getElementById('attackPathsBody');
   const pathsCount = document.getElementById('attackPathsCount');
