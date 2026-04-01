@@ -2,656 +2,332 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#050508">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Diverg Console</title>
-  <link rel="icon" href="/dashboard/logo.png" type="image/png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/dashboard/css/dashboard.css">
 </head>
 <body>
 <div class="app">
 
-  <!-- Sidebar -->
-  <aside class="sidebar" id="sidebarNav">
-    <div class="brand">
-      <img src="/dashboard/logo.png" alt="Diverg" class="brand-logo">
-      <span class="brand-badge">Console</span>
-    </div>
+  <!-- ═══ Sidebar (reference: rounded inner panel) ═══ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-inner">
+      <div class="brand">
+        <img src="/dashboard/logo.png" alt="Diverg" class="brand-logo">
+        <span class="brand-text">Diverg</span>
+      </div>
 
-    <div class="nav-section">
-      <div class="nav-item active" data-page="home">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-        Home
-      </div>
-      <div class="nav-item" data-page="scanner">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        Scanner
-      </div>
-      <div class="nav-item" data-page="investigation">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
-        Investigation
-      </div>
-      <div class="nav-item" data-page="analytics">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        Analytics
-      </div>
-      <div class="nav-item" data-page="history">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        History
-      </div>
-      <div class="nav-item" data-page="findings">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        Findings
-      </div>
-      <div class="nav-item" data-page="results">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18"/><path d="m14 5 7 7-7 7"/></svg>
-        Results
-      </div>
-      <div class="nav-item" data-page="attack-paths">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-        Attack Paths
-      </div>
-      <div class="nav-item" data-page="rewards">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-        Rewards
-      </div>
-      <div class="nav-item" data-page="settings">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        Settings
-      </div>
-    </div>
+      <button class="new-scan-btn" onclick="navigate('scanner')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        New Scan
+      </button>
 
-    <div class="nav-bottom">
-      <div class="user" onclick="document.getElementById('userMenu').classList.toggle('show')">
-        <div class="user-avatar" id="userAvatar">DV</div>
-        <div class="user-info">
-          <div class="user-name" id="userName">Operator</div>
-          <div class="user-role">Full Access</div>
+      <nav class="nav-section">
+        <div class="nav-label">Features</div>
+        <div class="nav-item active" data-page="home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Overview
         </div>
-      </div>
-      <div class="user-menu" id="userMenu">
-        <button class="user-menu-item" onclick="Auth.logout()">Sign out</button>
+        <div class="nav-item" data-page="scanner">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          Scanner
+        </div>
+        <div class="nav-item" data-page="investigation">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Investigation
+        </div>
+        <div class="nav-item" data-page="findings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Findings
+        </div>
+        <div class="nav-item" data-page="history">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          History
+        </div>
+
+        <div class="nav-label">Workspaces</div>
+        <div class="nav-item" data-page="analytics">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          Analytics
+        </div>
+        <div class="nav-item" data-page="rewards">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          Rewards
+        </div>
+        <div class="nav-item" data-page="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Settings
+        </div>
+      </nav>
+
+      <div class="nav-bottom">
+        <div class="user" onclick="toggleUserMenu()">
+          <div class="user-avatar">DV</div>
+          <div class="user-name">Operator</div>
+        </div>
+        <div class="user-menu" id="userMenu">
+          <button class="user-menu-item" onclick="logout()">Sign out</button>
+        </div>
       </div>
     </div>
   </aside>
 
-  <div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true" tabindex="-1"></div>
-
-  <!-- Main -->
+  <!-- ═══ Main ═══ -->
   <main class="main">
-    <header class="header">
-      <button type="button" class="nav-toggle" id="navToggle" aria-label="Open navigation menu" aria-expanded="false" aria-controls="sidebarNav">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
-      </button>
-      <span class="page-title" id="pageTitle">Home</span>
-    </header>
+    <button class="nav-toggle" onclick="toggleSidebar()" aria-label="Menu">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+    </button>
 
-    <div class="content">
-
-      <!-- HOME ═══════════════════════════════════════════════════════════ -->
-      <div class="page active" id="page-home">
-        <div class="hero">
-          <div class="hero-title">What should we scan today?</div>
+    <!-- ══════════ HOME ══════════ -->
+    <div class="page active" id="page-home">
+      <div class="topbar">
+        <div class="topbar-left">
+          <div class="topbar-dropdown">All <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M2 3.5 L5 7 L8 3.5z"/></svg></div>
         </div>
-
-        <div class="command-box">
-          <input type="text" class="command-input" id="quickUrl" placeholder="Enter a URL to scan…">
-          <button class="command-btn" id="quickBtn" onclick="quickLaunch()">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          </button>
+        <div class="topbar-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="quickUrl" placeholder="Search for targets, addresses, domains..." spellcheck="false">
         </div>
-
-        <div class="pills">
-          <span class="pill" data-scope="quick">Quick</span>
-          <span class="pill active" data-scope="full">Full</span>
-          <span class="pill" data-scope="web">Web</span>
-          <span class="pill" data-scope="crypto">Crypto</span>
+        <div class="topbar-right">
+          <button class="topbar-btn ghost" onclick="exportData()">Export Data</button>
+          <button class="topbar-btn primary" onclick="navigate('scanner')">+ New Scan</button>
         </div>
+      </div>
 
-        <div class="progress-box" id="quickProgressBox">
-          <div class="progress-h">
-            <div class="progress-dot"></div>
-            <span id="quickProgressText">Initializing scan…</span>
-          </div>
-          <div id="quickSkillsList"></div>
-          <div id="quickFindings"></div>
-        </div>
+      <div class="stat-banner">
+        <div class="stat-banner-item">Scans Today <strong id="bannerScans">0</strong> <span class="delta delta-up" id="bannerScansDelta">+0%</span></div>
+        <div class="stat-banner-item">Findings <strong id="bannerFindings">0</strong> <span class="delta delta-up" id="bannerFindingsDelta">+0</span></div>
+        <div class="stat-banner-item">Targets Tracked <strong id="bannerTargets">0</strong> <span class="delta delta-up" id="bannerTargetsDelta">+0</span></div>
+        <div class="stat-banner-item">Points <strong id="bannerPoints">0</strong> <span class="delta delta-up" id="bannerPointsDelta">+0%</span></div>
+      </div>
 
-        <div class="stats-row">
-          <div class="stat">
-            <div class="stat-value" id="statScans">—</div>
-            <div class="stat-label">Total scans</div>
+      <!-- Stat Cards (reference: sparkline + red circle indicator + number + label + green delta) -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-card-top">
+            <svg class="stat-sparkline" viewBox="0 0 60 28"><path d="M0 22 Q10 18, 15 20 T30 12 T45 16 T60 6" stroke="var(--accent)" fill="none"/></svg>
+            <div class="stat-indicator"><svg viewBox="0 0 24 24"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></div>
           </div>
-          <div class="stat">
-            <div class="stat-value red" id="statCritical">—</div>
-            <div class="stat-label">Critical findings</div>
-          </div>
-          <div class="stat">
-            <div class="stat-value blue" id="statTargets">—</div>
-            <div class="stat-label">Targets</div>
-          </div>
-          <div class="stat">
-            <div class="stat-value" id="statAvgRisk">—</div>
-            <div class="stat-label">Avg safety score</div>
+          <div class="stat-value" id="statScans">0</div>
+          <div class="stat-bottom">
+            <span class="stat-label">Scans Run</span>
+            <span class="stat-delta up" id="statScansDelta">+12%</span>
           </div>
         </div>
+        <div class="stat-card">
+          <div class="stat-card-top">
+            <svg class="stat-sparkline" viewBox="0 0 60 28"><path d="M0 24 Q10 20, 20 22 T35 14 T50 18 T60 10" stroke="var(--accent)" fill="none"/></svg>
+            <div class="stat-indicator"><svg viewBox="0 0 24 24"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></div>
+          </div>
+          <div class="stat-value" id="statCritical">0</div>
+          <div class="stat-bottom">
+            <span class="stat-label">Critical Issues</span>
+            <span class="stat-delta up" id="statCritDelta">+3</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-top">
+            <svg class="stat-sparkline" viewBox="0 0 60 28"><path d="M0 20 Q15 16, 20 18 T40 10 T55 14 T60 8" stroke="var(--green)" fill="none"/></svg>
+            <div class="stat-indicator"><svg viewBox="0 0 24 24"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></div>
+          </div>
+          <div class="stat-value" id="statTargets">0</div>
+          <div class="stat-bottom">
+            <span class="stat-label">Targets</span>
+            <span class="stat-delta up" id="statTargDelta">+3</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-top">
+            <svg class="stat-sparkline" viewBox="0 0 60 28"><path d="M0 18 Q10 14, 20 16 T35 10 T50 8 T60 4" stroke="var(--accent)" fill="none"/></svg>
+            <div class="stat-indicator"><svg viewBox="0 0 24 24"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg></div>
+          </div>
+          <div class="stat-value" id="statScore">&mdash;</div>
+          <div class="stat-bottom">
+            <span class="stat-label">Sec Score</span>
+            <span class="stat-delta up" id="statScoreDelta">+22%</span>
+          </div>
+        </div>
+      </div>
 
-        <div class="section-h">
-          <span class="section-title">Recent scans</span>
-          <span class="section-action" onclick="navigate('history')">View all</span>
+      <!-- Tab Bar (reference style) -->
+      <div class="tab-bar" id="homeTabBar">
+        <div class="tab-bar-item active" data-page="home">Overview</div>
+        <div class="tab-bar-item" data-page="scanner">Scanner</div>
+        <div class="tab-bar-item" data-page="investigation">Investigation</div>
+        <div class="tab-bar-item" data-page="findings">Findings</div>
+        <div class="tab-bar-item" data-page="history">History</div>
+        <div class="tab-bar-item" data-page="analytics">Analysis</div>
+        <div class="tab-bar-item" data-page="rewards">Rewards</div>
+        <div class="tab-bar-item" data-page="settings">Settings</div>
+      </div>
+
+      <!-- Content Grid (reference: big card left, 2 smaller right) -->
+      <div class="content-grid">
+        <!-- Big card: Scan Activity with area chart -->
+        <div class="card card-wide">
+          <div class="card-body">
+            <div style="font-size:0.9375rem;font-weight:700;margin-bottom:16px;">Scan Activity</div>
+            <div class="metric-row">
+              <div class="metric-block">
+                <div class="metric-label">Weekly</div>
+                <span class="metric-value" id="metricWeekly">0</span>
+                <span class="metric-delta">+19.6%</span>
+                <div class="metric-sub">Compared to last week</div>
+              </div>
+              <div class="metric-block">
+                <div class="metric-label">Monthly</div>
+                <span class="metric-value" id="metricMonthly">0</span>
+                <span class="metric-delta">+1.9%</span>
+                <div class="metric-sub">Compared to last month</div>
+              </div>
+            </div>
+            <div class="chart-area">
+              <svg viewBox="0 0 500 160" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.6"/>
+                    <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.02"/>
+                  </linearGradient>
+                </defs>
+                <path d="M0 140 Q50 120, 80 130 T160 100 T240 110 T320 60 T400 80 T500 40 L500 160 L0 160 Z" fill="url(#chartGrad)"/>
+                <path d="M0 140 Q50 120, 80 130 T160 100 T240 110 T320 60 T400 80 T500 40" fill="none" stroke="var(--accent)" stroke-width="2"/>
+              </svg>
+            </div>
+          </div>
         </div>
 
+        <!-- Right top: Recent Findings mini-table -->
         <div class="card">
-          <div class="card-b" id="recentScans">
-            <div class="empty">
-              <div class="empty-t">No scans yet</div>
-              <div class="empty-d">Enter a URL above to start</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- SCANNER ═══════════════════════════════════════════════════════ -->
-      <div class="page" id="page-scanner">
-        <div class="section-h" style="margin-top:2rem">
-          <span class="section-title">Advanced Scanner</span>
-        </div>
-
-        <div class="card" style="margin-bottom:1.5rem">
-          <div class="card-b">
-            <div class="settings-f">
-              <label>Target URL</label>
-              <input type="text" id="scanUrl" placeholder="https://example.com" class="input" style="font-family:var(--mono)">
-            </div>
-
-            <div class="scope-grid">
-              <div class="scope-opt active" data-scope="full">
-                <div class="scope-opt-title">Full</div>
-                <div class="scope-opt-desc">Complete assessment</div>
-              </div>
-              <div class="scope-opt" data-scope="quick">
-                <div class="scope-opt-title">Quick</div>
-                <div class="scope-opt-desc">Headers & basics</div>
-              </div>
-              <div class="scope-opt" data-scope="web">
-                <div class="scope-opt-title">Web</div>
-                <div class="scope-opt-desc">XSS, SQLi, CSRF</div>
-              </div>
-              <div class="scope-opt" data-scope="api">
-                <div class="scope-opt-title">API</div>
-                <div class="scope-opt-desc">REST & endpoints</div>
-              </div>
-              <div class="scope-opt" data-scope="crypto">
-                <div class="scope-opt-title">Crypto</div>
-                <div class="scope-opt-desc">Web3 & wallets</div>
-              </div>
-              <div class="scope-opt" data-scope="recon">
-                <div class="scope-opt-title">Recon</div>
-                <div class="scope-opt-desc">OSINT & mapping</div>
-              </div>
-              <div class="scope-opt" data-scope="passive">
-                <div class="scope-opt-title">Passive</div>
-                <div class="scope-opt-desc">Non-intrusive</div>
-              </div>
-              <div class="scope-opt" data-scope="attack">
-                <div class="scope-opt-title">Attack</div>
-                <div class="scope-opt-desc">Aggressive testing</div>
-              </div>
-            </div>
-
-            <button class="btn btn-primary" onclick="launchScan()">Launch Scan</button>
-          </div>
-        </div>
-
-        <div class="progress-box" id="progressBox">
-          <div class="progress-h">
-            <div class="progress-dot"></div>
-            <span id="progressText" style="font-size:0.8125rem; font-weight:500">Scanning…</span>
-          </div>
-          <div id="skillsList" style="margin-bottom:1rem"></div>
-          <div id="liveFindings"></div>
-        </div>
-      </div>
-
-      <!-- ANALYTICS ═══════════════════════════════════════════════════════ -->
-      <div class="page" id="page-analytics">
-        <div class="section-h" style="margin-top:2rem">
-          <span class="section-title">Security Overview</span>
-        </div>
-
-        <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:1rem; margin-bottom:2rem; max-width:800px; margin-left:auto; margin-right:auto">
-          <div class="card" style="max-width:none">
-            <div class="card-h"><h3>Findings by Severity</h3></div>
-            <div class="card-b">
-              <div class="chart-bars" id="severityChart">
-                <div class="chart-bar-row">
-                  <span class="chart-label">Critical</span>
-                  <div class="chart-bar-wrap"><div class="chart-bar critical" id="barCritical" style="width:0%"></div></div>
-                  <span class="chart-value" id="valCritical">0</span>
-                </div>
-                <div class="chart-bar-row">
-                  <span class="chart-label">High</span>
-                  <div class="chart-bar-wrap"><div class="chart-bar high" id="barHigh" style="width:0%"></div></div>
-                  <span class="chart-value" id="valHigh">0</span>
-                </div>
-                <div class="chart-bar-row">
-                  <span class="chart-label">Medium</span>
-                  <div class="chart-bar-wrap"><div class="chart-bar medium" id="barMedium" style="width:0%"></div></div>
-                  <span class="chart-value" id="valMedium">0</span>
-                </div>
-                <div class="chart-bar-row">
-                  <span class="chart-label">Low</span>
-                  <div class="chart-bar-wrap"><div class="chart-bar low" id="barLow" style="width:0%"></div></div>
-                  <span class="chart-value" id="valLow">0</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="card" style="max-width:none">
-            <div class="card-h"><h3>Average Safety Score</h3></div>
-            <div class="card-b" style="display:flex; align-items:center; justify-content:center; min-height:200px">
-              <div class="donut-chart" id="riskDonut">
-                <div class="donut-center">
-                  <div class="donut-value" id="donutValue">—</div>
-                  <div class="donut-label">avg safety (0-100)</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card" style="margin-bottom:2rem; max-width:800px; margin-left:auto; margin-right:auto">
-          <div class="card-h"><h3>Scan Activity (Last 30 Days)</h3></div>
-          <div class="card-b">
-            <div class="trend-chart" id="trendChart">
-              <div class="trend-bars" id="trendBars"></div>
-              <div class="trend-labels" id="trendLabels"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card" style="max-width:800px; margin-left:auto; margin-right:auto">
-          <div class="card-h"><h3>Top Vulnerability Categories</h3></div>
-          <div class="card-b" id="topCategories">
-            <div class="empty" style="padding:2rem">
-              <div class="empty-t">No data yet</div>
-              <div class="empty-d">Run scans to see analytics</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- HISTORY ═══════════════════════════════════════════════════════ -->
-      <div class="page" id="page-history">
-        <div class="section-h">
-          <span class="section-title">Scan history</span>
-          <span class="section-action" onclick="navigate('scanner')">New scan</span>
-        </div>
-
-        <div class="card">
-          <div class="scan-list" id="historyList">
-            <div class="empty" style="padding:2rem">
-              <div class="empty-t">No scans found</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- FINDINGS ═══════════════════════════════════════════════════════ -->
-      <div class="page" id="page-findings">
-        <div class="section-h">
-          <span class="section-title">All findings</span>
-        </div>
-
-        <div class="card" style="margin-bottom:1rem">
-          <div class="card-b" style="display:flex; gap:0.75rem; flex-wrap:wrap">
-            <select id="findingsSeverityFilter" class="input" style="max-width:220px">
-              <option value="">All severities</option>
-              <option value="critical">Critical</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-              <option value="info">Info</option>
-            </select>
-            <input type="text" id="findingsSearchInput" class="input" placeholder="Search title, category, evidence..." style="min-width:280px; flex:1">
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="scan-list" id="findingsList">
-            <div class="empty" style="padding:2rem">
-              <div class="empty-t">No findings</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- RESULTS ═══════════════════════════════════════════════════════ -->
-      <div class="page" id="page-results">
-        <div class="section-h">
-          <span class="section-title" id="resultsTarget">Results</span>
-          <span class="section-action-row">
-            <span class="section-action" onclick="exportReportPdf()" title="Easy-to-read summary you can save or print">Download PDF summary</span>
-            <span class="section-action" onclick="exportReport()">Export JSON</span>
-          </span>
-        </div>
-
-        <div id="resultsBadges" style="display:flex; gap:0.5rem; margin-bottom:1.5rem; flex-wrap:wrap"></div>
-
-        <div class="card">
-          <div id="resultsFindings"></div>
-        </div>
-      </div>
-
-      <!-- ATTACK PATHS ═══════════════════════════════════════════════════ -->
-      <div class="page" id="page-attack-paths">
-        <div class="section-h">
-          <span class="section-title">Attack paths</span>
-        </div>
-
-        <div class="card">
-          <div class="card-b" id="attackPathsList">
-            <div class="empty">
-              <div class="empty-t">No attack paths discovered</div>
-              <div class="empty-d">Run a full scan to find chained vulnerabilities</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- INVESTIGATION ═══════════════════════════════════════════════════ -->
-      <div class="page" id="page-investigation">
-        <div class="section-h inv-section-h">
-          <span class="section-title">Investigation tools</span>
-        </div>
-
-        <div class="settings-grid inv-settings-grid inv-settings-grid--blockchain">
-          <div class="settings-card wide inv-group-card">
-            <div class="settings-h">
-              <h4>Blockchain Investigation (Primary)</h4>
-              <p>Main workflow for wallet, contract, and token-bundle investigations</p>
-            </div>
-          </div>
-
-          <div class="settings-card inv-blockchain-card">
-            <div class="settings-h">
-              <h4>Blockchain</h4>
-              <p>Wallet RPC lookup &amp; Solana token bundle (extension parity)</p>
-            </div>
-
-            <div class="inv-tool-block">
-              <div class="inv-tool-kicker">1 · Quick check</div>
-              <h5 class="inv-tool-title">Wallet or contract snapshot</h5>
-              <p class="inv-tool-dek">Balance, Solana account shape, recent signatures (or EVM nonce + optional Etherscan txs). Uses your Helius key from Settings for Solana.</p>
-              <div class="settings-f">
-                <label class="inv-field-label" for="chainAddr">Address</label>
-                <input type="text" id="chainAddr" placeholder="0x… or Solana address" class="input" style="font-family:var(--mono)" autocomplete="off" spellcheck="false">
-              </div>
-              <p class="inv-hint">Solana balance uses your Helius key from Settings. Ethereum <span class="mono">0x…</span>: public RPC (balance / nonce); when <span class="mono">ETHERSCAN_API_KEY</span> is set on the server, recent mainnet txs are included.</p>
-              <button class="btn btn-primary" onclick="runChainLookup()">Look up address</button>
-              <div id="chainOut" class="inv-out inv-out-empty">
-                <div class="inv-summary" id="chainSummary">Enter an address to look up.</div>
-                <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="chainRaw"></pre></details>
-              </div>
-            </div>
-
-            <div class="inv-tool-block">
-              <div class="inv-tool-kicker">2 · Solana token only</div>
-              <h5 class="inv-tool-title">Token bundle &amp; holder risk</h5>
-              <p class="inv-tool-dek">Paste the <strong>SPL mint</strong> (token contract), not the wallet from step 1. Holder sampling, same-funder clusters, coordination score — same logic as the browser extension bundle.</p>
-              <div class="settings-f">
-                <label class="inv-field-label" for="tokenMint">SPL mint address</label>
-                <input type="text" id="tokenMint" placeholder="Token mint (SPL)" class="input" style="font-family:var(--mono)" autocomplete="off" spellcheck="false">
-                <label class="inv-field-label" for="tokenSeedWallet" style="margin-top:0.65rem">Focus wallet (optional)</label>
-                <input type="text" id="tokenSeedWallet" placeholder="Wallet to anchor cluster / % of supply" class="input" style="font-family:var(--mono); margin-top:0.35rem" autocomplete="off" spellcheck="false">
-              </div>
-              <label class="inv-check" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;font-size:0.85rem;color:var(--muted)">
-                <input type="checkbox" id="tokenBundleSkipX">
-                Skip X mention search (faster)
-              </label>
-              <label class="inv-check" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;font-size:0.85rem;color:var(--muted)">
-                <input type="checkbox" id="tokenBundleAllHolders" checked>
-                Scan all holders (slowest, broadest coverage)
-              </label>
-              <p class="inv-hint">Outputs risk score, cluster %, bridge/mixer-style signals on funders, optional X mentions of holders.</p>
-              <button class="btn btn-secondary" onclick="runTokenBundle()">Analyze token bundle</button>
-              <div id="tokenBundleOut" class="inv-out inv-out-empty">
-                <div class="inv-summary" id="tokenBundleSummary">Enter a mint to analyze, or use step 1 for a wallet/contract snapshot.</div>
-                <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="tokenBundleRaw"></pre></details>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="section-h inv-section-h inv-section-h--secondary">
-          <span class="section-title">Web Investigation (Secondary)</span>
-        </div>
-
-        <div class="settings-grid inv-settings-grid">
-          <div class="settings-card wide inv-group-card">
-            <div class="settings-h">
-              <h4>Web Tools</h4>
-              <p>Use these when you need infrastructure, exploit simulation, or reputation context around web targets.</p>
-            </div>
-          </div>
-
-          <div class="settings-card">
-            <div class="settings-h">
-              <h4>Domain OSINT</h4>
-              <p>WHOIS, DNS &amp; certificates</p>
-            </div>
-            <div class="settings-f">
-              <input type="text" id="osintDomain" placeholder="example.com" class="input">
-            </div>
-            <p class="inv-hint">Runs OSINT, recon, and headers/SSL in parallel; full skill JSON below.</p>
-            <button class="btn btn-primary" onclick="runOsint()">Investigate</button>
-            <div id="osintOut" class="inv-out inv-out-empty">
-              <div class="inv-summary" id="osintSummary">Enter a domain to investigate.</div>
-              <details class="inv-details"><summary>Full JSON (all skills)</summary><pre class="inv-json" id="osintRaw"></pre></details>
-            </div>
-          </div>
-
-          <div class="settings-card">
-            <div class="settings-h">
-              <h4>PoC Simulator</h4>
-              <p>Test IDOR &amp; unauth access</p>
-            </div>
-            <div class="settings-f">
-              <select id="pocType" class="input" style="margin-bottom:0.5rem">
-                <option value="idor">IDOR</option>
-                <option value="unauthenticated">Unauthenticated</option>
-              </select>
-              <input type="text" id="pocUrl" placeholder="https://api.example.com/user/123" class="input" style="font-family:var(--mono); margin-bottom:0.5rem">
-              <div style="display:flex; gap:0.5rem">
-                <input type="text" id="pocParam" placeholder="param (id)" class="input" style="flex:1">
-                <input type="text" id="pocValue" placeholder="value (2)" class="input" style="flex:1">
-              </div>
-            </div>
-            <button class="btn btn-primary" onclick="runPoc()">Simulate</button>
-            <div id="pocOut" class="inv-out inv-out-empty">
-              <div class="inv-summary" id="pocSummary">Configure and run.</div>
-              <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="pocRaw"></pre></details>
-            </div>
-          </div>
-
-          <div class="settings-card">
-            <div class="settings-h">
-              <h4>Entity Reputation</h4>
-              <p>Check threat intel</p>
-            </div>
-            <div class="settings-f">
-              <input type="text" id="reputationTarget" placeholder="Domain (e.g. example.com)" class="input">
-            </div>
-            <p class="inv-hint">Uses OSINT WHOIS context plus open-web reputation signals.</p>
-            <button class="btn btn-primary" onclick="runReputation()">Check</button>
-            <div id="reputationOut" class="inv-out inv-out-empty">
-              <div class="inv-summary" id="reputationSummary">Enter a domain to check.</div>
-              <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="reputationRaw"></pre></details>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- REWARDS ═══════════════════════════════════════════════════════ -->
-      <div class="page" id="page-rewards">
-        <div class="section-h" style="margin-top:2rem">
-          <span class="section-title">Rewards</span>
-        </div>
-
-        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1rem; margin-bottom:1.5rem">
-          <div class="card" style="max-width:none">
-            <div class="card-h"><h3>Your points</h3></div>
-            <div class="card-b">
-              <div id="rewardsBalance" style="font-size:2rem; font-weight:600; font-family:var(--mono); color:var(--accent)">—</div>
-              <p id="rewardsReferredNote" style="font-size:0.75rem; color:var(--dim); margin-top:0.5rem; display:none">You joined with a referral code.</p>
-            </div>
-          </div>
-          <div class="card" style="max-width:none">
-            <div class="card-h"><h3>Invite friends</h3></div>
-            <div class="card-b">
-              <div style="font-size:0.75rem; color:var(--dim); margin-bottom:0.35rem">Your code</div>
-              <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center">
-                <code id="rewardsReferralCode" style="font-family:var(--mono); font-size:1rem; letter-spacing:0.05em">—</code>
-                <button type="button" class="btn btn-secondary" style="font-size:0.75rem" onclick="copyRewardsLink()">Copy link</button>
-              </div>
-              <p style="font-size:0.7rem; color:var(--dim); margin-top:0.75rem; word-break:break-all" id="rewardsReferralHint"></p>
-            </div>
-          </div>
-        </div>
-
-        <div class="card" style="margin-bottom:1.5rem">
-          <div class="card-h"><h3>Leaderboard</h3></div>
-          <div class="card-b">
-            <div class="pills" style="margin-bottom:1rem">
-              <span class="pill active" data-lb="all" onclick="setRewardsLeaderboardWindow(this)">All-time</span>
-              <span class="pill" data-lb="30d" onclick="setRewardsLeaderboardWindow(this)">30 days</span>
-              <span class="pill" data-lb="7d" onclick="setRewardsLeaderboardWindow(this)">7 days</span>
-            </div>
-            <div style="overflow-x:auto">
-              <table style="width:100%; border-collapse:collapse; font-size:0.8125rem">
-                <thead>
-                  <tr style="text-align:left; color:var(--dim); border-bottom:1px solid var(--border)">
-                    <th style="padding:0.5rem 0.25rem">#</th>
-                    <th style="padding:0.5rem 0.25rem">Name</th>
-                    <th style="padding:0.5rem 0.25rem; text-align:right">Points</th>
-                  </tr>
-                </thead>
-                <tbody id="rewardsLeaderboardBody"></tbody>
+          <div class="card-body">
+            <div style="font-size:0.8125rem;font-weight:700;margin-bottom:12px;">Recent Findings</div>
+            <div class="data-table" style="border:none;">
+              <table>
+                <tbody id="homeRecentFindings">
+                  <tr><td colspan="3"><div class="empty" style="padding:20px;"><div class="empty-desc">No findings yet</div></div></td></tr>
+                </tbody>
               </table>
             </div>
           </div>
         </div>
 
+        <!-- Right bottom: Quick Stats -->
         <div class="card">
-          <div class="card-h"><h3>Recent activity</h3></div>
-          <div class="card-b">
-            <div style="overflow-x:auto">
-              <table style="width:100%; border-collapse:collapse; font-size:0.8125rem">
-                <thead>
-                  <tr style="text-align:left; color:var(--dim); border-bottom:1px solid var(--border)">
-                    <th style="padding:0.5rem 0.25rem">When</th>
-                    <th style="padding:0.5rem 0.25rem">Reason</th>
-                    <th style="padding:0.5rem 0.25rem; text-align:right">Δ</th>
-                  </tr>
-                </thead>
-                <tbody id="rewardsLedgerBody"></tbody>
-              </table>
-            </div>
+          <div class="card-body">
+            <div style="font-size:0.8125rem;font-weight:700;margin-bottom:14px;">Severity Breakdown</div>
+            <div class="bar-row"><span class="bar-label">Critical</span><div class="bar-track"><div class="bar-fill critical" id="barCritical" style="width:0%"></div></div><span class="bar-value" id="valCritical">0</span></div>
+            <div class="bar-row"><span class="bar-label">High</span><div class="bar-track"><div class="bar-fill high" id="barHigh" style="width:0%"></div></div><span class="bar-value" id="valHigh">0</span></div>
+            <div class="bar-row"><span class="bar-label">Medium</span><div class="bar-track"><div class="bar-fill medium" id="barMedium" style="width:0%"></div></div><span class="bar-value" id="valMedium">0</span></div>
+            <div class="bar-row"><span class="bar-label">Low</span><div class="bar-track"><div class="bar-fill low" id="barLow" style="width:0%"></div></div><span class="bar-value" id="valLow">0</span></div>
           </div>
         </div>
       </div>
 
-      <!-- SETTINGS ═══════════════════════════════════════════════════════ -->
-      <div class="page" id="page-settings">
-        <div class="section-h">
-          <span class="section-title">Settings</span>
-        </div>
-
-        <div class="settings-grid">
-          <div class="settings-card">
-            <div class="settings-h">
-              <h4>API Configuration</h4>
-              <p>Diverg backend connection</p>
-            </div>
-            <div class="settings-f">
-              <label>API URL</label>
-              <input type="text" id="settingsApiUrl" placeholder="https://dash.divergsec.com">
-            </div>
-            <div style="display:flex; gap:0.5rem">
-              <button class="btn btn-primary" onclick="saveSettings()">Save</button>
-              <button class="btn btn-secondary" onclick="testConnection()">Test</button>
-            </div>
-            <div id="connStatus" style="margin-top:0.75rem; font-size:0.75rem; color:var(--dim)"></div>
-          </div>
-
-          <div class="settings-card">
-            <div class="settings-h">
-              <h4>Helius Integration</h4>
-              <p>Blockchain data via Helius</p>
-            </div>
-            <p class="settings-help">Get a key: sign up at <a href="https://www.helius.dev/" target="_blank" rel="noopener noreferrer">helius.dev</a>, then open <a href="https://dashboard.helius.dev/" target="_blank" rel="noopener noreferrer">dashboard.helius.dev</a> → create or pick a project → copy the <strong>API key</strong> (long alphanumeric string, not a wallet address) → paste below and Save.</p>
-            <div class="settings-f">
-              <label>API Key</label>
-              <input type="password" id="heliusApiKey" placeholder="Enter Helius API key">
-            </div>
-            <div class="settings-f">
-              <label>Network</label>
-              <select id="heliusNetwork">
-                <option value="mainnet">Mainnet</option>
-                <option value="devnet">Devnet</option>
-              </select>
-            </div>
-            <div style="display:flex; gap:0.5rem">
-              <button class="btn btn-secondary" onclick="testHeliusKey()">Test</button>
-              <button class="btn btn-primary" onclick="saveHeliusKey()">Save</button>
-            </div>
-            <div id="heliusStatus" style="margin-top:0.75rem; font-size:0.75rem; color:var(--dim)"></div>
-          </div>
-
-          <div class="settings-card wide">
-            <div class="settings-h">
-              <h4>Preferences</h4>
-            </div>
-            <div style="display:flex; gap:2rem; flex-wrap:wrap">
-              <div style="display:flex; align-items:center; gap:0.75rem">
-                <label class="toggle">
-                  <input type="checkbox" id="toggleCritical" checked>
-                  <span class="toggle-s"></span>
-                </label>
-                <span style="font-size:0.8125rem">Critical alerts</span>
-              </div>
-              <div style="display:flex; align-items:center; gap:0.75rem">
-                <label class="toggle">
-                  <input type="checkbox" id="toggleAutoNav" checked>
-                  <span class="toggle-s"></span>
-                </label>
-                <span style="font-size:0.8125rem">Auto-navigate to results</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="settings-card wide">
-            <div class="settings-h">
-              <h4>Data Management</h4>
-            </div>
-            <div style="display:flex; gap:0.5rem">
-              <button class="btn btn-secondary" onclick="exportHistory()">Export history</button>
-              <button class="btn btn-secondary" onclick="clearHistory()" style="color:var(--red)">Clear all scans</button>
-            </div>
-          </div>
-        </div>
+      <!-- Bottom table: Recent Scans -->
+      <div class="data-table">
+        <table>
+          <thead><tr><th class="col-num">#</th><th>Target</th><th>Scope</th><th>Findings</th><th>Score</th><th>Date</th></tr></thead>
+          <tbody id="homeScansBody">
+            <tr><td colspan="6"><div class="empty"><div class="empty-title">No scans yet</div><div class="empty-desc">Launch a scan to get started</div></div></td></tr>
+          </tbody>
+        </table>
       </div>
-
     </div>
+
+    <!-- ══════════ SCANNER ══════════ -->
+    <div class="page" id="page-scanner">
+      <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">Scanner</h1><p style="font-size:0.6875rem;color:var(--text-dim);margin-top:2px;">Automated security assessment</p></div></div>
+      <div class="scan-input-wrap">
+        <span class="scan-prefix">&gt;</span>
+        <input type="text" class="scan-input" id="scanUrl" placeholder="https://target.com" spellcheck="false" autocomplete="off">
+        <button class="scan-btn" onclick="launchScan()">SCAN</button>
+      </div>
+      <div class="scope-row" id="scopeRow">
+        <div class="scope-pill active" data-scope="full">Full</div><div class="scope-pill" data-scope="quick">Quick</div><div class="scope-pill" data-scope="web">Web</div><div class="scope-pill" data-scope="api">API</div><div class="scope-pill" data-scope="crypto">Crypto</div><div class="scope-pill" data-scope="recon">Recon</div><div class="scope-pill" data-scope="passive">Passive</div><div class="scope-pill" data-scope="attack">Attack</div>
+      </div>
+      <div class="progress-box" id="scanProgress"><div class="terminal" id="scanTerminal"></div></div>
+      <div id="scanResults" style="display:none;">
+        <div class="card">
+          <div class="card-header"><span class="card-title">Findings</span><span id="scanFindingsCount" style="font-family:var(--mono);font-size:0.75rem;color:var(--text-dim);"></span><button class="btn btn-ghost" onclick="clearScan()">Clear</button></div>
+          <div class="card-body flush"><div class="data-table" style="border:none;box-shadow:none;"><table><thead><tr><th class="col-num">#</th><th>Finding</th><th>Severity</th><th>Category</th><th>Confidence</th></tr></thead><tbody id="scanResultsBody"></tbody></table></div></div>
+        </div>
+        <div class="card" id="attackPathsCard" style="display:none;">
+          <div class="card-header"><span class="card-title">Attack Paths</span><span id="attackPathsCount" style="font-family:var(--mono);font-size:0.75rem;color:var(--text-dim);"></span></div>
+          <div class="card-body"><div class="attack-paths" id="attackPathsBody"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ INVESTIGATION ══════════ -->
+    <div class="page" id="page-investigation">
+      <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">Investigation</h1><p style="font-size:0.6875rem;color:var(--text-dim);margin-top:2px;">On-chain &amp; domain intelligence</p></div></div>
+      <div class="tool-list">
+        <div class="tool-card"><div class="tool-header"><span class="tool-num">01</span><span class="tool-title">Wallet Lookup</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Balance, account shape, recent signatures</span></span></div><div class="tool-row"><input type="text" class="input input-mono" id="chainAddr" placeholder="0x... or Solana address"><button class="btn btn-primary" onclick="runChainLookup()">Lookup</button></div><div class="terminal" id="chainOut" style="display:none;margin-top:12px;"></div></div>
+        <div class="tool-card"><div class="tool-header"><span class="tool-num">02</span><span class="tool-title">Token Bundle</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Holder sampling, cluster analysis</span></span></div><div class="tool-row"><input type="text" class="input input-mono" id="tokenMint" placeholder="SPL mint address"><button class="btn btn-primary" onclick="runTokenBundle()">Analyze</button></div><div class="terminal" id="tokenOut" style="display:none;margin-top:12px;"></div></div>
+        <div class="tool-card"><div class="tool-header"><span class="tool-num">03</span><span class="tool-title">Domain OSINT</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">WHOIS, DNS, SSL cert info</span></span></div><div class="tool-row"><input type="text" class="input input-mono" id="osintDomain" placeholder="example.com"><button class="btn btn-primary" onclick="runOsint()">Investigate</button></div><div class="terminal" id="osintOut" style="display:none;margin-top:12px;"></div></div>
+        <div class="tool-card"><div class="tool-header"><span class="tool-num">04</span><span class="tool-title">PoC Simulator</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">IDOR and unauth access tests</span></span></div><div style="display:flex;gap:8px;margin-bottom:8px;"><select class="input" id="pocType" style="width:110px;"><option value="idor">IDOR</option><option value="unauth">Unauth</option></select><input type="text" class="input input-mono" id="pocUrl" placeholder="https://api.example.com/user/123" style="flex:1;"></div><button class="btn btn-primary" onclick="runPoc()">Simulate</button><div class="terminal" id="pocOut" style="display:none;margin-top:12px;"></div></div>
+      </div>
+    </div>
+
+    <!-- ══════════ FINDINGS ══════════ -->
+    <div class="page" id="page-findings">
+      <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">Findings</h1></div></div>
+      <div class="toggle-pills" id="findingsTabs" style="margin-bottom:14px;"><div class="toggle-pill active" data-filter="all">All</div><div class="toggle-pill" data-filter="critical">Critical</div><div class="toggle-pill" data-filter="high">High</div><div class="toggle-pill" data-filter="medium">Medium</div><div class="toggle-pill" data-filter="low">Low</div></div>
+      <div class="filter-bar"><input type="text" class="input" id="findingsSearch" placeholder="Search findings..."><select class="input" id="findingsSort" style="max-width:160px;"><option value="newest">Newest</option><option value="severity">Severity</option></select></div>
+      <div class="data-table"><table><thead><tr><th class="col-num">#</th><th>Title</th><th>Severity</th><th>Category</th><th>Target</th><th>Date</th></tr></thead><tbody id="findingsBody"><tr><td colspan="6"><div class="empty"><div class="empty-title">No findings</div><div class="empty-desc">Run a scan to discover vulnerabilities</div></div></td></tr></tbody></table></div>
+    </div>
+
+    <!-- ══════════ ANALYTICS ══════════ -->
+    <div class="page" id="page-analytics">
+      <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">Analytics</h1></div></div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-value" id="analyticsScans">0</div><div class="stat-label">Total Scans</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:var(--red);" id="analyticsCritical">0</div><div class="stat-label">Critical</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:var(--orange);" id="analyticsHigh">0</div><div class="stat-label">High</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:var(--accent);" id="analyticsScore">0</div><div class="stat-label">Avg Score</div></div>
+      </div>
+      <div class="card"><div class="card-header"><span class="card-title">Severity Distribution</span></div><div class="card-body">
+        <div class="bar-row"><span class="bar-label">Critical</span><div class="bar-track"><div class="bar-fill critical" id="barCritical2" style="width:0%"></div></div><span class="bar-value" id="valCritical2">0</span></div>
+        <div class="bar-row"><span class="bar-label">High</span><div class="bar-track"><div class="bar-fill high" id="barHigh2" style="width:0%"></div></div><span class="bar-value" id="valHigh2">0</span></div>
+        <div class="bar-row"><span class="bar-label">Medium</span><div class="bar-track"><div class="bar-fill medium" id="barMedium2" style="width:0%"></div></div><span class="bar-value" id="valMedium2">0</span></div>
+        <div class="bar-row"><span class="bar-label">Low</span><div class="bar-track"><div class="bar-fill low" id="barLow2" style="width:0%"></div></div><span class="bar-value" id="valLow2">0</span></div>
+      </div></div>
+    </div>
+
+    <!-- ══════════ HISTORY ══════════ -->
+    <div class="page" id="page-history">
+      <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">History</h1></div>
+        <div class="toggle-pills" id="historyTabs"><div class="toggle-pill active" data-time="24h">24H</div><div class="toggle-pill" data-time="7d">7D</div><div class="toggle-pill" data-time="30d">30D</div><div class="toggle-pill" data-time="all">All</div></div>
+      </div>
+      <div class="data-table"><table><thead><tr><th class="col-num">#</th><th>Target</th><th>Scope</th><th>Findings</th><th>Score</th><th>Date</th></tr></thead><tbody id="historyBody"><tr><td colspan="6"><div class="empty"><div class="empty-title">No history</div><div class="empty-desc">Completed scans appear here</div></div></td></tr></tbody></table></div>
+    </div>
+
+    <!-- ══════════ REWARDS ══════════ -->
+    <div class="page" id="page-rewards">
+      <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">Rewards</h1><p style="font-size:0.6875rem;color:var(--text-dim);margin-top:2px;">Points, referrals &amp; leaderboard</p></div></div>
+      <div class="rewards-hero">
+        <div class="rewards-balance"><div class="pts-value" id="rewardsBalance">0</div><div class="pts-label">Total Points</div></div>
+        <div class="referral-card"><div class="referral-label">Your Referral Code</div><div class="referral-code-row"><div class="referral-code" id="referralCode">&mdash;</div><button class="btn btn-primary" onclick="copyReferral()">Copy</button></div><p style="font-size:0.5625rem;color:var(--text-dim);margin-top:10px;">Share your code — earn 50 pts per signup, +25 for them</p></div>
+      </div>
+      <div class="card"><div class="card-header"><span class="card-title">How to Earn</span></div><div class="card-body"><div class="earn-list">
+        <div class="earn-item"><span class="earn-action">Full Scan</span><span class="earn-pts">+20</span></div><div class="earn-item"><span class="earn-action">Attack Scan</span><span class="earn-pts">+18</span></div><div class="earn-item"><span class="earn-action">Web / API / Crypto</span><span class="earn-pts">+15</span></div><div class="earn-item"><span class="earn-action">Recon Scan</span><span class="earn-pts">+12</span></div><div class="earn-item"><span class="earn-action">Quick / Passive</span><span class="earn-pts">+10</span></div><div class="earn-item"><span class="earn-action">Investigation</span><span class="earn-pts">+3</span></div><div class="earn-item"><span class="earn-action">Referral (you)</span><span class="earn-pts">+50</span></div><div class="earn-item"><span class="earn-action">Referral (friend)</span><span class="earn-pts">+25</span></div>
+      </div></div></div>
+      <div class="card"><div class="card-header"><span class="card-title">Recent Activity</span></div><div class="card-body flush"><div class="data-table"><table><thead><tr><th>Action</th><th>Points</th><th>Date</th></tr></thead><tbody id="ledgerBody"><tr><td colspan="3"><div class="empty" style="padding:20px;"><div class="empty-title">No activity yet</div></div></td></tr></tbody></table></div></div></div>
+      <div class="card"><div class="card-header"><span class="card-title">Leaderboard</span><div class="toggle-pills" id="leaderboardTabs"><div class="toggle-pill active" data-window="all">All Time</div><div class="toggle-pill" data-window="30d">30D</div><div class="toggle-pill" data-window="7d">7D</div></div></div><div class="card-body flush"><div class="data-table"><table><thead><tr><th class="col-num">Rank</th><th>User</th><th>Points</th></tr></thead><tbody id="leaderboardBody"><tr><td colspan="3"><div class="empty" style="padding:20px;"><div class="empty-title">No data</div></div></td></tr></tbody></table></div></div></div>
+    </div>
+
+    <!-- ══════════ SETTINGS ══════════ -->
+    <div class="page" id="page-settings">
+      <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">Settings</h1></div></div>
+      <div class="tool-list">
+        <div class="tool-card"><div class="tool-header"><span class="tool-num">&gt;</span><span class="tool-title">API Configuration</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Backend API connection</span></span></div><input type="text" class="input input-mono" id="apiUrl" placeholder="http://127.0.0.1:5000" style="margin-bottom:10px;"><div class="tool-row"><button class="btn btn-primary" onclick="saveSettings()">Save</button><button class="btn btn-ghost" onclick="testConnection()">Test</button></div></div>
+        <div class="tool-card"><div class="tool-header"><span class="tool-num">&gt;</span><span class="tool-title">Helius API Key</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Required for Solana lookups</span></span></div><input type="password" class="input" id="heliusKey" placeholder="Enter Helius API key" style="margin-bottom:10px;"><select class="input" id="heliusNetwork" style="margin-bottom:10px;"><option value="mainnet">Mainnet</option><option value="devnet">Devnet</option></select><div class="tool-row"><button class="btn btn-primary" onclick="saveHelius()">Save</button><button class="btn btn-ghost" onclick="testHelius()">Test</button></div></div>
+        <div class="tool-card"><div class="tool-header"><span class="tool-num">&gt;</span><span class="tool-title">Preferences</span></div><div style="display:flex;flex-direction:column;gap:10px;"><label style="display:flex;align-items:center;gap:10px;font-size:0.75rem;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" id="prefAlerts" checked style="accent-color:var(--accent);"> Critical alert notifications</label><label style="display:flex;align-items:center;gap:10px;font-size:0.75rem;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" id="prefAutoNav" checked style="accent-color:var(--accent);"> Auto-navigate to results</label></div></div>
+        <div class="tool-card"><div class="tool-header"><span class="tool-num">&gt;</span><span class="tool-title">Data</span></div><div class="tool-row"><button class="btn btn-ghost" onclick="exportData()">Export</button><button class="btn btn-ghost" onclick="clearData()" style="color:var(--red);">Clear All</button></div></div>
+      </div>
+    </div>
+
   </main>
 </div>
-
-<div class="toast-container" id="toastContainer"></div>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" crossorigin="anonymous"></script>
 <script src="/dashboard/js/app.js"></script>
 </body>
 </html>
