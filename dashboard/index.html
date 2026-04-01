@@ -402,7 +402,19 @@
             <div class="inv-tool-block">
               <div class="inv-tool-kicker">2 · Analyst report</div>
               <h5 class="inv-tool-title">Full chain investigation</h5>
-              <p class="inv-tool-dek">Uses the <strong>same address as in step 1</strong> (or add optional token mints below for token-focused runs). Runs the <strong>blockchain_investigation</strong> skill: verdict-style summary, flow graph, counterparties, explorer links. Server API keys only (Solscan, Etherscan, Arkham, Helius, …). For authorized review — not a legal finding.</p>
+              <p class="inv-tool-dek">Uses the <strong>address in step 1</strong> as the main wallet/contract/deployer (or paste extra token mints/contracts below). Runs the server <strong>blockchain_investigation</strong> skill — not a court-ready report; intelligence for <strong>authorized</strong> follow-up.</p>
+              <p class="inv-subhead" style="margin-top:0.25rem">What appears in the results panel</p>
+              <ul class="inv-what-list">
+                <li><strong>Verdict line</strong> — risk band (high / elevated / moderate-low) plus short reasons (e.g. CEX exposure, high-severity findings).</li>
+                <li><strong>Summary</strong> — numeric risk score (0–100), finding counts, evidence quality; may note sniper/LP/CEX themes when data supports them.</li>
+                <li><strong>Chronology</strong> — dated money-flow lines built from on-chain transfer edges (when the graph is populated).</li>
+                <li><strong>Flow highlights</strong> — deployer counterparties (e.g. Arkham-style labels), CEX routing callouts, outflow snippets.</li>
+                <li><strong>Red flags</strong> — checklist-style signals (LP removal, mint authority, etc.) from patterns in the data — still heuristics, not accusations.</li>
+                <li><strong>Explorer links</strong> — Solscan / Etherscan (or chain explorer) for addresses in the graph.</li>
+                <li><strong>Flow edges + Mermaid</strong> — sample hops; &quot;Copy flow as Mermaid&quot; for diagrams elsewhere.</li>
+                <li><strong>Findings list</strong> — full structured items (severity, evidence, source) below the summary blocks.</li>
+              </ul>
+              <p class="inv-hint" style="margin-top:-0.25rem">If <span class="mono">SOLSCAN_PRO_API_KEY</span> / <span class="mono">ETHERSCAN_API_KEY</span> (and related keys) are missing on the server, on-chain sections will be thin or skipped — check <strong>Full JSON</strong> → <span class="mono">crime_report.data_sources</span> and errors.</p>
               <div class="settings-f" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:flex-end">
                 <div>
                   <label class="inv-field-label" for="chainFullChain">Chain</label>
@@ -433,7 +445,7 @@
               </div>
               <button class="btn btn-secondary" onclick="runFullChainInvestigation()">Run full investigation</button>
               <div id="chainFullOut" class="inv-out inv-out-empty" style="margin-top:0.75rem">
-                <div class="inv-summary" id="chainFullSummary">Fill step 1 (or optional tokens), then run full investigation.</div>
+                <div class="inv-summary" id="chainFullSummary">Run the investigation to see verdict, summary, chronology, flow highlights, red flags, explorer links, and findings — or open Full JSON if the panel is empty (often missing API keys).</div>
                 <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="chainFullRaw"></pre></details>
               </div>
             </div>

@@ -754,6 +754,15 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
   color: var(--dim);
   margin-bottom: 0.35rem;
 }
+.inv-what-list {
+  margin: 0 0 0.85rem;
+  padding-left: 1.15rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  line-height: 1.55;
+}
+.inv-what-list li { margin-bottom: 0.35rem; }
+.inv-what-list strong { color: var(--text); font-weight: 500; }
 
 .inv-metric-grid {
   display: grid;
