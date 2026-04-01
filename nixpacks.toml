@@ -1,10 +1,11 @@
-# Force Python provider detection (ensures python3 + pip + requirements.txt install).
 providers = ["python"]
 
 [phases.setup]
-# Keep setup minimal for Railway build speed/stability.
-# Recon degrades gracefully when nmap binary is unavailable.
 aptPkgs = []
+
+[phases.install]
+cmds = ["pip install --prefer-binary --no-compile -r requirements.txt"]
+cacheDirectories = ["/root/.cache/pip"]
 
 [start]
 cmd = "python3 api_server.py"
