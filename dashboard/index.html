@@ -386,11 +386,39 @@
             <div class="settings-f">
               <input type="text" id="chainAddr" placeholder="0x… or Solana address" class="input" style="font-family:var(--mono)">
             </div>
-            <p class="inv-hint">Solana balance uses your Helius key from Settings. Ethereum <span class="mono">0x…</span>: public RPC (balance / nonce).</p>
+            <p class="inv-hint">Solana balance uses your Helius key from Settings. Ethereum <span class="mono">0x…</span>: public RPC (balance / nonce); when <span class="mono">ETHERSCAN_API_KEY</span> is set on the server, recent mainnet txs are included.</p>
             <button class="btn btn-primary" onclick="runChainLookup()">Look up address</button>
             <div id="chainOut" class="inv-out inv-out-empty">
               <div class="inv-summary" id="chainSummary">Enter an address to look up.</div>
               <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="chainRaw"></pre></details>
+            </div>
+
+            <div class="inv-subhead" style="margin-top:1.25rem">Full chain investigation (analyst)</div>
+            <p class="inv-hint">Runs the same <strong>blockchain_investigation</strong> skill as the orchestrator: crime-oriented summary, flow graph, counterparties, explorer links. Uses <strong>server</strong> API keys (Solscan / Etherscan / Arkham / Helius, etc.). Signals for authorized review only — not a legal verdict.</p>
+            <div class="settings-f" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center">
+              <select id="chainFullChain" class="input" style="max-width:11rem" title="Chain">
+                <option value="solana">Solana</option>
+                <option value="ethereum">Ethereum</option>
+                <option value="base">Base</option>
+                <option value="bsc">BSC</option>
+                <option value="polygon">Polygon</option>
+                <option value="arbitrum">Arbitrum</option>
+              </select>
+              <select id="chainFullDepth" class="input" style="max-width:9rem" title="Flow depth">
+                <option value="full">Flow: full</option>
+                <option value="deep">Flow: deep</option>
+              </select>
+            </div>
+            <div class="settings-f" style="margin-top:0.5rem">
+              <input type="text" id="chainFullTargetUrl" placeholder="Optional: https://… (scrape launchpad / fees context)" class="input" style="font-family:var(--mono)">
+            </div>
+            <div class="settings-f" style="margin-top:0.5rem">
+              <input type="text" id="chainFullTokens" placeholder="Optional: comma-separated token mints or contract addresses" class="input" style="font-family:var(--mono)">
+            </div>
+            <button class="btn btn-secondary" onclick="runFullChainInvestigation()">Run full investigation</button>
+            <div id="chainFullOut" class="inv-out inv-out-empty" style="margin-top:0.75rem">
+              <div class="inv-summary" id="chainFullSummary">Run a full investigation to see verdict, narrative, and findings.</div>
+              <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="chainFullRaw"></pre></details>
             </div>
 
             <div class="inv-subhead" style="margin-top:1.35rem">Solana token mint</div>

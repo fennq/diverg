@@ -16,7 +16,8 @@ Scan endpoints:
   POST /api/poc/simulate         Run PoC for a finding
 
 Investigation (console):
-  POST /api/investigation/blockchain   Solana via Helius + EVM via public RPC
+  POST /api/investigation/blockchain   Solana via Helius + EVM via public RPC (+ optional Etherscan tx list)
+  POST /api/investigation/blockchain-full  Full blockchain_investigation skill (crime_report, flow_graph; server API keys)
   POST /api/investigation/solana-bundle  Token mint: holders, cluster %, coordination / risk score (extension parity)
   POST /api/investigation/domain       OSINT + recon + headers (full skill JSON)
   POST /api/investigation/reputation   OSINT context + entity reputation
@@ -56,6 +57,7 @@ from datetime import datetime, timezone, timedelta
 from functools import wraps
 from pathlib import Path
 from threading import Lock
+import copy
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
@@ -406,6 +408,11 @@ def _security_headers(resp):
     origin = request.headers.get("Origin", "")
     if origin in ALLOWED_ORIGINS:
         resp.headers["Access-Control-Allow-Origin"] = origin
+    elif (
+        origin.startswith("chrome-extension://")
+        and (os.environ.get("DIVERG_ALLOW_EXTENSION_CORS") or "").strip().lower() in ("1", "true", "yes")
+    ):
+        resp.headers["Access-Control-Allow-Origin"] = origin
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH, DELETE, OPTIONS"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     resp.headers["Access-Control-Allow-Credentials"] = "true"
@@ -415,7 +422,11 @@ def _security_headers(resp):
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     resp.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-    resp.headers["Cross-Origin-Resource-Policy"] = "same-site"
+    # JSON API must be readable from the Chrome extension origin when CORS is enabled.
+    if request.path.startswith("/api/"):
+        resp.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    else:
+        resp.headers["Cross-Origin-Resource-Policy"] = "same-site"
     resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
 
     connect_src = "'self' https://mainnet.helius-rpc.com"
@@ -854,8 +865,48 @@ def poc_simulate():
 # ── Investigation tools (full skill / chain data for console) ─────────────────
 
 _bundle_api_lock = Lock()
+_blockchain_full_lock = Lock()
 
 _ETH_ADDR_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
+
+# Full skill can run ~55s internally; allow headroom for slow RPCs.
+BLOCKCHAIN_FULL_HTTP_TIMEOUT_SEC = max(60, int(os.environ.get("DIVERG_BLOCKCHAIN_FULL_TIMEOUT_SEC", "120")))
+BLOCKCHAIN_FULL_MAX_FINDINGS = min(500, max(40, int(os.environ.get("DIVERG_BLOCKCHAIN_FULL_MAX_FINDINGS", "120"))))
+BLOCKCHAIN_FULL_MAX_FLOW_EDGES = min(300, max(40, int(os.environ.get("DIVERG_BLOCKCHAIN_FULL_MAX_FLOW_EDGES", "150"))))
+
+
+def _truncate_blockchain_full_payload(d: dict) -> dict:
+    """Cap list sizes so browser JSON stays usable."""
+    out = copy.deepcopy(d)
+    findings = out.get("findings")
+    if isinstance(findings, list) and len(findings) > BLOCKCHAIN_FULL_MAX_FINDINGS:
+        out["_truncated_findings"] = len(findings) - BLOCKCHAIN_FULL_MAX_FINDINGS
+        out["findings"] = findings[:BLOCKCHAIN_FULL_MAX_FINDINGS]
+    fg = out.get("flow_graph")
+    if isinstance(fg, dict):
+        edges = fg.get("edges")
+        if isinstance(edges, list) and len(edges) > BLOCKCHAIN_FULL_MAX_FLOW_EDGES:
+            fg = dict(fg)
+            fg["_truncated_edges"] = len(edges) - BLOCKCHAIN_FULL_MAX_FLOW_EDGES
+            fg["edges"] = edges[:BLOCKCHAIN_FULL_MAX_FLOW_EDGES]
+            out["flow_graph"] = fg
+    cr = out.get("crime_report")
+    if isinstance(cr, dict):
+        fwe = cr.get("findings_with_evidence")
+        if isinstance(fwe, list) and len(fwe) > 80:
+            cr = dict(cr)
+            cr["findings_with_evidence"] = fwe[:80]
+            out["crime_report"] = cr
+    return out
+
+
+def _sanitize_crypto_relation_api(val) -> str | None:
+    if val is None or val is False:
+        return None
+    s = sanitize_text(str(val), 48).strip().lower()
+    if not s or not re.match(r"^[a-z0-9][a-z0-9_-]{0,47}$", s):
+        return None
+    return s
 
 
 def _helius_solana_rpc(network: str, api_key: str, method: str, params: list | dict) -> dict:
@@ -930,7 +981,64 @@ def _summarize_chain_evm(raw: dict) -> dict:
     nonce = raw.get("eth_getTransactionCount") or {}
     if isinstance(nonce, dict) and nonce.get("result") is not None:
         s["transaction_count_hex"] = nonce["result"]
+    etx = raw.get("etherscan_recent_txs")
+    if isinstance(etx, list) and etx:
+        s["etherscan_recent_tx_count"] = len(etx)
+        s["etherscan_recent_tx_sample"] = [
+            {
+                "hash": t.get("hash"),
+                "from": t.get("from"),
+                "to": t.get("to"),
+                "timeStamp": t.get("timeStamp"),
+            }
+            for t in etx[:8]
+            if isinstance(t, dict)
+        ]
     return s
+
+
+def _etherscan_v2_txlist_mainnet(address: str, offset: int = 14) -> list | None:
+    """Recent mainnet txs when ETHERSCAN_API_KEY is set. Returns trimmed dict rows or None."""
+    if not requests:
+        return None
+    api_key = (os.environ.get("ETHERSCAN_API_KEY") or "").strip()
+    if not api_key or not _ETH_ADDR_RE.match(address):
+        return None
+    try:
+        r = requests.get(
+            "https://api.etherscan.io/v2/api",
+            params={
+                "chainid": 1,
+                "apikey": api_key,
+                "module": "account",
+                "action": "txlist",
+                "address": address,
+                "page": 1,
+                "offset": min(max(offset, 1), 30),
+                "sort": "desc",
+            },
+            timeout=18,
+        )
+        j = r.json()
+        if j.get("status") != "1" or not isinstance(j.get("result"), list):
+            return None
+        rows = []
+        for t in j["result"][:offset]:
+            if not isinstance(t, dict):
+                continue
+            rows.append(
+                {
+                    "hash": t.get("hash"),
+                    "from": t.get("from"),
+                    "to": t.get("to"),
+                    "value": t.get("value"),
+                    "timeStamp": t.get("timeStamp"),
+                    "blockNumber": t.get("blockNumber"),
+                }
+            )
+        return rows
+    except Exception:
+        return None
 
 
 @app.route("/api/investigation/blockchain", methods=["OPTIONS"])
@@ -966,6 +1074,9 @@ def investigation_blockchain():
                 "eth_getBalance": _evm_public_rpc("eth_getBalance", [addr, "latest"]),
                 "eth_getTransactionCount": _evm_public_rpc("eth_getTransactionCount", [addr, "latest"]),
             }
+            etx = _etherscan_v2_txlist_mainnet(addr)
+            if etx is not None:
+                raw["etherscan_recent_txs"] = etx
             out["raw"] = raw
             out["summary"] = _summarize_chain_evm(raw)
         except Exception as e:
@@ -1011,6 +1122,102 @@ def investigation_blockchain():
     out["summary"] = _summarize_chain_solana(raw)
     _reward_investigation(g.user["id"], "blockchain")
     return jsonify(out)
+
+
+@app.route("/api/investigation/blockchain-full", methods=["OPTIONS"])
+def investigation_blockchain_full_options():
+    return "", 204
+
+
+@app.route("/api/investigation/blockchain-full", methods=["POST"])
+@require_auth
+def investigation_blockchain_full():
+    """
+    Full skills.blockchain_investigation output (crime_report, flow_graph, findings).
+    Uses server-side API keys only. May take up to ~2 minutes.
+    """
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json(silent=True) or {}
+    deployer = sanitize_text(data.get("deployer_address") or data.get("address") or "", 128).strip()
+
+    tokens_raw = data.get("token_addresses")
+    token_addresses: list[str] | None = None
+    if isinstance(tokens_raw, list):
+        token_addresses = [
+            sanitize_text(str(x), 128).strip()
+            for x in tokens_raw[:24]
+            if x is not None and str(x).strip()
+        ] or None
+    elif isinstance(tokens_raw, str) and tokens_raw.strip():
+        token_addresses = [
+            sanitize_text(p, 128).strip()
+            for p in tokens_raw.split(",")
+            if p.strip()
+        ][:24] or None
+
+    if not deployer and not token_addresses:
+        return jsonify({"error": "Provide address, deployer_address, or token_addresses"}), 400
+
+    target_url = sanitize_text(data.get("target_url") or "", 2048).strip()
+    chain = sanitize_text(data.get("chain") or "solana", 32).lower().strip()
+    flow_depth = sanitize_text(data.get("flow_depth") or "full", 16).lower().strip()
+    if flow_depth not in ("full", "deep"):
+        flow_depth = "full"
+    crypto_relation = _sanitize_crypto_relation_api(data.get("crypto_relation"))
+
+    skills_path = str(ROOT / "skills")
+    if skills_path not in sys.path:
+        sys.path.insert(0, skills_path)
+
+    log = logging.getLogger("diverg.api")
+    log.info(
+        "blockchain_full user_id=%s chain=%s deployer=%s tokens=%s",
+        g.user.get("id"),
+        chain,
+        bool(deployer),
+        len(token_addresses or ()),
+    )
+
+    def _invoke_skill() -> str:
+        import blockchain_investigation as bi
+
+        return bi.run(
+            target_url=target_url,
+            scan_type="full",
+            deployer_address=deployer or None,
+            token_addresses=token_addresses,
+            chain=chain,
+            crypto_relation=crypto_relation,
+            flow_depth=flow_depth,
+        )
+
+    try:
+        with _blockchain_full_lock:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                fut = pool.submit(_invoke_skill)
+                raw_json = fut.result(timeout=float(BLOCKCHAIN_FULL_HTTP_TIMEOUT_SEC))
+    except concurrent.futures.TimeoutError:
+        log.warning("blockchain_full timeout user_id=%s", g.user.get("id"))
+        return jsonify({"error": "Full investigation timed out; try flow_depth=full or a narrower target."}), 504
+    except Exception as e:
+        log.exception("blockchain_full failed: %s", e)
+        return jsonify({"error": str(e)}), 500
+
+    try:
+        payload = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return jsonify({"error": "Invalid investigation output"}), 500
+
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Unexpected investigation shape"}), 500
+
+    payload = _truncate_blockchain_full_payload(payload)
+    _reward_investigation(g.user["id"], "blockchain_full")
+    try:
+        return jsonify(payload)
+    except TypeError:
+        return Response(json.dumps(payload, default=str), mimetype="application/json")
 
 
 @app.route("/api/investigation/domain", methods=["OPTIONS"])

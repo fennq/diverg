@@ -747,8 +747,116 @@ function _invChainSummaryHtml(data) {
   } else if (chain === 'evm') {
     if (s.eth_approx != null) h += `<div class="inv-kv"><span>Balance</span> ~${esc(String(s.eth_approx))} ETH</div>`;
     if (s.transaction_count_hex) h += `<div class="inv-kv"><span>Nonce</span> ${esc(String(s.transaction_count_hex))}</div>`;
+    if (s.etherscan_recent_tx_count != null) {
+      h += `<div class="inv-kv"><span>Recent txs (Etherscan)</span> ${esc(String(s.etherscan_recent_tx_count))}</div>`;
+    }
+    const samp = s.etherscan_recent_tx_sample;
+    if (Array.isArray(samp) && samp.length) {
+      h += '<ul class="inv-bundle-archetype" style="margin-top:0.5rem">';
+      samp.slice(0, 6).forEach((t) => {
+        const hash = t && t.hash;
+        const link = hash ? `https://etherscan.io/tx/${encodeURIComponent(hash)}` : '';
+        const row = [t.from, t.to, t.timeStamp].filter(Boolean).join(' · ');
+        h += `<li class="inv-muted">${link ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer" class="mono">${esc(String(hash).slice(0, 14))}…</a>` : ''} ${esc(row.slice(0, 120))}</li>`;
+      });
+      h += '</ul>';
+    }
   }
   h += '<p class="inv-muted" style="margin-top:0.75rem">Expand <strong>Full JSON</strong> for complete RPC responses (signatures, account data, token accounts).</p>';
+  return h;
+}
+
+function _flowGraphToMermaid(fg) {
+  if (!fg || !Array.isArray(fg.edges) || !fg.edges.length) return '';
+  const lines = ['flowchart LR'];
+  const seen = new Map();
+  let n = 0;
+  function nodeId(addr) {
+    const k = String(addr || '');
+    if (!seen.has(k)) {
+      seen.set(k, `n${n++}`);
+    }
+    return seen.get(k);
+  }
+  fg.edges.slice(0, 35).forEach((e) => {
+    const a = nodeId(e.from);
+    const b = nodeId(e.to);
+    const al = String(e.from || '?').replace(/"/g, "'").slice(0, 16);
+    const bl = String(e.to || '?').replace(/"/g, "'").slice(0, 16);
+    lines.push(`  ${a}["${al}"] --> ${b}["${bl}"]`);
+  });
+  return lines.join('\n');
+}
+
+function _invChainFullSummaryHtml(data) {
+  if (data.error && !data.crime_report && !(Array.isArray(data.findings) && data.findings.length)) {
+    return `<p class="inv-err">${esc(data.error)}</p>`;
+  }
+  const cr = data.crime_report || {};
+  let h = '';
+  if (data._truncated_findings != null) {
+    h += `<p class="inv-muted">Response truncated (${esc(String(data._truncated_findings))} findings omitted). See <strong>Full JSON</strong>.</p>`;
+  }
+  const fgTrunc = data.flow_graph && data.flow_graph._truncated_edges;
+  if (fgTrunc != null) {
+    h += `<p class="inv-muted">${esc(String(fgTrunc))} flow edges omitted.</p>`;
+  }
+  if (cr.verdict) {
+    h += `<div class="inv-metric inv-metric--hi" style="margin-bottom:0.55rem"><div class="inv-metric-k">Verdict</div><div class="inv-metric-v" style="font-size:0.9rem;line-height:1.35">${esc(String(cr.verdict))}</div></div>`;
+  }
+  if (cr.summary) {
+    h += `<p class="inv-muted" style="margin-bottom:0.65rem">${esc(String(cr.summary))}</p>`;
+  }
+  if (cr.risk_score != null) {
+    h += `<div class="inv-kv"><span>Risk score</span> ${esc(String(cr.risk_score))}/100</div>`;
+  }
+  const narr = cr.chronological_narrative;
+  if (Array.isArray(narr) && narr.length) {
+    h += '<div class="inv-subhead" style="margin-top:0.75rem">Chronology (sample)</div><ul class="inv-bundle-archetype">';
+    narr.slice(0, 14).forEach((line) => { h += `<li class="inv-muted">${esc(String(line))}</li>`; });
+    h += '</ul>';
+  }
+  const fh = cr.flow_highlights;
+  if (Array.isArray(fh) && fh.length) {
+    h += '<div class="inv-subhead" style="margin-top:0.75rem">Flow highlights</div><ul class="inv-bundle-archetype">';
+    fh.slice(0, 12).forEach((line) => { h += `<li class="inv-muted">${esc(String(line))}</li>`; });
+    h += '</ul>';
+  }
+  const rf = cr.red_flags;
+  if (Array.isArray(rf) && rf.length) {
+    h += '<div class="inv-subhead" style="margin-top:0.75rem">Red flags (signals)</div><ul class="inv-bundle-archetype">';
+    rf.slice(0, 14).forEach((x) => { h += `<li class="inv-muted">${esc(String(x))}</li>`; });
+    h += '</ul>';
+  }
+  const ex = cr.explorer_links;
+  if (Array.isArray(ex) && ex.length) {
+    h += '<div class="inv-subhead" style="margin-top:0.75rem">Explorer links</div><div style="display:flex;flex-wrap:wrap;gap:0.35rem">';
+    ex.slice(0, 24).forEach((l) => {
+      const url = l && l.url;
+      const lab = (l && (l.label || l.address)) || 'open';
+      if (url) {
+        h += `<a class="btn btn-secondary" style="font-size:0.68rem;padding:0.28rem 0.55rem" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(String(lab).slice(0, 28))}</a>`;
+      }
+    });
+    h += '</div>';
+  }
+  const fg = data.flow_graph;
+  if (fg && Array.isArray(fg.edges) && fg.edges.length) {
+    h += '<div class="inv-subhead" style="margin-top:0.75rem">Flow edges (sample)</div><ul class="inv-bundle-archetype">';
+    fg.edges.slice(0, 18).forEach((e) => {
+      const bits = [e.date_str, e.from, e.to, e.amount, e.unit].filter(Boolean).join(' · ');
+      h += `<li class="inv-muted"><span class="mono">${esc(String(bits).slice(0, 220))}</span></li>`;
+    });
+    h += '</ul>';
+    const mer = _flowGraphToMermaid(fg);
+    if (mer) {
+      window._divergLastFlowMermaid = mer;
+      h += '<button type="button" class="btn btn-secondary" style="margin-top:0.45rem" onclick="copyInvText(window._divergLastFlowMermaid || \'\')">Copy flow as Mermaid</button>';
+    }
+  }
+  h += '<div class="inv-subhead" style="margin-top:0.85rem">Findings</div>';
+  h += _invFindingsHtml(data.findings);
+  h += '<p class="inv-muted" style="margin-top:0.65rem">Heuristic / intelligence signals for <strong>authorized</strong> investigation — not proof of crime.</p>';
   return h;
 }
 
@@ -766,6 +874,65 @@ async function runChainLookup() {
     _invSetOut('chainOut', 'chainSummary', 'chainRaw', 'inv-out-empty',
       `<p class="inv-err">${esc(e.message)}</p>`, { error: e.message });
   }
+}
+
+async function runFullChainInvestigation() {
+  const addr = document.getElementById('chainAddr').value.trim();
+  const tokensExtra = (document.getElementById('chainFullTokens') && document.getElementById('chainFullTokens').value.trim()) || '';
+  if (!addr && !tokensExtra) {
+    toast('Enter a wallet/contract in the field above, or add token addresses below', 'err');
+    return;
+  }
+  const chain = (document.getElementById('chainFullChain') && document.getElementById('chainFullChain').value) || 'solana';
+  const flowDepth = (document.getElementById('chainFullDepth') && document.getElementById('chainFullDepth').value) || 'full';
+  const targetUrl = (document.getElementById('chainFullTargetUrl') && document.getElementById('chainFullTargetUrl').value.trim()) || '';
+  let token_addresses = null;
+  if (tokensExtra) {
+    token_addresses = tokensExtra.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  _invSetOut('chainFullOut', 'chainFullSummary', 'chainFullRaw', 'inv-out-empty',
+    '<p class="inv-muted">Full investigation running (may take up to ~2 minutes)…</p>', null);
+  try {
+    const body = {
+      chain,
+      flow_depth: flowDepth,
+      deployer_address: addr || undefined,
+      address: addr || undefined,
+      token_addresses: token_addresses && token_addresses.length ? token_addresses : undefined,
+      target_url: targetUrl || undefined,
+    };
+    const r = await post('/api/investigation/blockchain-full', body);
+    _invSetOut('chainFullOut', 'chainFullSummary', 'chainFullRaw', 'inv-out-empty', _invChainFullSummaryHtml(r), r);
+    toast('Full investigation complete', 'ok');
+  } catch (e) {
+    _invSetOut('chainFullOut', 'chainFullSummary', 'chainFullRaw', 'inv-out-empty',
+      `<p class="inv-err">${esc(e.message)}</p>`, { error: e.message });
+    toast(e.message || 'Investigation failed', 'err');
+  }
+}
+
+/** Apply ?page=investigation&inv_address=…&inv_chain=… from extension or bookmark. */
+function applyInvestigationDeepLink(params) {
+  const invAddr = params.get('inv_address') || params.get('address');
+  if (!invAddr) return false;
+  const chainSel = document.getElementById('chainFullChain');
+  const invChain = (params.get('inv_chain') || params.get('chain') || '').toLowerCase();
+  if (chainSel && invChain) {
+    const opt = Array.from(chainSel.options).find((o) => o.value === invChain);
+    if (opt) chainSel.value = invChain;
+  }
+  const ca = document.getElementById('chainAddr');
+  if (ca) ca.value = invAddr;
+  const tu = document.getElementById('chainFullTargetUrl');
+  const invUrl = params.get('inv_target_url');
+  if (tu && invUrl) tu.value = invUrl;
+  const depth = params.get('inv_flow_depth');
+  const dEl = document.getElementById('chainFullDepth');
+  if (dEl && (depth === 'deep' || depth === 'full')) dEl.value = depth;
+  if (params.get('inv_full') === '1') {
+    setTimeout(() => runFullChainInvestigation(), 400);
+  }
+  return true;
 }
 
 function _invTokenBundleSummaryHtml(d) {
@@ -1662,4 +1829,14 @@ function exportReport() {
   if (q) q.addEventListener('input', renderFindingsList);
 })();
 
-loadHome();
+(function bootDashboard() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const page = (params.get('page') || params.get('p') || '').toLowerCase();
+    if (page === 'investigation' && applyInvestigationDeepLink(params)) {
+      navigate('investigation');
+      return;
+    }
+  } catch (_) { /* ignore */ }
+  loadHome();
+})();
