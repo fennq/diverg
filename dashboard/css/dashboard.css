@@ -713,6 +713,48 @@ input, textarea, select { font-family: inherit; color: var(--text); outline: non
   margin: 0 0 0.5rem;
 }
 
+/* Investigation: separate stacked tools inside one card */
+.inv-tool-block {
+  margin-top: 1.35rem;
+  padding-top: 1.35rem;
+  border-top: 1px solid var(--border);
+}
+.inv-tool-block:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.inv-tool-kicker {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin: 0 0 0.35rem;
+}
+.inv-tool-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 0.35rem;
+  line-height: 1.3;
+}
+.inv-tool-dek {
+  font-size: 0.8125rem;
+  color: var(--muted);
+  margin: 0 0 0.75rem;
+  line-height: 1.45;
+}
+.inv-field-label {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--dim);
+  margin-bottom: 0.35rem;
+}
+
 .inv-metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

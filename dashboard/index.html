@@ -379,66 +379,89 @@
 
           <div class="settings-card inv-blockchain-card">
             <div class="settings-h">
-              <h4>Blockchain</h4>
-              <p>Wallet RPC lookup &amp; Solana token bundle (extension parity)</p>
-            </div>
-            <div class="inv-subhead">Wallet or contract</div>
-            <div class="settings-f">
-              <input type="text" id="chainAddr" placeholder="0x… or Solana address" class="input" style="font-family:var(--mono)">
-            </div>
-            <p class="inv-hint">Solana balance uses your Helius key from Settings. Ethereum <span class="mono">0x…</span>: public RPC (balance / nonce); when <span class="mono">ETHERSCAN_API_KEY</span> is set on the server, recent mainnet txs are included.</p>
-            <button class="btn btn-primary" onclick="runChainLookup()">Look up address</button>
-            <div id="chainOut" class="inv-out inv-out-empty">
-              <div class="inv-summary" id="chainSummary">Enter an address to look up.</div>
-              <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="chainRaw"></pre></details>
+              <h4>On-chain</h4>
+              <p>Three separate tools: fast RPC check, deep analyst report, or Solana token-holder bundle.</p>
             </div>
 
-            <div class="inv-subhead" style="margin-top:1.25rem">Full chain investigation (analyst)</div>
-            <p class="inv-hint">Runs the same <strong>blockchain_investigation</strong> skill as the orchestrator: crime-oriented summary, flow graph, counterparties, explorer links. Uses <strong>server</strong> API keys (Solscan / Etherscan / Arkham / Helius, etc.). Signals for authorized review only — not a legal verdict.</p>
-            <div class="settings-f" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center">
-              <select id="chainFullChain" class="input" style="max-width:11rem" title="Chain">
-                <option value="solana">Solana</option>
-                <option value="ethereum">Ethereum</option>
-                <option value="base">Base</option>
-                <option value="bsc">BSC</option>
-                <option value="polygon">Polygon</option>
-                <option value="arbitrum">Arbitrum</option>
-              </select>
-              <select id="chainFullDepth" class="input" style="max-width:9rem" title="Flow depth">
-                <option value="full">Flow: full</option>
-                <option value="deep">Flow: deep</option>
-              </select>
-            </div>
-            <div class="settings-f" style="margin-top:0.5rem">
-              <input type="text" id="chainFullTargetUrl" placeholder="Optional: https://… (scrape launchpad / fees context)" class="input" style="font-family:var(--mono)">
-            </div>
-            <div class="settings-f" style="margin-top:0.5rem">
-              <input type="text" id="chainFullTokens" placeholder="Optional: comma-separated token mints or contract addresses" class="input" style="font-family:var(--mono)">
-            </div>
-            <button class="btn btn-secondary" onclick="runFullChainInvestigation()">Run full investigation</button>
-            <div id="chainFullOut" class="inv-out inv-out-empty" style="margin-top:0.75rem">
-              <div class="inv-summary" id="chainFullSummary">Run a full investigation to see verdict, narrative, and findings.</div>
-              <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="chainFullRaw"></pre></details>
+            <div class="inv-tool-block">
+              <div class="inv-tool-kicker">1 · Quick check</div>
+              <h5 class="inv-tool-title">Wallet or contract snapshot</h5>
+              <p class="inv-tool-dek">Balance, Solana account shape, recent signatures (or EVM nonce + optional Etherscan txs). Fast — uses your Helius key from Settings for Solana.</p>
+              <div class="settings-f">
+                <label class="inv-field-label" for="chainAddr">Address</label>
+                <input type="text" id="chainAddr" placeholder="Solana wallet · 0x wallet/contract · Solana program…" class="input" style="font-family:var(--mono)" autocomplete="off" spellcheck="false">
+              </div>
+              <p class="inv-hint">Ethereum <span class="mono">0x…</span> uses public RPC; if the server has <span class="mono">ETHERSCAN_API_KEY</span>, recent mainnet transfers appear in the summary.</p>
+              <button class="btn btn-primary" onclick="runChainLookup()">Run quick lookup</button>
+              <div id="chainOut" class="inv-out inv-out-empty">
+                <div class="inv-summary" id="chainSummary">Enter an address and run quick lookup.</div>
+                <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="chainRaw"></pre></details>
+              </div>
             </div>
 
-            <div class="inv-subhead" style="margin-top:1.35rem">Solana token mint</div>
-            <div class="settings-f">
-              <input type="text" id="tokenMint" placeholder="Token mint (SPL)" class="input" style="font-family:var(--mono)">
-              <input type="text" id="tokenSeedWallet" placeholder="Optional: wallet to focus cluster / % supply" class="input" style="font-family:var(--mono); margin-top:0.5rem">
+            <div class="inv-tool-block">
+              <div class="inv-tool-kicker">2 · Analyst report</div>
+              <h5 class="inv-tool-title">Full chain investigation</h5>
+              <p class="inv-tool-dek">Uses the <strong>same address as in step 1</strong> (or add optional token mints below for token-focused runs). Runs the <strong>blockchain_investigation</strong> skill: verdict-style summary, flow graph, counterparties, explorer links. Server API keys only (Solscan, Etherscan, Arkham, Helius, …). For authorized review — not a legal finding.</p>
+              <div class="settings-f" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:flex-end">
+                <div>
+                  <label class="inv-field-label" for="chainFullChain">Chain</label>
+                  <select id="chainFullChain" class="input" style="max-width:11rem" title="Chain">
+                    <option value="solana">Solana</option>
+                    <option value="ethereum">Ethereum</option>
+                    <option value="base">Base</option>
+                    <option value="bsc">BSC</option>
+                    <option value="polygon">Polygon</option>
+                    <option value="arbitrum">Arbitrum</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="inv-field-label" for="chainFullDepth">Flow depth</label>
+                  <select id="chainFullDepth" class="input" style="max-width:9rem" title="Flow depth">
+                    <option value="full">Full</option>
+                    <option value="deep">Deep (slower)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="settings-f" style="margin-top:0.5rem">
+                <label class="inv-field-label" for="chainFullTargetUrl">Optional site URL</label>
+                <input type="text" id="chainFullTargetUrl" placeholder="https://… — scrape launchpad / fee copy for context" class="input" style="font-family:var(--mono)" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="settings-f" style="margin-top:0.5rem">
+                <label class="inv-field-label" for="chainFullTokens">Extra token mints / contracts</label>
+                <input type="text" id="chainFullTokens" placeholder="Comma-separated — only if you need tokens in addition to the address above" class="input" style="font-family:var(--mono)" autocomplete="off" spellcheck="false">
+              </div>
+              <button class="btn btn-secondary" onclick="runFullChainInvestigation()">Run full investigation</button>
+              <div id="chainFullOut" class="inv-out inv-out-empty" style="margin-top:0.75rem">
+                <div class="inv-summary" id="chainFullSummary">Fill step 1 (or optional tokens), then run full investigation.</div>
+                <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="chainFullRaw"></pre></details>
+              </div>
             </div>
-            <label class="inv-check" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;font-size:0.85rem;color:var(--muted)">
-              <input type="checkbox" id="tokenBundleSkipX">
-              Skip X mention search (faster; otherwise server uses X API / Nitter when configured)
-            </label>
-            <label class="inv-check" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;font-size:0.85rem;color:var(--muted)">
-              <input type="checkbox" id="tokenBundleAllHolders" checked>
-              Scan every holder wallet (slowest, highest coverage for funder/bridge/mixer checks)
-            </label>
-            <p class="inv-hint">Risk / coordination score, shared-funder cluster, parallel CEX and privacy-mixer funder patterns, bridge-program touches on holders and funders (cross-chain on-ramp hints), registry-based token mappings to other chains, Helius labels, optional X posts that mention a holder address.</p>
-            <button class="btn btn-secondary" onclick="runTokenBundle()">Analyze token bundle</button>
-            <div id="tokenBundleOut" class="inv-out inv-out-empty">
-              <div class="inv-summary" id="tokenBundleSummary">Run an analysis to see risk score, cluster %, and wallets.</div>
-              <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="tokenBundleRaw"></pre></details>
+
+            <div class="inv-tool-block">
+              <div class="inv-tool-kicker">3 · Solana token only</div>
+              <h5 class="inv-tool-title">Token bundle &amp; holder risk</h5>
+              <p class="inv-tool-dek">Different from steps 1–2: paste the <strong>SPL mint</strong> (token contract), not the wallet from step 1. Holder sampling, same-funder clusters, coordination score — same logic as the browser extension bundle.</p>
+              <div class="settings-f">
+                <label class="inv-field-label" for="tokenMint">SPL mint address</label>
+                <input type="text" id="tokenMint" placeholder="Token mint (SPL)" class="input" style="font-family:var(--mono)" autocomplete="off" spellcheck="false">
+                <label class="inv-field-label" for="tokenSeedWallet" style="margin-top:0.65rem">Focus wallet (optional)</label>
+                <input type="text" id="tokenSeedWallet" placeholder="Wallet to anchor cluster / % of supply" class="input" style="font-family:var(--mono); margin-top:0.35rem" autocomplete="off" spellcheck="false">
+              </div>
+              <label class="inv-check" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;font-size:0.85rem;color:var(--muted)">
+                <input type="checkbox" id="tokenBundleSkipX">
+                Skip X mention search (faster)
+              </label>
+              <label class="inv-check" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;font-size:0.85rem;color:var(--muted)">
+                <input type="checkbox" id="tokenBundleAllHolders" checked>
+                Scan all holders (slowest, broadest coverage)
+              </label>
+              <p class="inv-hint">Outputs risk score, cluster %, bridge/mixer-style signals on funders, optional X mentions of holders.</p>
+              <button class="btn btn-secondary" onclick="runTokenBundle()">Analyze token bundle</button>
+              <div id="tokenBundleOut" class="inv-out inv-out-empty">
+                <div class="inv-summary" id="tokenBundleSummary">Enter a mint and analyze, or use steps 1–2 for a single wallet/contract.</div>
+                <details class="inv-details"><summary>Full JSON</summary><pre class="inv-json" id="tokenBundleRaw"></pre></details>
+              </div>
             </div>
           </div>
         </div>
