@@ -1,12 +1,10 @@
 name: Diverg Security Scan
 
 on:
-  # Run on pushes to main and on pull requests
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  # Allow manual trigger with custom target
   workflow_dispatch:
     inputs:
       target:

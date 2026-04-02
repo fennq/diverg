@@ -1,13 +1,8 @@
 """
-Domain trust assessment skill.
+Domain trust assessment — multi-factor domain reputation using WHOIS, TLD
+abuse stats, registrar reputation, privacy/proxy detection, and email auth.
 
-Multi-factor domain reputation analysis based on WHOIS registration data,
-TLD reputation, registrar reputation, privacy/proxy detection, and email
-security posture.  Produces a composite trust score (0–100) and individual
-sub-signal findings.
-
-All data is derived from the osint_json context (phase 1) with a direct
-WHOIS fallback — zero additional network calls in the normal path.
+Data comes from osint_json (phase 1) with WHOIS fallback if needed.
 """
 
 from __future__ import annotations
@@ -86,30 +81,12 @@ _SIGNAL_TITLES: dict[str, str] = {
 }
 
 _SIGNAL_IMPACT: dict[str, str] = {
-    "domain_age": (
-        "Newly registered domains are disproportionately used for phishing, "
-        "fraud, and short-lived attack infrastructure."
-    ),
-    "expiration_proximity": (
-        "Short registration windows or imminent expiration suggest disposable "
-        "infrastructure commonly used in campaigns."
-    ),
-    "tld_reputation": (
-        "Certain TLDs have significantly higher abuse rates and are commonly "
-        "used for phishing and spam domains."
-    ),
-    "privacy_proxy": (
-        "WHOIS privacy services obscure domain ownership.  While used legitimately, "
-        "they also enable anonymous malicious registration."
-    ),
-    "registrar_reputation": (
-        "Some registrars have disproportionately high abuse rates due to lax "
-        "verification or bulk-registration pricing."
-    ),
-    "email_security": (
-        "Missing email authentication (SPF/DKIM/DMARC) indicates the domain may "
-        "lack operational maturity or intentional configuration."
-    ),
+    "domain_age": "Newly registered domains are heavily overrepresented in phishing and throwaway attack infra.",
+    "expiration_proximity": "Short reg windows or imminent expiry are typical of disposable campaign domains.",
+    "tld_reputation": "Some TLDs have significantly higher abuse rates (Spamhaus, SURBL data).",
+    "privacy_proxy": "WHOIS privacy hides ownership — legit use exists, but also enables anonymous abuse.",
+    "registrar_reputation": "Certain registrars show up disproportionately in abuse reports (lax verification, cheap bulk reg).",
+    "email_security": "No SPF/DKIM/DMARC suggests the domain lacks operational maturity or config.",
 }
 
 # ---------------------------------------------------------------------------
@@ -595,11 +572,7 @@ def _signal_to_finding(target_url: str, sig: DomainSignal) -> dict:
         "category": "Domain Trust",
         "evidence": f"signal={sig.signal}; sub_score={sig.score}/100; {sig.reason}",
         "impact": impact,
-        "remediation": (
-            "Evaluate this signal in context with other domain trust indicators. "
-            "Isolated signals are informational; combinations of multiple elevated "
-            "signals warrant deeper investigation."
-        ),
+        "remediation": "Evaluate alongside other trust signals — isolated hits are informational, stacked hits need investigation.",
         "finding_type": finding_type,
         "context": sig.reason,
         "confidence": "medium" if sig.risk != "unknown" else "low",
@@ -635,10 +608,8 @@ def _summary_finding(target_url: str, report: DomainTrustReport) -> dict:
             "phishing, fraud, and short-lived attack campaigns."
         ),
         "remediation": (
-            "For low-trust domains: increase verification depth, check certificate "
-            "transparency logs, investigate domain ownership provenance, and "
-            "cross-reference with threat intelligence feeds. "
-            "For high-trust domains: standard security monitoring is sufficient."
+            "Low-trust: dig into CT logs, ownership history, and threat intel feeds. "
+            "High-trust: normal monitoring is fine."
         ),
         "finding_type": "vulnerability" if severity in ("Critical", "High", "Medium") else "informational",
         "context": f"Domain trust score {score}/100 ({verdict}) from {len(report.signals)} signals.",
@@ -655,13 +626,7 @@ def _summary_finding(target_url: str, report: DomainTrustReport) -> dict:
 
 
 def run(target_url: str, scan_type: str = "full", osint_json: str | None = None) -> str:
-    """
-    Entry point for the Diverg skill runner.
-
-    Returns JSON with a ``findings`` list (canonical shape expected by
-    orchestrator aggregation) and a ``domain_trust`` dict for direct API
-    consumption.
-    """
+    """Skill entry point.  Returns JSON with findings + domain_trust payload."""
     run_start = time.time()
     domain = _extract_domain(target_url)
     report = DomainTrustReport(target_url=target_url, domain=domain)

@@ -1,10 +1,6 @@
 """
-SARIF 2.1.0 output for Diverg scan findings.
-
-Converts the canonical Diverg findings list into a SARIF log that GitHub
-Code Scanning (and other SARIF consumers) can ingest.
-
-Reference: https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html
+SARIF 2.1.0 output — converts Diverg findings to the format GitHub Code
+Scanning expects.  Ref: https://docs.oasis-open.org/sarif/sarif/v2.1.0/
 """
 
 from __future__ import annotations
@@ -40,10 +36,7 @@ def _slugify(text: str) -> str:
 
 
 def _build_rules(findings: list[dict]) -> tuple[list[dict], dict[str, int]]:
-    """Deduplicate findings into SARIF rule definitions.
-
-    Returns (rules_list, rule_id_to_index) so results can reference by index.
-    """
+    """Unique categories -> SARIF rule defs.  Returns (rules, id->index map)."""
     rules: list[dict] = []
     rule_index: dict[str, int] = {}
 
@@ -76,7 +69,7 @@ def _build_rules(findings: list[dict]) -> tuple[list[dict], dict[str, int]]:
 
 
 def _finding_to_result(f: dict, rule_index: dict[str, int]) -> dict:
-    """Convert a single Diverg finding into a SARIF result object."""
+    """Single finding -> SARIF result."""
     category = f.get("category", "Assessment")
     rule_id = _slugify(category)
     severity = f.get("severity", "Info")
@@ -122,16 +115,7 @@ def findings_to_sarif(
     target_url: str = "",
     scanned_at: str = "",
 ) -> dict:
-    """Convert Diverg findings into a complete SARIF 2.1.0 log.
-
-    Args:
-        findings: List of normalised Diverg finding dicts.
-        target_url: The scanned target (informational).
-        scanned_at: ISO timestamp of the scan.
-
-    Returns:
-        A dict representing the SARIF JSON structure.
-    """
+    """Build a full SARIF 2.1.0 log from a list of Diverg findings."""
     rules, rule_index = _build_rules(findings)
     results = [_finding_to_result(f, rule_index) for f in findings]
 
@@ -159,15 +143,7 @@ def findings_to_sarif(
 
 
 def check_severity_gate(findings: list[dict], fail_on: str) -> bool:
-    """Return True if any finding meets or exceeds the severity threshold.
-
-    Args:
-        findings: List of normalised Diverg finding dicts.
-        fail_on: Minimum severity to trigger failure (critical/high/medium/low).
-
-    Returns:
-        True if the gate is breached (caller should exit non-zero).
-    """
+    """True if any finding meets or exceeds the given severity threshold."""
     threshold = _SEVERITY_RANK.get(fail_on.capitalize(), 0)
     for f in findings:
         rank = _SEVERITY_RANK.get(f.get("severity", "Info"), 0)

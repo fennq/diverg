@@ -52,15 +52,12 @@ app.config["JSON_SORT_KEYS"] = False
 # ---------------------------------------------------------------------------
 
 def _error(message: str, status: int = 400):
-    """Return a consistent JSON error response."""
+    """JSON error envelope."""
     return jsonify({"error": True, "message": message}), status
 
 
 def _validate_url(raw: str) -> tuple[str | None, str | None]:
-    """Validate and normalise a user-supplied URL.
-
-    Returns (clean_url, None) on success or (None, error_message) on failure.
-    """
+    """Return (clean_url, None) or (None, err_msg)."""
     url = (raw or "").strip()
     if not url:
         return None, "Missing 'url' in request body"
@@ -91,7 +88,7 @@ def _validate_url(raw: str) -> tuple[str | None, str | None]:
 
 @app.after_request
 def _cors(resp):
-    """Allow Chrome extension and other clients to call the API (e.g. from localhost)."""
+    """CORS headers for extension + local dev."""
     resp.headers["Access-Control-Allow-Origin"] = "*"
     resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type"

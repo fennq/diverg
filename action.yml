@@ -1,5 +1,5 @@
 name: "Diverg Security Scan"
-description: "Run a Diverg security scan and optionally upload SARIF to GitHub Security tab"
+description: "Run Diverg scan, output SARIF, optionally upload to GitHub Security"
 branding:
   icon: "shield"
   color: "red"
