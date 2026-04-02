@@ -68,4 +68,5 @@ investigation/*
 
 # Local-only drafts (do not commit)
 twitter/
+drift-exploit-*.md
 node_modules/
