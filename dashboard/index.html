@@ -49,6 +49,10 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
         Investigation
       </div>
+      <div class="nav-item" data-page="sentinel">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l7 4v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V7l7-4z"/><path d="M9 12l2 2 4-4"/></svg>
+        Sentinel
+      </div>
       <div class="nav-item" data-page="settings">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         Settings
@@ -371,6 +375,7 @@
               </div>
             </div>
             <button class="btn btn-primary" onclick="runPoc()">Simulate</button>
+            <button class="btn btn-secondary" id="pocUseAsRegressionBtn" onclick="usePocAsRegression()" style="display:none; margin-left:0.5rem">Use as Regression</button>
             <pre id="pocResult" class="tool-result">Configure and run</pre>
           </div>
 
@@ -384,6 +389,152 @@
             </div>
             <button class="btn btn-primary" onclick="runReputation()">Check</button>
             <pre id="reputationResult" class="tool-result">Enter a target to check</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- SENTINEL ═══════════════════════════════════════════════════════ -->
+      <div class="page" id="page-sentinel">
+        <div class="section-h">
+          <span class="section-title">Sentinel intelligence</span>
+        </div>
+
+        <div class="sentinel-tabs">
+          <button class="sentinel-tab active" data-sentinel-tab="diff" onclick="showSentinelTab('diff')">Diff</button>
+          <button class="sentinel-tab" data-sentinel-tab="surface" onclick="showSentinelTab('surface')">Surface</button>
+          <button class="sentinel-tab" data-sentinel-tab="trend" onclick="showSentinelTab('trend')">Trend</button>
+          <button class="sentinel-tab" data-sentinel-tab="regression" onclick="showSentinelTab('regression')">Regression</button>
+        </div>
+
+        <div class="card sentinel-disabled" id="sentinelDisabled" style="display:none">
+          <div class="card-b">
+            <div class="empty" style="padding:2rem">
+              <div class="empty-t">Sentinel unavailable</div>
+              <div class="empty-d" id="sentinelDisabledMessage">Build the Rust binary or enable Sentinel to use this page.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sentinel-pane active" id="sentinel-pane-diff">
+          <div class="card" style="max-width:none; margin-bottom:1rem">
+            <div class="card-h"><h3>Finding diff</h3></div>
+            <div class="card-b">
+              <div class="sentinel-grid">
+                <div class="settings-f">
+                  <label>Current scan</label>
+                  <select id="sentinelDiffScan" class="input" onchange="onSentinelDiffScanChange()"></select>
+                </div>
+                <div class="settings-f">
+                  <label>Compare to</label>
+                  <select id="sentinelDiffCompare" class="input"></select>
+                </div>
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap">
+                <button class="btn btn-primary" onclick="runSentinelDiff(false)">Diff Selected Pair</button>
+                <button class="btn btn-secondary" onclick="runSentinelDiff(true)">Diff vs Previous</button>
+              </div>
+            </div>
+          </div>
+          <div id="sentinelDiffOutput"></div>
+        </div>
+
+        <div class="sentinel-pane" id="sentinel-pane-surface">
+          <div class="card" style="max-width:none; margin-bottom:1rem">
+            <div class="card-h"><h3>Surface drift</h3></div>
+            <div class="card-b">
+              <div class="settings-f">
+                <label>Target URL</label>
+                <input type="text" id="sentinelSurfaceUrl" class="input" placeholder="https://example.com/">
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap">
+                <button class="btn btn-primary" onclick="captureSentinelSurface()">Capture Snapshot</button>
+                <button class="btn btn-secondary" onclick="loadSentinelSurfaceHistory()">Load History</button>
+              </div>
+            </div>
+          </div>
+          <div id="sentinelSurfaceOutput"></div>
+          <div id="sentinelSurfaceHistory"></div>
+        </div>
+
+        <div class="sentinel-pane" id="sentinel-pane-trend">
+          <div class="card" style="max-width:none; margin-bottom:1rem">
+            <div class="card-h"><h3>Risk trend</h3></div>
+            <div class="card-b">
+              <div class="settings-f">
+                <label>Target URL</label>
+                <input type="text" id="sentinelTrendUrl" class="input" placeholder="https://example.com/">
+              </div>
+              <button class="btn btn-primary" onclick="loadSentinelTrend()">Load Trend</button>
+            </div>
+          </div>
+          <div id="sentinelTrendOutput"></div>
+        </div>
+
+        <div class="sentinel-pane" id="sentinel-pane-regression">
+          <div class="sentinel-grid">
+            <div class="settings-card">
+              <div class="settings-h">
+                <h4>Create Regression</h4>
+                <p>Replay a confirmed request and classify it as REPRODUCES, FIXED, or ERROR.</p>
+              </div>
+              <div id="sentinelRegressionPrefillNote" class="sentinel-note" style="display:none"></div>
+              <div class="settings-f">
+                <label>Target URL</label>
+                <input type="text" id="sentinelRegressionTargetUrl" class="input" placeholder="https://example.com/">
+              </div>
+              <div class="settings-f">
+                <label>Finding title</label>
+                <input type="text" id="sentinelRegressionFindingTitle" class="input" placeholder="IDOR in /api/users">
+              </div>
+              <div class="sentinel-grid">
+                <div class="settings-f">
+                  <label>Method</label>
+                  <input type="text" id="sentinelRegressionMethod" class="input" value="GET">
+                </div>
+                <div class="settings-f">
+                  <label>Expected status</label>
+                  <input type="number" id="sentinelRegressionExpectedStatus" class="input" placeholder="200">
+                </div>
+              </div>
+              <div class="settings-f">
+                <label>Request URL</label>
+                <input type="text" id="sentinelRegressionRequestUrl" class="input" placeholder="https://example.com/api/users">
+              </div>
+              <div class="settings-f">
+                <label>Match pattern (optional regex)</label>
+                <input type="text" id="sentinelRegressionMatchPattern" class="input" placeholder="admin|email">
+              </div>
+              <div class="settings-f">
+                <label>Headers JSON</label>
+                <textarea id="sentinelRegressionHeaders" class="sentinel-textarea" placeholder='{"Authorization":"Bearer token"}'></textarea>
+              </div>
+              <div class="settings-f">
+                <label>Params JSON</label>
+                <textarea id="sentinelRegressionParams" class="sentinel-textarea" placeholder='{"id":"2"}'></textarea>
+              </div>
+              <div class="settings-f">
+                <label>Body (optional)</label>
+                <textarea id="sentinelRegressionBody" class="sentinel-textarea" placeholder='{"email":"victim@example.com"}'></textarea>
+              </div>
+              <button class="btn btn-primary" onclick="createSentinelRegression()">Save Regression</button>
+            </div>
+
+            <div class="settings-card">
+              <div class="settings-h">
+                <h4>Regression Suite</h4>
+                <p>List, run, and delete saved regressions for one target.</p>
+              </div>
+              <div class="settings-f">
+                <label>Target URL</label>
+                <input type="text" id="sentinelRegressionListTarget" class="input" placeholder="https://example.com/">
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:1rem">
+                <button class="btn btn-secondary" onclick="loadSentinelRegressions()">Load</button>
+                <button class="btn btn-primary" onclick="runSentinelRegressions()">Run Suite</button>
+              </div>
+              <div id="sentinelRegressionRunOutput"></div>
+              <div id="sentinelRegressionList"></div>
+            </div>
           </div>
         </div>
       </div>

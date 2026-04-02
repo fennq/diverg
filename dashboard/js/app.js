@@ -3,7 +3,26 @@
 const CFG = { apiUrl: localStorage.getItem('diverg_api') || window.location.origin };
 const api = p => CFG.apiUrl + p;
 
-const State = { scope: 'full', scanId: null, report: null, historyData: [], findings: [] };
+const State = {
+  scope: 'full',
+  scanId: null,
+  report: null,
+  historyData: [],
+  findings: [],
+  sentinel: {
+    tab: 'diff',
+    scans: [],
+    disabled: false,
+    disabledMessage: '',
+    lastDiff: null,
+    lastSurface: null,
+    lastSurfaceHistory: null,
+    lastTrend: null,
+    lastRegressionList: null,
+    lastRegressionRun: null,
+    lastPocPrefill: null,
+  },
+};
 
 // ── Auth ──────────────────────────────────────────────────────────────────
 const Auth = {
@@ -30,7 +49,7 @@ function navigate(page, data) {
   const titles = {
     home: 'Home', scanner: 'Scanner', analytics: 'Analytics', history: 'History',
     findings: 'Findings', results: 'Results', 'attack-paths': 'Attack Paths',
-    investigation: 'Investigation', settings: 'Settings',
+    investigation: 'Investigation', sentinel: 'Sentinel', settings: 'Settings',
   };
   document.getElementById('pageTitle').textContent = titles[page] || page;
 
@@ -39,6 +58,7 @@ function navigate(page, data) {
   if (page === 'history') loadHistory();
   if (page === 'findings') loadFindings();
   if (page === 'attack-paths') loadAttackPaths();
+  if (page === 'sentinel') loadSentinel();
   if (page === 'settings') loadSettings();
   if (page === 'results' && data) showResults(data);
 
@@ -76,25 +96,40 @@ function authHeaders(extra) {
   return { ...Auth.headers, ...extra };
 }
 
-async function get(path) {
-  const r = await fetch(api(path), { headers: authHeaders() });
+async function requestJson(path, options = {}) {
+  const headers = authHeaders(options.headers || {});
+  const init = { ...options, headers };
+  if (options.body !== undefined && options.body !== null && typeof options.body !== 'string') {
+    init.body = JSON.stringify(options.body);
+    init.headers = authHeaders({ 'Content-Type': 'application/json', ...(options.headers || {}) });
+  }
+  const r = await fetch(api(path), init);
   if (r.status === 401) { Auth.logout(); return; }
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+  let data = null;
+  const contentType = r.headers.get('content-type') || '';
+  try {
+    data = contentType.includes('application/json') ? await r.json() : await r.text();
+  } catch {
+    data = null;
+  }
+  if (!r.ok) {
+    const message = (data && (data.message || data.error)) || ('HTTP ' + r.status);
+    const err = new Error(message);
+    err.status = r.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+async function get(path) {
+  return requestJson(path, { method: 'GET' });
 }
 async function post(path, body) {
-  const r = await fetch(api(path), {
-    method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body)
-  });
-  if (r.status === 401) { Auth.logout(); return; }
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+  return requestJson(path, { method: 'POST', body });
 }
 async function del(path) {
-  const r = await fetch(api(path), { method: 'DELETE', headers: authHeaders() });
-  if (r.status === 401) { Auth.logout(); return; }
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+  return requestJson(path, { method: 'DELETE' });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -134,6 +169,33 @@ function shortUrl(u) {
     const x = new URL(u.startsWith('http') ? u : 'https://' + u);
     return x.hostname;
   } catch { return u; }
+}
+
+function ensureHttpUrl(u) {
+  const v = (u || '').trim();
+  if (!v) return '';
+  return v.startsWith('http://') || v.startsWith('https://') ? v : ('https://' + v);
+}
+
+function shortDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatDelta(v) {
+  if (v == null) return '—';
+  if (v === 0) return '0';
+  return v > 0 ? `+${v}` : String(v);
+}
+
+function friendlyError(e, fallback = 'Request failed') {
+  return e?.data?.message || e?.data?.error || e?.message || fallback;
+}
+
+function prettyJson(value) {
+  return JSON.stringify(value, null, 2);
 }
 
 function scanRow(s) {
@@ -573,10 +635,12 @@ async function runOsint() {
 
 async function runPoc() {
   const type = document.getElementById('pocType').value;
-  const url = document.getElementById('pocUrl').value.trim();
+  const url = ensureHttpUrl(document.getElementById('pocUrl').value.trim());
   if (!url) { toast('Enter a URL', 'err'); return; }
   const el = document.getElementById('pocResult');
+  const useBtn = document.getElementById('pocUseAsRegressionBtn');
   el.textContent = 'Running…'; el.style.color = '';
+  useBtn.style.display = 'none';
   try {
     const body = { type, url };
     if (type === 'idor') {
@@ -586,6 +650,8 @@ async function runPoc() {
     const r = await post('/api/poc/simulate', body);
     el.textContent = `Result: ${r.conclusion}\nSuccess: ${r.success}\nStatus: ${r.status_code || '—'}${r.body_preview ? '\n\n' + r.body_preview.substring(0, 300) : ''}`;
     el.style.color = r.success ? 'var(--green)' : 'var(--red)';
+    State.sentinel.lastPocPrefill = buildPocRegressionPrefill(type, url, r);
+    if (State.sentinel.lastPocPrefill) useBtn.style.display = 'inline-flex';
   } catch (e) { el.textContent = 'Error: ' + e.message; el.style.color = 'var(--red)'; }
 }
 
@@ -602,6 +668,558 @@ async function runReputation() {
     if (!(r.findings || []).length) lines.push('No significant findings.');
     el.textContent = lines.join('\n');
   } catch (e) { el.textContent = 'Error: ' + e.message; el.style.color = 'var(--red)'; }
+}
+
+function buildPocRegressionPrefill(type, rawUrl, result) {
+  try {
+    const parsed = new URL(ensureHttpUrl(rawUrl));
+    const targetUrl = `${parsed.protocol}//${parsed.host}/`;
+    const requestUrl = `${parsed.protocol}//${parsed.host}${parsed.pathname || '/'}`;
+    const params = {};
+    parsed.searchParams.forEach((value, key) => { params[key] = value; });
+    if (type === 'idor') {
+      const param = document.getElementById('pocParam')?.value.trim() || 'id';
+      const newValue = document.getElementById('pocValue')?.value.trim() || '2';
+      params[param] = newValue;
+    }
+    return {
+      target_url: targetUrl,
+      finding_title: `${type === 'idor' ? 'IDOR' : 'Unauthenticated access'} replay for ${parsed.pathname || '/'}`,
+      method: 'GET',
+      request_url: requestUrl,
+      expected_status: result?.status_code || 200,
+      match_pattern: '',
+      headers: {},
+      params,
+      body: '',
+      note: 'Prefilled from the Investigation PoC request. Review before saving.',
+    };
+  } catch {
+    return null;
+  }
+}
+
+function usePocAsRegression() {
+  if (!State.sentinel.lastPocPrefill) {
+    toast('Run a PoC first', 'err');
+    return;
+  }
+  navigate('sentinel');
+  showSentinelTab('regression');
+  fillSentinelRegressionForm(State.sentinel.lastPocPrefill);
+}
+
+// ── SENTINEL ───────────────────────────────────────────────────────────────
+function showSentinelTab(tab) {
+  State.sentinel.tab = tab;
+  document.querySelectorAll('.sentinel-tab').forEach(el => el.classList.toggle('active', el.dataset.sentinelTab === tab));
+  document.querySelectorAll('.sentinel-pane').forEach(el => el.classList.remove('active'));
+  if (!State.sentinel.disabled) document.getElementById('sentinel-pane-' + tab)?.classList.add('active');
+}
+
+function updateSentinelAvailabilityUi() {
+  const disabledEl = document.getElementById('sentinelDisabled');
+  if (!disabledEl) return;
+  disabledEl.style.display = State.sentinel.disabled ? '' : 'none';
+  document.getElementById('sentinelDisabledMessage').textContent = State.sentinel.disabledMessage || 'Build the Rust binary or enable Sentinel to use this page.';
+  document.querySelectorAll('.sentinel-pane').forEach(el => el.classList.remove('active'));
+  if (!State.sentinel.disabled) document.getElementById('sentinel-pane-' + State.sentinel.tab)?.classList.add('active');
+}
+
+function setSentinelDisabled(message) {
+  State.sentinel.disabled = true;
+  State.sentinel.disabledMessage = message || 'Sentinel unavailable';
+  updateSentinelAvailabilityUi();
+}
+
+function clearSentinelDisabled() {
+  State.sentinel.disabled = false;
+  State.sentinel.disabledMessage = '';
+  updateSentinelAvailabilityUi();
+}
+
+function handleSentinelError(error, quiet = false) {
+  if (error?.status === 503 && error?.data?.sentinel_disabled) {
+    setSentinelDisabled(error.data.error || 'Sentinel unavailable');
+    return true;
+  }
+  if (!quiet) toast(friendlyError(error), 'err');
+  return false;
+}
+
+async function checkSentinelAvailability() {
+  try {
+    await get('/api/sentinel/surface/history?target_url=' + encodeURIComponent('https://example.com/') + '&limit=1');
+    clearSentinelDisabled();
+    return true;
+  } catch (e) {
+    if (handleSentinelError(e, true)) return false;
+    toast(friendlyError(e), 'err');
+    return false;
+  }
+}
+
+async function loadSentinel() {
+  updateSentinelAvailabilityUi();
+  try {
+    const data = await get('/api/history?limit=100');
+    State.sentinel.scans = data.scans || [];
+    populateSentinelScans();
+  } catch {
+    toast('Failed to load scan history', 'err');
+  }
+  await checkSentinelAvailability();
+  updateSentinelAvailabilityUi();
+}
+
+function populateSentinelScans() {
+  const scanSelect = document.getElementById('sentinelDiffScan');
+  const compareSelect = document.getElementById('sentinelDiffCompare');
+  if (!scanSelect || !compareSelect) return;
+
+  const currentScanId = scanSelect.value;
+  const scans = State.sentinel.scans || [];
+  if (!scans.length) {
+    scanSelect.innerHTML = '<option value="">No scans available</option>';
+    compareSelect.innerHTML = '<option value="">No comparison scans</option>';
+    document.getElementById('sentinelDiffOutput').innerHTML = `<div class="card"><div class="card-b"><div class="empty" style="padding:2rem"><div class="empty-t">No scans available</div><div class="empty-d">Run scans before using Sentinel diff.</div></div></div></div>`;
+    return;
+  }
+
+  scanSelect.innerHTML = scans.map(scan => `<option value="${esc(scan.id)}">${esc(sentinelScanLabel(scan))}</option>`).join('');
+  if (currentScanId && scans.some(scan => scan.id === currentScanId)) scanSelect.value = currentScanId;
+  else scanSelect.value = scans[0].id;
+
+  const latestTarget = scans[0].target_url;
+  ['sentinelSurfaceUrl', 'sentinelTrendUrl', 'sentinelRegressionTargetUrl', 'sentinelRegressionListTarget'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.value) el.value = latestTarget;
+  });
+  onSentinelDiffScanChange();
+}
+
+function sentinelScanLabel(scan) {
+  return `${shortUrl(scan.target_url)} · ${shortDate(scan.scanned_at || scan.created_at)} · ${scan.id.slice(0, 8)}`;
+}
+
+function onSentinelDiffScanChange() {
+  const scanId = document.getElementById('sentinelDiffScan')?.value;
+  const compareSelect = document.getElementById('sentinelDiffCompare');
+  if (!scanId || !compareSelect) return;
+
+  const scans = State.sentinel.scans || [];
+  const selected = scans.find(scan => scan.id === scanId);
+  const candidates = scans.filter(scan => scan.id !== scanId && (!selected || scan.target_url === selected.target_url));
+  const fallback = scans.filter(scan => scan.id !== scanId);
+  const compareScans = candidates.length ? candidates : fallback;
+  compareSelect.innerHTML = compareScans.length
+    ? compareScans.map(scan => `<option value="${esc(scan.id)}">${esc(sentinelScanLabel(scan))}</option>`).join('')
+    : '<option value="">No comparison scans</option>';
+}
+
+async function runSentinelDiff(usePrevious) {
+  const scanId = document.getElementById('sentinelDiffScan')?.value;
+  const compareTo = document.getElementById('sentinelDiffCompare')?.value;
+  if (!scanId) { toast('Select a scan first', 'err'); return; }
+  let path = `/api/sentinel/diff?scan_id=${encodeURIComponent(scanId)}`;
+  if (!usePrevious && compareTo) path += `&compare_to=${encodeURIComponent(compareTo)}`;
+  try {
+    const data = await get(path);
+    State.sentinel.lastDiff = data;
+    renderSentinelDiff(data);
+  } catch (e) {
+    if (handleSentinelError(e)) return;
+    toast(friendlyError(e), 'err');
+  }
+}
+
+function renderSentinelDiff(data) {
+  const el = document.getElementById('sentinelDiffOutput');
+  if (!el) return;
+  const summary = data.summary || {};
+  const newFindings = data.new_findings || [];
+  const resolved = data.resolved_findings || [];
+  const severityChanges = data.severity_changes || [];
+  const evidenceChanges = data.evidence_changes || [];
+  el.innerHTML = `
+    <div class="card" style="max-width:none; margin-bottom:1rem">
+      <div class="card-b">
+        <div class="sentinel-metrics">
+          ${sentinelMetric('New', summary.new_count, 'critical')}
+          ${sentinelMetric('Resolved', summary.resolved_count, 'low')}
+          ${sentinelMetric('Severity', summary.severity_changed_count, 'medium')}
+          ${sentinelMetric('Evidence', summary.evidence_changed_count, 'blue')}
+          ${sentinelMetric('Risk Δ', formatDelta(summary.risk_delta), (summary.risk_delta || 0) > 0 ? 'critical' : 'green')}
+        </div>
+        <div class="sentinel-subtle">
+          ${esc(shortUrl(data.target_url || ''))} · ${esc((data.compare_to || '').slice(0, 8))} → ${esc((data.scan_id || '').slice(0, 8))}
+          ${data.auto_selected_previous ? ' · previous auto-selected' : ''}
+        </div>
+      </div>
+    </div>
+    <div class="sentinel-grid" style="margin-bottom:1rem">
+      <div class="card sentinel-panel danger">
+        <div class="card-h"><h3>New Findings</h3></div>
+        ${renderSentinelFindingCard(newFindings, 'No new findings.')}
+      </div>
+      <div class="card sentinel-panel success">
+        <div class="card-h"><h3>Resolved Findings</h3></div>
+        ${renderSentinelFindingCard(resolved, 'No resolved findings.')}
+      </div>
+    </div>
+    <div class="sentinel-grid">
+      <div class="card">
+        <div class="card-h"><h3>Severity Changes</h3></div>
+        <div class="card-b">${renderSentinelChanges(severityChanges, change => `
+          <div class="sentinel-change-row">
+            <span class="badge ${riskClass(change.to)}">${esc(change.from)} → ${esc(change.to)}</span>
+            <div class="sentinel-change-copy">
+              <div>${esc(change.title)}</div>
+              <div class="sentinel-subtle">${esc(change.category || '')}</div>
+            </div>
+          </div>` , 'No severity changes.')}</div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h3>Evidence Changes</h3></div>
+        <div class="card-b">${renderSentinelChanges(evidenceChanges, change => `
+          <div class="sentinel-change-row">
+            <span class="badge clean">Evidence</span>
+            <div class="sentinel-change-copy">
+              <div>${esc(change.title)}</div>
+              <div class="sentinel-subtle">${esc((change.to_excerpt || '').substring(0, 140) || 'Evidence changed')}</div>
+            </div>
+          </div>` , 'No evidence changes.')}</div>
+      </div>
+    </div>`;
+}
+
+function renderSentinelFindingCard(findings, emptyText) {
+  if (!findings.length) return `<div class="card-b"><div class="empty" style="padding:2rem"><div class="empty-t">${esc(emptyText)}</div></div></div>`;
+  return `<div>${findings.map(findingRow).join('')}</div>`;
+}
+
+function renderSentinelChanges(items, renderItem, emptyText) {
+  if (!items.length) return `<div class="empty" style="padding:2rem"><div class="empty-t">${esc(emptyText)}</div></div>`;
+  return items.map(renderItem).join('');
+}
+
+function sentinelMetric(label, value, tone) {
+  return `<div class="sentinel-metric"><div class="sentinel-metric-value ${tone || ''}">${esc(value)}</div><div class="sentinel-metric-label">${esc(label)}</div></div>`;
+}
+
+async function captureSentinelSurface() {
+  const input = document.getElementById('sentinelSurfaceUrl');
+  const targetUrl = ensureHttpUrl(input?.value || '');
+  if (!targetUrl) { toast('Enter a target URL', 'err'); return; }
+  input.value = targetUrl;
+  try {
+    const data = await post('/api/sentinel/surface/capture', { target_url: targetUrl });
+    State.sentinel.lastSurface = data;
+    renderSentinelSurface(data);
+    await loadSentinelSurfaceHistory(targetUrl, true);
+  } catch (e) {
+    if (handleSentinelError(e)) return;
+    toast(friendlyError(e), 'err');
+  }
+}
+
+async function loadSentinelSurfaceHistory(targetOverride, quiet = false) {
+  const input = document.getElementById('sentinelSurfaceUrl');
+  const targetUrl = ensureHttpUrl(targetOverride || input?.value || '');
+  if (!targetUrl) { toast('Enter a target URL', 'err'); return; }
+  input.value = targetUrl;
+  try {
+    const data = await get(`/api/sentinel/surface/history?target_url=${encodeURIComponent(targetUrl)}&limit=10`);
+    State.sentinel.lastSurfaceHistory = data;
+    renderSentinelSurfaceHistory(data);
+  } catch (e) {
+    if (handleSentinelError(e, quiet)) return;
+    toast(friendlyError(e), 'err');
+  }
+}
+
+function renderSentinelSurface(data) {
+  const el = document.getElementById('sentinelSurfaceOutput');
+  if (!el) return;
+  const snapshot = data.snapshot || {};
+  const drift = data.drift;
+  el.innerHTML = `
+    <div class="card" style="max-width:none; margin-bottom:1rem">
+      <div class="card-h"><h3>Latest Snapshot</h3></div>
+      <div class="card-b">
+        <div class="sentinel-metrics">
+          ${sentinelMetric('Status', snapshot.status_code ?? '—', 'blue')}
+          ${sentinelMetric('Latency', snapshot.response_time_ms != null ? `${snapshot.response_time_ms}ms` : '—', 'green')}
+          ${sentinelMetric('Headers', (snapshot.security_headers || []).length, 'blue')}
+          ${sentinelMetric('Missing', (snapshot.missing_security_headers || []).length, 'critical')}
+        </div>
+        <div class="sentinel-detail-grid">
+          <div><span class="sentinel-subtle">Final URL</span><div>${esc(snapshot.final_url || snapshot.target_url || '—')}</div></div>
+          <div><span class="sentinel-subtle">Server</span><div>${esc(snapshot.server || snapshot.x_powered_by || '—')}</div></div>
+          <div><span class="sentinel-subtle">Captured</span><div>${esc(ago(snapshot.captured_at))}</div></div>
+          <div><span class="sentinel-subtle">Redirects</span><div>${esc(String((snapshot.redirects || []).length || 1))}</div></div>
+        </div>
+      </div>
+    </div>
+    ${drift ? `
+      <div class="card" style="max-width:none; margin-bottom:1rem">
+        <div class="card-h"><h3>Drift Since Previous Snapshot</h3></div>
+        <div class="card-b">
+          <div class="sentinel-metrics">
+            ${sentinelMetric('High', drift.high_count, 'critical')}
+            ${sentinelMetric('Medium', drift.medium_count, 'medium')}
+            ${sentinelMetric('Low', drift.low_count, 'low')}
+            ${sentinelMetric('Info', drift.info_count, 'blue')}
+          </div>
+          <div>${renderSentinelChanges(drift.changes || [], change => `
+            <div class="sentinel-change-row">
+              <span class="badge ${change.severity === 'high' ? 'critical' : change.severity === 'medium' ? 'medium' : change.severity === 'low' ? 'low' : 'clean'}">${esc(change.severity.toUpperCase())}</span>
+              <div class="sentinel-change-copy">
+                <div>${esc(change.field)}</div>
+                <div class="sentinel-subtle">${esc(change.detail)}</div>
+              </div>
+            </div>`, 'No drift detected.')}</div>
+        </div>
+      </div>` : `
+      <div class="card" style="max-width:none; margin-bottom:1rem">
+        <div class="card-b"><div class="empty" style="padding:2rem"><div class="empty-t">No previous snapshot</div><div class="empty-d">Capture another snapshot later to see drift.</div></div></div>
+      </div>`}
+  `;
+}
+
+function renderSentinelSurfaceHistory(data) {
+  const el = document.getElementById('sentinelSurfaceHistory');
+  if (!el) return;
+  const snapshots = data.snapshots || [];
+  el.innerHTML = `
+    <div class="card" style="max-width:none">
+      <div class="card-h"><h3>Snapshot History</h3></div>
+      <div class="card-b">
+        ${snapshots.length ? snapshots.map(snapshot => `
+          <div class="sentinel-change-row">
+            <span class="badge ${snapshot.status_code >= 400 ? 'critical' : 'clean'}">${esc(snapshot.status_code ?? '—')}</span>
+            <div class="sentinel-change-copy">
+              <div>${esc(snapshot.final_url || snapshot.target_url)}</div>
+              <div class="sentinel-subtle">${esc(shortDate(snapshot.captured_at))} · ${esc(String(snapshot.response_time_ms || 0))}ms · ${(snapshot.security_headers || []).length} headers</div>
+            </div>
+          </div>`).join('') : `<div class="empty" style="padding:2rem"><div class="empty-t">No snapshots yet</div><div class="empty-d">Capture a surface snapshot to start drift tracking.</div></div>`}
+      </div>
+    </div>`;
+}
+
+async function loadSentinelTrend() {
+  const input = document.getElementById('sentinelTrendUrl');
+  const targetUrl = ensureHttpUrl(input?.value || '');
+  if (!targetUrl) { toast('Enter a target URL', 'err'); return; }
+  input.value = targetUrl;
+  try {
+    const data = await get(`/api/sentinel/trend?target_url=${encodeURIComponent(targetUrl)}&limit=30`);
+    State.sentinel.lastTrend = data;
+    renderSentinelTrend(data);
+  } catch (e) {
+    toast(friendlyError(e), 'err');
+  }
+}
+
+function renderSentinelTrend(data) {
+  const el = document.getElementById('sentinelTrendOutput');
+  if (!el) return;
+  const points = data.points || [];
+  if (!points.length) {
+    el.innerHTML = `<div class="card" style="max-width:none"><div class="card-b"><div class="empty" style="padding:2rem"><div class="empty-t">No scan history for this target</div><div class="empty-d">Trend charts appear after at least one saved scan.</div></div></div></div>`;
+    return;
+  }
+  const maxRisk = Math.max(...points.map(point => point.risk_score || 0), 1);
+  el.innerHTML = `
+    <div class="card" style="max-width:none; margin-bottom:1rem">
+      <div class="card-h"><h3>Risk Score Timeline</h3></div>
+      <div class="card-b">
+        <div class="sentinel-trend-bars">
+          ${points.map(point => `
+            <div class="sentinel-trend-col">
+              <div class="sentinel-trend-bar" style="height:${Math.max(((point.risk_score || 0) / maxRisk) * 100, 6)}%; background:${sentinelTrendColor(point.risk_score)}"></div>
+              <div class="sentinel-trend-score">${esc(point.risk_score ?? '—')}</div>
+              <div class="sentinel-trend-date">${esc(shortDate(point.scanned_at || point.created_at))}</div>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="card" style="max-width:none">
+      <div class="card-h"><h3>Recent Points</h3></div>
+      <div class="card-b">
+        <div class="scan-list">
+          ${points.slice().reverse().slice(0, 5).map(point => `
+            <div class="scan-row">
+              <div class="scan-info">
+                <div class="scan-url">${esc(shortDate(point.scanned_at || point.created_at))}</div>
+                <div class="scan-meta">${esc(point.risk_verdict || 'Unknown')} · ${esc(String(point.total || 0))} findings</div>
+              </div>
+              <span class="badge ${riskClass(point.risk_verdict || '')}">${esc(point.risk_score ?? '—')}</span>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function sentinelTrendColor(score) {
+  if ((score || 0) >= 8) return 'var(--red)';
+  if ((score || 0) >= 5) return 'var(--orange)';
+  if ((score || 0) >= 1) return 'var(--accent)';
+  return 'var(--green)';
+}
+
+function parseSentinelJsonInput(id, label) {
+  const raw = document.getElementById(id)?.value.trim() || '';
+  if (!raw) return {};
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { throw new Error(`${label} must be valid JSON`); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${label} must be a JSON object`);
+  return parsed;
+}
+
+function fillSentinelRegressionForm(prefill) {
+  document.getElementById('sentinelRegressionTargetUrl').value = prefill.target_url || '';
+  document.getElementById('sentinelRegressionFindingTitle').value = prefill.finding_title || '';
+  document.getElementById('sentinelRegressionMethod').value = prefill.method || 'GET';
+  document.getElementById('sentinelRegressionRequestUrl').value = prefill.request_url || '';
+  document.getElementById('sentinelRegressionExpectedStatus').value = prefill.expected_status || '';
+  document.getElementById('sentinelRegressionMatchPattern').value = prefill.match_pattern || '';
+  document.getElementById('sentinelRegressionHeaders').value = prettyJson(prefill.headers || {});
+  document.getElementById('sentinelRegressionParams').value = prettyJson(prefill.params || {});
+  document.getElementById('sentinelRegressionBody').value = prefill.body || '';
+  document.getElementById('sentinelRegressionListTarget').value = prefill.target_url || '';
+  const note = document.getElementById('sentinelRegressionPrefillNote');
+  note.textContent = prefill.note || '';
+  note.style.display = prefill.note ? '' : 'none';
+}
+
+async function createSentinelRegression() {
+  try {
+    const target_url = ensureHttpUrl(document.getElementById('sentinelRegressionTargetUrl').value);
+    const request_url = ensureHttpUrl(document.getElementById('sentinelRegressionRequestUrl').value);
+    const finding_title = document.getElementById('sentinelRegressionFindingTitle').value.trim();
+    const method = (document.getElementById('sentinelRegressionMethod').value.trim() || 'GET').toUpperCase();
+    const expectedRaw = document.getElementById('sentinelRegressionExpectedStatus').value.trim();
+    const match_pattern = document.getElementById('sentinelRegressionMatchPattern').value.trim();
+    const headers = parseSentinelJsonInput('sentinelRegressionHeaders', 'Headers JSON');
+    const params = parseSentinelJsonInput('sentinelRegressionParams', 'Params JSON');
+    const body = document.getElementById('sentinelRegressionBody').value;
+
+    if (!target_url || !request_url || !finding_title) throw new Error('Target URL, request URL, and finding title are required');
+    const payload = {
+      target_url,
+      request_url,
+      finding_title,
+      method,
+      headers,
+      params,
+      body,
+    };
+    if (expectedRaw) payload.expected_status = Number(expectedRaw);
+    if (match_pattern) payload.match_pattern = match_pattern;
+
+    await post('/api/sentinel/regressions', payload);
+    toast('Regression saved', 'ok');
+    document.getElementById('sentinelRegressionListTarget').value = target_url;
+    await loadSentinelRegressions();
+  } catch (e) {
+    if (handleSentinelError(e)) return;
+    toast(friendlyError(e), 'err');
+  }
+}
+
+function latestRegressionOutcomes() {
+  const map = {};
+  (State.sentinel.lastRegressionRun?.results || []).forEach(result => { map[result.test_id] = result; });
+  return map;
+}
+
+async function loadSentinelRegressions() {
+  const input = document.getElementById('sentinelRegressionListTarget');
+  const targetUrl = ensureHttpUrl(input?.value || document.getElementById('sentinelRegressionTargetUrl')?.value || '');
+  if (!targetUrl) { toast('Enter a target URL', 'err'); return; }
+  input.value = targetUrl;
+  try {
+    const data = await get(`/api/sentinel/regressions?target_url=${encodeURIComponent(targetUrl)}`);
+    State.sentinel.lastRegressionList = data;
+    renderSentinelRegressionList(data);
+  } catch (e) {
+    if (handleSentinelError(e)) return;
+    toast(friendlyError(e), 'err');
+  }
+}
+
+async function runSentinelRegressions() {
+  const input = document.getElementById('sentinelRegressionListTarget');
+  const targetUrl = ensureHttpUrl(input?.value || document.getElementById('sentinelRegressionTargetUrl')?.value || '');
+  if (!targetUrl) { toast('Enter a target URL', 'err'); return; }
+  input.value = targetUrl;
+  try {
+    const data = await post('/api/sentinel/regressions/run', { target_url: targetUrl });
+    State.sentinel.lastRegressionRun = data;
+    renderSentinelRegressionRun(data);
+    if (!State.sentinel.lastRegressionList || State.sentinel.lastRegressionList.target_url !== targetUrl) await loadSentinelRegressions();
+    else renderSentinelRegressionList(State.sentinel.lastRegressionList);
+  } catch (e) {
+    if (handleSentinelError(e)) return;
+    toast(friendlyError(e), 'err');
+  }
+}
+
+async function deleteSentinelRegression(id) {
+  if (!confirm('Delete this regression?')) return;
+  try {
+    await del(`/api/sentinel/regressions/${id}`);
+    toast('Regression deleted', 'ok');
+    await loadSentinelRegressions();
+  } catch (e) {
+    if (handleSentinelError(e)) return;
+    toast(friendlyError(e), 'err');
+  }
+}
+
+function renderSentinelRegressionRun(report) {
+  const el = document.getElementById('sentinelRegressionRunOutput');
+  if (!el) return;
+  const summary = report.summary || {};
+  el.innerHTML = `
+    <div class="card" style="max-width:none; margin-bottom:1rem">
+      <div class="card-b">
+        <div class="sentinel-metrics">
+          ${sentinelMetric('Reproduces', summary.reproduces || 0, 'critical')}
+          ${sentinelMetric('Fixed', summary.fixed || 0, 'green')}
+          ${sentinelMetric('Error', summary.error || 0, 'medium')}
+          ${sentinelMetric('Total', summary.total || 0, 'blue')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderSentinelRegressionList(data) {
+  const el = document.getElementById('sentinelRegressionList');
+  if (!el) return;
+  const regressions = data.regressions || [];
+  const outcomes = latestRegressionOutcomes();
+  el.innerHTML = regressions.length ? `
+    <div class="scan-list">
+      ${regressions.map(regression => {
+        const outcome = outcomes[regression.id];
+        return `<div class="scan-row">
+          <div class="scan-info">
+            <div class="scan-url">${esc(regression.finding_title)}</div>
+            <div class="scan-meta">${esc(regression.method)} ${esc(regression.request_url)}${regression.expected_status ? ` · expected ${esc(regression.expected_status)}` : ''}${regression.match_pattern ? ` · /${esc(regression.match_pattern)}/` : ''}</div>
+          </div>
+          ${outcome ? `<span class="badge ${sentinelOutcomeBadge(outcome.outcome)}">${esc(outcome.outcome.toUpperCase())}</span>` : ''}
+          <button class="btn btn-ghost" onclick="deleteSentinelRegression(${regression.id})">Delete</button>
+        </div>`;
+      }).join('')}
+    </div>` : `<div class="empty" style="padding:2rem"><div class="empty-t">No regressions saved</div><div class="empty-d">Save a regression or prefill one from Investigation.</div></div>`;
+}
+
+function sentinelOutcomeBadge(outcome) {
+  if (outcome === 'reproduces') return 'critical';
+  if (outcome === 'fixed') return 'low';
+  return 'medium';
 }
 
 // ── SETTINGS ────────────────────────────────────────────────────────────────

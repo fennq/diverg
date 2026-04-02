@@ -1,2 +1,5 @@
 [phases.setup]
-nixPkgs = ["...", "nmap"]
+nixPkgs = ["...", "nmap", "cargo", "rustc"]
+
+[phases.build]
+cmds = ["cargo build --release --manifest-path rust_signals/Cargo.toml"]

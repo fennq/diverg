@@ -21,6 +21,12 @@ Dashboard endpoints:
   DELETE /api/history/<id>       Delete a scan
   PATCH /api/history/<id>        Update label/tags on a scan
   GET  /api/stats                Aggregate dashboard statistics
+  GET  /api/sentinel/diff        Diff a scan against another or its previous run
+  GET  /api/sentinel/trend       Risk trend for a target
+  POST /api/sentinel/surface/capture
+  GET  /api/sentinel/surface/history
+  GET/POST/DELETE /api/sentinel/regressions
+  POST /api/sentinel/regressions/run
   GET  /api/health               Health check
 
 Dashboard static files:
@@ -36,6 +42,7 @@ import os
 import re
 import secrets
 import sqlite3
+import subprocess
 import sys
 import time
 import uuid
@@ -95,6 +102,13 @@ ALLOWED_ORIGINS = [
 ]
 MAX_REQUEST_SIZE = 2 * 1024 * 1024  # 2 MB
 IS_PRODUCTION = os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("DIVERG_PRODUCTION")
+SENTINEL_ENABLED = os.environ.get("SENTINEL_ENABLED", "1").strip().lower() not in ("0", "false", "no", "off")
+SENTINEL_BIN = Path(
+    os.environ.get(
+        "DIVERG_SENTINEL_BIN",
+        str(ROOT / "rust_signals" / "target" / "release" / "diverg-sentinel"),
+    )
+)
 
 # ── Rate limiter ──────────────────────────────────────────────────────────
 
@@ -303,6 +317,96 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_SIZE
 VALID_SCOPES = ("full", "quick", "crypto", "recon", "web", "api", "passive", "attack")
 
 init_db()
+
+
+def _error(message: str, status: int = 400):
+    return jsonify({"error": True, "message": message}), status
+
+
+def _validate_url(url: str) -> str | None:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return "Invalid URL provided"
+    if parsed.scheme not in ("http", "https"):
+        return "URL must use http or https scheme (e.g. https://example.com)"
+    if not parsed.netloc:
+        return "URL must include a valid hostname"
+    return None
+
+
+def _sentinel_unavailable(message: str = "Sentinel not available"):
+    return jsonify({"error": message, "sentinel_disabled": True}), 503
+
+
+def _ensure_sentinel_available():
+    if not SENTINEL_ENABLED:
+        return _sentinel_unavailable("Sentinel disabled")
+    if not SENTINEL_BIN.exists():
+        return _sentinel_unavailable("Sentinel binary not found")
+    return None
+
+
+def _run_sentinel(*args: str, timeout: int = 30) -> dict:
+    result = subprocess.run(
+        [str(SENTINEL_BIN), *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=str(ROOT),
+        env=os.environ.copy(),
+    )
+    if result.returncode != 0:
+        stderr = (result.stderr or result.stdout or "Unknown Sentinel failure").strip()
+        raise RuntimeError(stderr)
+    payload = (result.stdout or "").strip()
+    if not payload:
+        raise RuntimeError("Sentinel returned empty output")
+    return json.loads(payload)
+
+
+def _get_owned_scan(scan_id: str, user_id: str):
+    with _db() as conn:
+        return conn.execute(
+            """SELECT id, user_id, target_url, scanned_at, created_at
+               FROM scans
+               WHERE id = ? AND user_id = ?""",
+            (scan_id, user_id),
+        ).fetchone()
+
+
+def _find_previous_owned_scan(scan_id: str, user_id: str):
+    current = _get_owned_scan(scan_id, user_id)
+    if not current:
+        return None, None
+    with _db() as conn:
+        rows = conn.execute(
+            """SELECT id, target_url, scanned_at, created_at
+               FROM scans
+               WHERE user_id = ? AND target_url = ?
+               ORDER BY COALESCE(created_at, scanned_at) DESC""",
+            (user_id, current["target_url"]),
+        ).fetchall()
+    rows = [dict(row) for row in rows]
+    for index, row in enumerate(rows):
+        if row["id"] == scan_id:
+            return current, (rows[index + 1] if index + 1 < len(rows) else None)
+    return current, None
+
+
+def _coerce_flat_dict(value, label: str) -> dict[str, str]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"'{label}' must be an object")
+    out: dict[str, str] = {}
+    for key, val in value.items():
+        key_s = sanitize_text(str(key), 200)
+        if not key_s:
+            raise ValueError(f"'{label}' contains an empty key")
+        out[key_s] = sanitize_text(str(val), 4000)
+    return out
+
 
 
 @app.after_request
@@ -697,6 +801,341 @@ def _safe_int(val, default: int, minimum: int = 0, maximum: int = 999999) -> int
         return max(minimum, min(n, maximum))
     except (TypeError, ValueError):
         return default
+
+
+# ── Sentinel endpoints ───────────────────────────────────────────────────────
+
+@app.route("/api/sentinel/diff", methods=["GET"])
+@require_auth
+def sentinel_diff():
+    unavailable = _ensure_sentinel_available()
+    if unavailable:
+        return unavailable
+
+    scan_id = sanitize_text(request.args.get("scan_id") or "", 64)
+    compare_to = sanitize_text(request.args.get("compare_to") or "", 64)
+    if not scan_id:
+        return _error("scan_id is required")
+    if compare_to and compare_to == scan_id:
+        return _error("compare_to must be different from scan_id")
+
+    user_id = request.user["id"]
+    current = _get_owned_scan(scan_id, user_id)
+    if not current:
+        return jsonify({"error": "Scan not found"}), 404
+
+    if compare_to:
+        baseline = _get_owned_scan(compare_to, user_id)
+        if not baseline:
+            return jsonify({"error": "Comparison scan not found"}), 404
+    else:
+        _, baseline = _find_previous_owned_scan(scan_id, user_id)
+        if not baseline:
+            return jsonify({"error": "No previous scan found for this target"}), 404
+        compare_to = baseline["id"]
+
+    try:
+        payload = _run_sentinel(
+            "diff",
+            "--scan-a", compare_to,
+            "--scan-b", scan_id,
+            "--db", str(DB_PATH),
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return _error("Sentinel diff timed out", 504)
+    except Exception:
+        app.logger.exception("Sentinel diff failed for scans %s vs %s", compare_to, scan_id)
+        return _error("Sentinel diff failed. Check server logs for details.", 500)
+
+    payload["scan_id"] = scan_id
+    payload["compare_to"] = compare_to
+    payload["auto_selected_previous"] = request.args.get("compare_to") in (None, "")
+    return jsonify(payload)
+
+
+@app.route("/api/sentinel/trend", methods=["GET"])
+@require_auth
+def sentinel_trend():
+    unavailable = _ensure_sentinel_available()
+    if unavailable:
+        return unavailable
+    target_url = sanitize_text(request.args.get("target_url") or "", 2048)
+    limit = _safe_int(request.args.get("limit"), 30, 1, 200)
+    if not target_url:
+        return _error("target_url is required")
+    url_err = _validate_url(target_url)
+    if url_err:
+        return _error(url_err)
+
+    with _db() as conn:
+        rows = conn.execute(
+            """SELECT id, target_url, scanned_at, created_at, risk_score, risk_verdict,
+                      total, critical, high, medium, low, info
+               FROM scans
+               WHERE user_id = ? AND target_url = ?
+               ORDER BY COALESCE(created_at, scanned_at) DESC
+               LIMIT ?""",
+            (request.user["id"], target_url, limit),
+        ).fetchall()
+
+    points = [dict(row) for row in reversed(rows)]
+    return jsonify({
+        "target_url": target_url,
+        "count": len(points),
+        "points": points,
+    })
+
+
+@app.route("/api/sentinel/surface/capture", methods=["OPTIONS"])
+def sentinel_surface_capture_options():
+    return "", 204
+
+
+@app.route("/api/sentinel/surface/capture", methods=["POST"])
+@require_auth
+def sentinel_surface_capture():
+    unavailable = _ensure_sentinel_available()
+    if unavailable:
+        return unavailable
+    if not request.is_json:
+        return _error("Content-Type must be application/json")
+    data = request.get_json(silent=True) or {}
+    target_url = sanitize_text(data.get("target_url") or "", 2048)
+    if not target_url:
+        return _error("target_url is required")
+    url_err = _validate_url(target_url)
+    if url_err:
+        return _error(url_err)
+
+    try:
+        payload = _run_sentinel(
+            "surface", "capture",
+            "--target-url", target_url,
+            "--user-id", request.user["id"],
+            "--db", str(DB_PATH),
+            timeout=30,
+        )
+        return jsonify(payload)
+    except subprocess.TimeoutExpired:
+        return _error("Sentinel surface capture timed out", 504)
+    except Exception:
+        app.logger.exception("Sentinel surface capture failed for %s", target_url)
+        return _error("Sentinel surface capture failed. Check server logs for details.", 500)
+
+
+@app.route("/api/sentinel/surface/history", methods=["GET"])
+@require_auth
+def sentinel_surface_history():
+    unavailable = _ensure_sentinel_available()
+    if unavailable:
+        return unavailable
+    target_url = sanitize_text(request.args.get("target_url") or "", 2048)
+    limit = _safe_int(request.args.get("limit"), 25, 1, 100)
+    if not target_url:
+        return _error("target_url is required")
+    url_err = _validate_url(target_url)
+    if url_err:
+        return _error(url_err)
+
+    try:
+        payload = _run_sentinel(
+            "surface", "history",
+            "--target-url", target_url,
+            "--user-id", request.user["id"],
+            "--limit", str(limit),
+            "--db", str(DB_PATH),
+            timeout=30,
+        )
+        return jsonify(payload)
+    except subprocess.TimeoutExpired:
+        return _error("Sentinel surface history timed out", 504)
+    except Exception:
+        app.logger.exception("Sentinel surface history failed for %s", target_url)
+        return _error("Sentinel surface history failed. Check server logs for details.", 500)
+
+
+@app.route("/api/sentinel/regressions", methods=["OPTIONS"])
+def sentinel_regressions_options():
+    return "", 204
+
+
+@app.route("/api/sentinel/regressions", methods=["POST"])
+@require_auth
+def sentinel_regression_create():
+    unavailable = _ensure_sentinel_available()
+    if unavailable:
+        return unavailable
+    if not request.is_json:
+        return _error("Content-Type must be application/json")
+    data = request.get_json(silent=True) or {}
+
+    target_url = sanitize_text(data.get("target_url") or "", 2048)
+    request_url = sanitize_text(data.get("request_url") or "", 2048)
+    finding_title = sanitize_text(data.get("finding_title") or "", 200)
+    method = sanitize_text(data.get("method") or "GET", 16).upper() or "GET"
+    match_pattern = sanitize_text(data.get("match_pattern") or "", 1000) or None
+
+    if not target_url:
+        return _error("target_url is required")
+    if not request_url:
+        return _error("request_url is required")
+    if not finding_title:
+        return _error("finding_title is required")
+
+    for label, value in (("target_url", target_url), ("request_url", request_url)):
+        url_err = _validate_url(value)
+        if url_err:
+            return _error(f"{label}: {url_err}")
+
+    expected_status_raw = data.get("expected_status")
+    expected_status: int | None = None
+    if expected_status_raw not in (None, ""):
+        try:
+            expected_status = int(expected_status_raw)
+        except (TypeError, ValueError):
+            return _error("expected_status must be an integer")
+        if expected_status < 100 or expected_status > 599:
+            return _error("expected_status must be a valid HTTP status code")
+
+    try:
+        headers = _coerce_flat_dict(data.get("headers"), "headers")
+        params = _coerce_flat_dict(data.get("params"), "params")
+    except ValueError as exc:
+        return _error(str(exc))
+
+    body = data.get("body")
+    body = None if body in (None, "") else str(body)[:20000]
+
+    args = [
+        "regress", "add",
+        "--user-id", request.user["id"],
+        "--target-url", target_url,
+        "--finding-title", finding_title,
+        "--method", method,
+        "--request-url", request_url,
+    ]
+    for key, value in headers.items():
+        args.extend(["--header", f"{key}={value}"])
+    for key, value in params.items():
+        args.extend(["--param", f"{key}={value}"])
+    if body is not None:
+        args.extend(["--body", body])
+    if expected_status is not None:
+        args.extend(["--expected-status", str(expected_status)])
+    if match_pattern is not None:
+        args.extend(["--match-pattern", match_pattern])
+    args.extend(["--db", str(DB_PATH)])
+
+    try:
+        payload = _run_sentinel(*args, timeout=30)
+        return jsonify(payload)
+    except subprocess.TimeoutExpired:
+        return _error("Sentinel regression create timed out", 504)
+    except Exception as exc:
+        message = str(exc)
+        if "regression must include expected_status or match_pattern" in message:
+            return _error(message)
+        if "match_pattern is not a valid regex" in message:
+            return _error(message)
+        app.logger.exception("Sentinel regression create failed for %s", target_url)
+        return _error("Sentinel regression create failed. Check server logs for details.", 500)
+
+
+@app.route("/api/sentinel/regressions", methods=["GET"])
+@require_auth
+def sentinel_regression_list():
+    unavailable = _ensure_sentinel_available()
+    if unavailable:
+        return unavailable
+    target_url = sanitize_text(request.args.get("target_url") or "", 2048)
+    if not target_url:
+        return _error("target_url is required")
+    url_err = _validate_url(target_url)
+    if url_err:
+        return _error(url_err)
+
+    try:
+        payload = _run_sentinel(
+            "regress", "list",
+            "--user-id", request.user["id"],
+            "--target-url", target_url,
+            "--db", str(DB_PATH),
+            timeout=30,
+        )
+        return jsonify(payload)
+    except subprocess.TimeoutExpired:
+        return _error("Sentinel regression list timed out", 504)
+    except Exception:
+        app.logger.exception("Sentinel regression list failed for %s", target_url)
+        return _error("Sentinel regression list failed. Check server logs for details.", 500)
+
+
+@app.route("/api/sentinel/regressions/<int:regression_id>", methods=["OPTIONS"])
+def sentinel_regression_delete_options(regression_id):
+    return "", 204
+
+
+@app.route("/api/sentinel/regressions/<int:regression_id>", methods=["DELETE"])
+@require_auth
+def sentinel_regression_delete(regression_id):
+    unavailable = _ensure_sentinel_available()
+    if unavailable:
+        return unavailable
+    try:
+        payload = _run_sentinel(
+            "regress", "delete",
+            "--user-id", request.user["id"],
+            "--id", str(regression_id),
+            "--db", str(DB_PATH),
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return _error("Sentinel regression delete timed out", 504)
+    except Exception:
+        app.logger.exception("Sentinel regression delete failed for %s", regression_id)
+        return _error("Sentinel regression delete failed. Check server logs for details.", 500)
+
+    if not payload.get("deleted"):
+        return jsonify({"error": "Regression not found"}), 404
+    return jsonify(payload)
+
+
+@app.route("/api/sentinel/regressions/run", methods=["OPTIONS"])
+def sentinel_regression_run_options():
+    return "", 204
+
+
+@app.route("/api/sentinel/regressions/run", methods=["POST"])
+@require_auth
+def sentinel_regression_run():
+    unavailable = _ensure_sentinel_available()
+    if unavailable:
+        return unavailable
+    if not request.is_json:
+        return _error("Content-Type must be application/json")
+    data = request.get_json(silent=True) or {}
+    target_url = sanitize_text(data.get("target_url") or "", 2048)
+    if not target_url:
+        return _error("target_url is required")
+    url_err = _validate_url(target_url)
+    if url_err:
+        return _error(url_err)
+
+    try:
+        payload = _run_sentinel(
+            "regress", "run",
+            "--user-id", request.user["id"],
+            "--target-url", target_url,
+            "--db", str(DB_PATH),
+            timeout=120,
+        )
+        return jsonify(payload)
+    except subprocess.TimeoutExpired:
+        return _error("Sentinel regression run timed out", 504)
+    except Exception:
+        app.logger.exception("Sentinel regression run failed for %s", target_url)
+        return _error("Sentinel regression run failed. Check server logs for details.", 500)
 
 
 @app.route("/api/history", methods=["GET"])

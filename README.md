@@ -112,8 +112,26 @@ python api_server.py
 | **POST /api/scan** | Run a full web scan. Body: `{"url": "https://...", "goal": "optional", "scope": "full\|quick\|crypto\|recon\|web\|api\|passive"}`. Returns JSON: `target_url`, `findings`, `scanned_at`, `summary`, `skills_run`, `site_classification`. |
 | **POST /api/scan/stream** | Same body. Returns an NDJSON stream: `skill_start`, `skill_done` (with `findings_count`), then `done` with the full report. Use for live progress in the UI. |
 | **POST /api/poc/simulate** | Run a minimal proof-of-concept for a finding. Body: `{"finding": {...}}` or explicit `{"type": "idor", "url": "...", "param_to_change": "...", "new_value": "..."}`. Returns `success`, `status_code`, `body_preview`, `conclusion`. Used by the extension “Simulate” button for IDOR and unauthenticated-access checks. |
+| **GET /api/sentinel/diff** | Diff one saved scan against another or its previous run. Query: `scan_id=<id>[&compare_to=<id>]`. |
+| **GET /api/sentinel/trend** | Risk-score trend for a target. Query: `target_url=https://...&limit=30`. |
+| **POST /api/sentinel/surface/capture** | Persist a passive surface snapshot for a target. Body: `{"target_url": "https://..."}`. |
+| **GET /api/sentinel/surface/history** | List saved surface snapshots for a target. Query: `target_url=https://...&limit=10`. |
+| **GET /api/sentinel/regressions** | List saved regression replays for a target. Query: `target_url=https://...`. |
+| **POST /api/sentinel/regressions** | Create a saved regression replay. Body includes `target_url`, `finding_title`, `request_url`, optional `headers`, `params`, `body`, `expected_status`, `match_pattern`. |
+| **DELETE /api/sentinel/regressions/<id>** | Delete a saved regression replay owned by the current user. |
+| **POST /api/sentinel/regressions/run** | Execute saved regressions for a target. Body: `{"target_url": "https://..."}`. |
 
 The API does not perform blockchain or wallet-specific scanning; it is a web and API security pipeline.
+
+### Sentinel binary
+
+Sentinel is a Rust binary used by the Flask API for finding diffs, surface drift, and replayable regressions.
+
+```bash
+cargo build --release --manifest-path rust_signals/Cargo.toml
+```
+
+The API looks for the binary at `rust_signals/target/release/diverg-sentinel` by default. Override with `DIVERG_SENTINEL_BIN=/abs/path/to/diverg-sentinel`. Set `SENTINEL_ENABLED=0` to disable Sentinel routes and show the dashboard disabled state.
 
 ### Chrome extension
 
