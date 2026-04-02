@@ -1394,10 +1394,7 @@ def _get_crypto_detection(target_url: str) -> dict:
 
 
 def _extract_scan_target(target: str) -> tuple[str, str]:
-    """Derive (domain, target_url) from a user-supplied target string.
-
-    Raises ValueError when the target cannot produce a usable hostname.
-    """
+    """Return (domain, target_url); raises ValueError if hostname is bogus."""
     target_url = target if target.startswith("http") else f"https://{target}"
     domain = target_url.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0].strip().lower()
     if not domain or domain in (".", ".."):
@@ -1559,7 +1556,7 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
 
 
 def _run_skill_with_timeout(fn, *args, timeout: int = SKILL_TIMEOUT_SECONDS, **kwargs) -> dict:
-    """Run a skill function in a thread with a timeout. Returns a result dict or error dict."""
+    """Thread wrapper with hard timeout; returns error dict on overrun."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(fn, *args, **kwargs)
         try:
