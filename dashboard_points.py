@@ -232,6 +232,38 @@ def _maybe_referrer_first_scan_bonus(conn: sqlite3.Connection, referee_id: str) 
     )
 
 
+def points_for_watch_run(scope: str) -> int:
+    """Points awarded for each CTM watch run (lower than manual scans)."""
+    env_key = f"DIVERG_POINTS_WATCH_{scope.upper().replace('-', '_')}"
+    if (os.environ.get(env_key) or "").strip():
+        return clamp_award_delta(_int_env(env_key, 5))
+    defaults = {
+        "full": 8,
+        "quick": 4,
+        "crypto": 6,
+        "recon": 4,
+        "web": 6,
+        "api": 6,
+        "passive": 4,
+        "attack": 8,
+    }
+    return clamp_award_delta(defaults.get((scope or "quick").lower(), 5))
+
+
+def award_watch_run_points(
+    conn: sqlite3.Connection,
+    user_id: str,
+    run_id: str,
+    scope: str,
+) -> None:
+    """Award points for a CTM watch run. Uses the watch_run ref_type for idempotency."""
+    if not user_id:
+        return
+    ensure_user_points_row(conn, user_id)
+    pts = points_for_watch_run(scope)
+    award_points(conn, user_id, pts, "watch_run", "watch_run", run_id)
+
+
 def normalize_referral_code(raw: str | None) -> str:
     if not raw:
         return ""
