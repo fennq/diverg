@@ -1394,7 +1394,6 @@ def _get_crypto_detection(target_url: str) -> dict:
 
 
 def _extract_scan_target(target: str) -> tuple[str, str]:
-    """Return (domain, target_url); raises ValueError if hostname is bogus."""
     target_url = target if target.startswith("http") else f"https://{target}"
     domain = target_url.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0].strip().lower()
     if not domain or domain in (".", ".."):
@@ -1556,7 +1555,6 @@ def run_web_scan(target: str, scope: str = "full", goal: str | None = None) -> d
 
 
 def _run_skill_with_timeout(fn, *args, timeout: int = SKILL_TIMEOUT_SECONDS, **kwargs) -> dict:
-    """Thread wrapper with hard timeout; returns error dict on overrun."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(fn, *args, **kwargs)
         try:
@@ -1608,7 +1606,6 @@ def run_web_scan_streaming(target: str, scope: str = "full", goal: str | None = 
     results: dict[str, dict] = {}
 
     def _stream_skill(skill_name, out_key, fn, *args, **kwargs):
-        """Run a skill with timeout, store result, yield progress events."""
         out = _run_skill_with_timeout(fn, *args, **kwargs)
         results[out_key] = out
         err = out.get("error") if isinstance(out, dict) else None
@@ -1727,7 +1724,6 @@ def run_direct(
     company_surfaces = aggregate_company_surfaces(results)
     scan_timestamp = datetime.now(timezone.utc).isoformat()
 
-    # --- Structured output (SARIF / JSON) ---
     if output_format in ("sarif", "json"):
         if output_format == "sarif":
             from sarif_output import findings_to_sarif
@@ -1756,7 +1752,6 @@ def run_direct(
         else:
             print(output_text)
 
-    # --- Default text output (original behaviour) ---
     else:
         print_summary(findings, target)
 
@@ -1788,7 +1783,6 @@ def run_direct(
         print(f"  Report saved: {report_path}")
         send_telegram_report(findings, target, report_type)
 
-    # --- Severity gate ---
     if fail_on:
         from sarif_output import check_severity_gate
         if check_severity_gate(findings, fail_on):
@@ -1800,8 +1794,7 @@ def run_direct(
 
 
 def _gate_severities(fail_on: str) -> set[str]:
-    """Severity names at or above the given threshold."""
-    order = ["low", "medium", "high", "critical"]
+    order = ["info", "low", "medium", "high", "critical"]
     try:
         idx = order.index(fail_on.lower())
     except ValueError:

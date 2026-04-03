@@ -1,6 +1,6 @@
 """
-SARIF 2.1.0 output — converts Diverg findings to the format GitHub Code
-Scanning expects.  Ref: https://docs.oasis-open.org/sarif/sarif/v2.1.0/
+SARIF 2.1.0 output for GitHub Code Scanning integration.
+Spec: https://docs.oasis-open.org/sarif/sarif/v2.1.0/
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from typing import Any
 SARIF_SCHEMA = "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json"
 SARIF_VERSION = "2.1.0"
 TOOL_NAME = "Diverg"
+TOOL_VERSION = "0.1.0"
 TOOL_URI = "https://github.com/fennq/diverg"
 
 _SEVERITY_TO_LEVEL: dict[str, str] = {
@@ -36,7 +37,7 @@ def _slugify(text: str) -> str:
 
 
 def _build_rules(findings: list[dict]) -> tuple[list[dict], dict[str, int]]:
-    """Unique categories -> SARIF rule defs.  Returns (rules, id->index map)."""
+    """Dedupe finding categories into SARIF rule definitions."""
     rules: list[dict] = []
     rule_index: dict[str, int] = {}
 
@@ -69,7 +70,6 @@ def _build_rules(findings: list[dict]) -> tuple[list[dict], dict[str, int]]:
 
 
 def _finding_to_result(f: dict, rule_index: dict[str, int]) -> dict:
-    """Single finding -> SARIF result."""
     category = f.get("category", "Assessment")
     rule_id = _slugify(category)
     severity = f.get("severity", "Info")
@@ -115,7 +115,6 @@ def findings_to_sarif(
     target_url: str = "",
     scanned_at: str = "",
 ) -> dict:
-    """Build a full SARIF 2.1.0 log from a list of Diverg findings."""
     rules, rule_index = _build_rules(findings)
     results = [_finding_to_result(f, rule_index) for f in findings]
 
@@ -127,6 +126,7 @@ def findings_to_sarif(
                 "tool": {
                     "driver": {
                         "name": TOOL_NAME,
+                        "version": TOOL_VERSION,
                         "informationUri": TOOL_URI,
                         "rules": rules,
                     }
@@ -143,7 +143,7 @@ def findings_to_sarif(
 
 
 def check_severity_gate(findings: list[dict], fail_on: str) -> bool:
-    """True if any finding meets or exceeds the given severity threshold."""
+    """True if any finding is at or above *fail_on* severity."""
     threshold = _SEVERITY_RANK.get(fail_on.capitalize(), 0)
     for f in findings:
         rank = _SEVERITY_RANK.get(f.get("severity", "Info"), 0)

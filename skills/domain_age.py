@@ -1,8 +1,7 @@
 """
-Domain trust assessment — multi-factor domain reputation using WHOIS, TLD
-abuse stats, registrar reputation, privacy/proxy detection, and email auth.
-
-Data comes from osint_json (phase 1) with WHOIS fallback if needed.
+Multi-signal domain trust scoring (WHOIS age, TLD abuse stats, registrar rep,
+privacy/proxy detection, email auth posture).  Consumes osint_json from phase 1
+when available; falls back to live WHOIS otherwise.
 """
 
 from __future__ import annotations
@@ -16,11 +15,7 @@ from typing import Any
 
 RUN_BUDGET_SEC = 20
 
-# ---------------------------------------------------------------------------
-# Reference data
-# ---------------------------------------------------------------------------
-
-# Freenom free TLDs + TLDs consistently topping abuse charts (Spamhaus, SURBL, APWG)
+# Freenom free TLDs + TLDs that consistently top abuse charts (Spamhaus, SURBL, APWG)
 HIGH_ABUSE_TLDS: frozenset[str] = frozenset({
     "tk", "ml", "ga", "cf", "gq",
     "top", "xyz", "work", "click", "buzz", "surf", "rest", "icu", "cam",
@@ -55,14 +50,12 @@ HIGH_ABUSE_REGISTRARS: list[str] = [
     "west263", "hichina", "ename",
 ]
 
-# Signal weights for composite trust score
 WEIGHT_DOMAIN_AGE = 0.35
 WEIGHT_TLD = 0.20
 WEIGHT_EXPIRATION = 0.15
 WEIGHT_PRIVACY = 0.15
 WEIGHT_REGISTRAR = 0.15
 
-# Severity / finding-type mapping
 _RISK_SEVERITY: dict[str, tuple[str, str]] = {
     "high": ("High", "vulnerability"),
     "medium": ("Medium", "vulnerability"),
@@ -89,11 +82,6 @@ _SIGNAL_IMPACT: dict[str, str] = {
     "email_security": "No SPF/DKIM/DMARC suggests the domain lacks operational maturity or config.",
 }
 
-# ---------------------------------------------------------------------------
-# Data models
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class DomainSignal:
     signal: str
@@ -114,11 +102,6 @@ class DomainTrustReport:
     findings: list[dict] = field(default_factory=list)
     domain_trust: dict = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _extract_domain(target_url: str) -> str:
@@ -222,13 +205,7 @@ def _parse_osint_context(osint_json: str | None) -> dict:
     return ctx
 
 
-# ---------------------------------------------------------------------------
-# Signal computations
-# ---------------------------------------------------------------------------
-
-
 def _signal_domain_age(domain: str, ctx: dict) -> DomainSignal:
-    """Days since WHOIS creation_date."""
     created_dt = _parse_any_datetime(ctx.get("creation_date"))
 
     if created_dt is None:
@@ -276,7 +253,6 @@ def _signal_domain_age(domain: str, ctx: dict) -> DomainSignal:
 
 
 def _signal_expiration_proximity(domain: str, ctx: dict) -> DomainSignal:
-    """How soon the registration expires and the total registration window."""
     expiry_dt = _parse_any_datetime(ctx.get("expiration_date"))
     created_dt = _parse_any_datetime(ctx.get("creation_date"))
 
@@ -320,7 +296,6 @@ def _signal_expiration_proximity(domain: str, ctx: dict) -> DomainSignal:
 
 
 def _signal_tld_reputation(domain: str) -> DomainSignal:
-    """TLD reputation based on aggregate abuse statistics."""
     tld = _extract_tld(domain)
     if not tld:
         return DomainSignal(
@@ -354,7 +329,6 @@ def _signal_tld_reputation(domain: str) -> DomainSignal:
 
 
 def _signal_privacy_proxy(ctx: dict, age_days: int | None) -> DomainSignal:
-    """Detect WHOIS privacy/proxy services, contextualised by domain age."""
     haystack = " ".join(
         str(ctx.get(k) or "").lower()
         for k in ("registrar", "org", "registrant_name")
@@ -397,7 +371,6 @@ def _signal_privacy_proxy(ctx: dict, age_days: int | None) -> DomainSignal:
 
 
 def _signal_registrar_reputation(ctx: dict) -> DomainSignal:
-    """Check registrar against known high-abuse registrar list."""
     registrar = str(ctx.get("registrar") or "").lower().strip()
     if not registrar:
         return DomainSignal(
@@ -425,7 +398,6 @@ def _signal_registrar_reputation(ctx: dict) -> DomainSignal:
 
 
 def _signal_email_security(ctx: dict) -> DomainSignal:
-    """Email security posture (SPF/DKIM/DMARC) as a domain maturity indicator."""
     has_spf = bool(ctx.get("spf_record"))
     has_dkim = bool(ctx.get("dkim_selectors"))
     has_dmarc = bool(ctx.get("dmarc_record"))
@@ -469,13 +441,8 @@ def _signal_email_security(ctx: dict) -> DomainSignal:
     )
 
 
-# ---------------------------------------------------------------------------
-# Composite scoring
-# ---------------------------------------------------------------------------
-
-
 def _compute_trust_score(signals: list[DomainSignal]) -> int:
-    """Weighted average of sub-scores (weight > 0 only), adjusted by email modifier."""
+    """Weighted average of sub-scores, nudged by the email-auth modifier."""
     weighted_sum = 0.0
     total_weight = 0.0
     for sig in signals:
@@ -498,7 +465,6 @@ def _compute_trust_score(signals: list[DomainSignal]) -> int:
 
 
 def _cross_signal_severity(signals: list[DomainSignal]) -> str:
-    """Determine composite severity from signal combinations."""
     core = [s for s in signals if s.weight > 0]
     high_count = sum(1 for s in core if s.risk == "high")
     medium_count = sum(1 for s in core if s.risk == "medium")
@@ -534,13 +500,7 @@ def _trust_verdict(score: int) -> str:
     return "excellent"
 
 
-# ---------------------------------------------------------------------------
-# Finding generation
-# ---------------------------------------------------------------------------
-
-
 def _signal_title_suffix(sig: DomainSignal) -> str:
-    """Human-friendly suffix for each signal type."""
     if sig.signal == "domain_age":
         return f"{sig.value} days" if sig.value is not None else "unknown"
     if sig.signal == "expiration_proximity":
@@ -581,7 +541,6 @@ def _signal_to_finding(target_url: str, sig: DomainSignal) -> dict:
 
 
 def _summary_finding(target_url: str, report: DomainTrustReport) -> dict:
-    """Composite domain trust assessment finding."""
     severity = _cross_signal_severity(report.signals)
     score = report.trust_score if report.trust_score is not None else 50
     verdict = report.trust_verdict
@@ -620,13 +579,7 @@ def _summary_finding(target_url: str, report: DomainTrustReport) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
-
 def run(target_url: str, scan_type: str = "full", osint_json: str | None = None) -> str:
-    """Skill entry point.  Returns JSON with findings + domain_trust payload."""
     run_start = time.time()
     domain = _extract_domain(target_url)
     report = DomainTrustReport(target_url=target_url, domain=domain)
@@ -640,7 +593,6 @@ def run(target_url: str, scan_type: str = "full", osint_json: str | None = None)
     def _over_budget() -> bool:
         return (time.time() - run_start) > RUN_BUDGET_SEC
 
-    # -- Compute all signals --
     age_sig = _signal_domain_age(domain, ctx)
     report.signals.append(age_sig)
     age_days: int | None = age_sig.value if isinstance(age_sig.value, int) else None
@@ -656,17 +608,14 @@ def run(target_url: str, scan_type: str = "full", osint_json: str | None = None)
     if not _over_budget():
         report.signals.append(_signal_email_security(ctx))
 
-    # -- Composite trust score --
     report.trust_score = _compute_trust_score(report.signals)
     report.trust_verdict = _trust_verdict(report.trust_score)
 
-    # -- Generate findings --
     for sig in report.signals:
         if sig.risk != "unknown":
             report.findings.append(_signal_to_finding(target_url, sig))
     report.findings.insert(0, _summary_finding(target_url, report))
 
-    # -- Structured payload for API consumers --
     report.domain_trust = {
         "score": report.trust_score,
         "verdict": report.trust_verdict,

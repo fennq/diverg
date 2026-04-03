@@ -1,12 +1,6 @@
 """
-Live PoC / Simulate — run a minimal proof-of-concept for a finding to confirm or refute it.
-
-Supported types:
-- idor: replay request with a different ID param; compare response.
-- unauthenticated: replay request without auth headers; see if we get data.
-
-Used by: POST /api/poc/simulate (extension calls this when user clicks "Simulate").
-Authorized use only.
+PoC runner — replay-based verification for IDOR and unauthenticated-access findings.
+Called from POST /api/poc/simulate when a user clicks "Simulate" in the extension.
 """
 
 from __future__ import annotations
@@ -67,10 +61,6 @@ def run_idor_poc(
     new_value: str = "1",
     cookies: dict | None = None,
 ) -> PoCResult:
-    """
-    Send the same request twice: once with original param, once with new_value.
-    If the second request returns 200 with a different/ non-empty body, likely IDOR.
-    """
     if not requests:
         return PoCResult(success=False, error="requests not available", poc_type="idor")
 
@@ -82,10 +72,8 @@ def run_idor_poc(
     headers = dict(headers or {})
     headers.setdefault("User-Agent", "Mozilla/5.0 (compatible; Diverg-PoC/1.0)")
 
-    # Determine param to change from URL or body
     param = param_to_change
     if not param and params:
-        # Change first ID-like param
         for k in ("user_id", "userId", "id", "account_id", "order_id", "uid"):
             if k in params:
                 param = k
@@ -140,7 +128,6 @@ def run_idor_poc(
     except Exception as e:
         return PoCResult(success=False, error=str(e), poc_type="idor")
 
-    # Request 2: with modified param
     params2 = dict(params or {})
     data2 = data
     if isinstance(data2, dict):
@@ -211,7 +198,6 @@ def run_unauth_poc(
     headers: dict | None = None,
     cookies: dict | None = None,
 ) -> PoCResult:
-    """Send request without auth; if 200 with body, endpoint may be unauthenticated."""
     if not requests:
         return PoCResult(success=False, error="requests not available", poc_type="unauthenticated")
 
@@ -221,7 +207,6 @@ def run_unauth_poc(
 
     method = (method or "GET").upper()
     headers = dict(headers or {})
-    # Strip common auth headers for the PoC
     for k in list(headers.keys()):
         if k.lower() in ("authorization", "cookie", "x-api-key", "x-auth-token"):
             del headers[k]
@@ -263,7 +248,6 @@ def run_unauth_poc(
 
 
 def infer_poc_type_from_finding(finding: dict) -> str:
-    """Return 'idor', 'unauthenticated', or '' from finding title/category."""
     title = (finding.get("title") or "").lower()
     category = (finding.get("category") or "").lower()
     if "idor" in title or "insecure direct object" in title or "object reference" in title or "idor" in category:
@@ -281,10 +265,6 @@ def run_poc_for_finding(
     new_value: str = "1",
     cookies: dict | None = None,
 ) -> PoCResult:
-    """
-    Run the appropriate PoC based on finding content.
-    finding should have: url, title, category, and optionally evidence (for param hints).
-    """
     url = (finding.get("url") or "").strip()
     if url and not url.startswith("http"):
         url = "https://" + url
@@ -298,7 +278,6 @@ def run_poc_for_finding(
         )
 
     if poc_type == "idor":
-        # Try to get param from evidence or common names
         param = param_to_change
         if not param:
             ev = (finding.get("evidence") or "").lower()

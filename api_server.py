@@ -47,21 +47,16 @@ app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 def _error(message: str, status: int = 400):
-    """JSON error envelope."""
     return jsonify({"error": True, "message": message}), status
 
 
-def _validate_url(raw: str) -> tuple[str | None, str | None]:
+def _validate_url(raw) -> tuple[str | None, str | None]:
     """Return (clean_url, None) or (None, err_msg)."""
-    url = (raw or "").strip()
-    if not url:
-        return None, "Missing 'url' in request body"
+    if not isinstance(raw, str) or not raw.strip():
+        return None, "Missing or invalid 'url' in request body"
 
+    url = raw.strip()
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
 
@@ -75,13 +70,13 @@ def _validate_url(raw: str) -> tuple[str | None, str | None]:
         return None, "URL has no hostname"
 
     if parsed.scheme not in ("http", "https"):
-        return None, f"Unsupported scheme '{parsed.scheme}' — use http or https"
+        return None, f"Unsupported scheme '{parsed.scheme}'"
 
     if "." not in host and host != "localhost":
         return None, f"Invalid hostname '{host}'"
 
     if len(host) > 253 or any(len(part) > 63 for part in host.split(".")):
-        return None, f"Hostname exceeds DNS length limits"
+        return None, "Hostname exceeds DNS length limits"
 
     return url, None
 

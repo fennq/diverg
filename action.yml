@@ -9,7 +9,7 @@ inputs:
     description: "URL to scan (e.g. https://example.com)"
     required: true
   scope:
-    description: "Scan profile: full, quick, crypto, recon, web, api, passive"
+    description: "Scan profile: full | quick | crypto | recon | web | api | passive | attack"
     required: false
     default: "quick"
   fail-on:
