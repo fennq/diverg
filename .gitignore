@@ -69,4 +69,5 @@ investigation/*
 # Local-only drafts (do not commit)
 twitter/
 drift-exploit-*.md
+drift-attacker-evidence-packet.*
 node_modules/
