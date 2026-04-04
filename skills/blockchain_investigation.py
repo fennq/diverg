@@ -15,8 +15,8 @@ For platforms like liquid.af (launchpad / token creation):
 - Wallet / entity intel: Solscan (transfers, holders, defi activities), Arkham (labels).
 - Multi-chain: Solana (Solscan), Ethereum (Etherscan stub).
 
-Requires SOLSCAN_PRO_API_KEY (Solana) or ETHERSCAN_API_KEY (Ethereum) for on-chain checks.
-ARKHAM_API_KEY optional for labels. FRONTRUNPRO_API_KEY + FRONTRUNPRO_BASE_URL optional for
+Requires SOLSCAN_PRO_API_KEY (Solana) or ETHERSCAN_API_KEY (Ethereum) plus ARKHAM_API_KEY for on-chain checks.
+FRONTRUNPRO_API_KEY + FRONTRUNPRO_BASE_URL optional for
 FrontrunPro (linked wallets, KOL follow list, CA history — paid API; see investigation/frontrunpro_client.py).
 Authorized use only.
 """
@@ -38,14 +38,13 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "investigation"))
+from arkham_intel import evm_chain_slug_for_arkham, intel_batch, intel_counterparties, legacy_label
 from stealth import get_session
 
 SESSION = get_session()
 TIMEOUT = 12
 RUN_BUDGET_SEC = 55
 SOLSCAN_BASE = "https://pro-api.solscan.io/v2.0"
-ARKHAM_BASE = "https://api.arkhamintelligence.com"
-ARKHAM_INTEL_BASE = "https://api.arkm.com"  # Intel API: batch labels, counterparties, flow
 
 # EVM explorer: prefer Etherscan API v2 multichain (single ETHERSCAN_API_KEY). Fallback BscScan for BSC.
 EVM_CHAIN_META: dict[str, tuple[int, str]] = {
@@ -701,22 +700,6 @@ def _solscan_account_defi_activities(
     return data.get("data", []) if isinstance(data["data"], list) else []
 
 
-def _arkham_label(session: requests.Session, address: str, api_key: str) -> str | None:
-    """Single-address label (legacy Arkham endpoint)."""
-    try:
-        r = session.get(
-            f"{ARKHAM_BASE}/api/address/{address}",
-            headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
-            timeout=TIMEOUT,
-        )
-        if r.ok:
-            j = r.json()
-            return j.get("label") or j.get("entity") or j.get("name")
-    except Exception:
-        pass
-    return None
-
-
 def _solscan_token_meta(session: requests.Session, token_mint: str, api_key: str) -> dict | None:
     """Token metadata: mint_authority, freeze_authority (rug/honeypot signals if still active)."""
     data = _solscan_get(session, "token/meta", {"address": token_mint}, api_key)
@@ -744,97 +727,6 @@ def _solscan_account_balance_change(
     if not data or "data" not in data:
         return []
     return data.get("data", []) if isinstance(data["data"], list) else []
-
-
-def _arkham_intel_batch(session: requests.Session, addresses: list[str], api_key: str, chain: str = "solana") -> dict[str, str]:
-    """Batch label lookup via Arkham Intel API (api.arkm.com). Returns address -> label/entity name."""
-    out = {}
-    if not addresses or len(addresses) > 100:
-        return out
-    try:
-        r = session.post(
-            f"{ARKHAM_INTEL_BASE}/intelligence/address/batch",
-            params={"chain": chain} if chain else None,
-            json={"addresses": addresses[:50]},
-            headers={"Content-Type": "application/json", "API-Key": api_key},
-            timeout=TIMEOUT,
-        )
-        if not r.ok:
-            return out
-        j = r.json()
-        # Response shape: may be { "address": { "arkhamEntity": { "name": "..." }, "arkhamLabel": { "name": "..." } } } or list
-        for addr in addresses:
-            info = j.get(addr) if isinstance(j, dict) else None
-            if not info:
-                continue
-            name = None
-            if isinstance(info, dict):
-                entity = info.get("arkhamEntity") or info.get("entity")
-                label = info.get("arkhamLabel") or info.get("label")
-                if entity and isinstance(entity, dict):
-                    name = entity.get("name")
-                if not name and label and isinstance(label, dict):
-                    name = label.get("name")
-                if not name:
-                    name = info.get("name")
-            if name:
-                out[addr] = str(name)
-    except Exception:
-        pass
-    return out
-
-
-def _arkham_intel_counterparties(
-    session: requests.Session,
-    address: str,
-    api_key: str,
-    chain: str = "solana",
-    limit: int = 10,
-    time_last: str = "30d",
-) -> list[dict]:
-    """Top counterparties for an address (who they transact with — CEX, entities)."""
-    try:
-        r = session.get(
-            f"{ARKHAM_INTEL_BASE}/counterparties/address/{address}",
-            params={"chains": chain, "limit": limit, "timeLast": time_last, "sortKey": "usd", "sortDir": "desc"},
-            headers={"API-Key": api_key},
-            timeout=TIMEOUT,
-        )
-        if not r.ok:
-            return []
-        j = r.json()
-        if isinstance(j, dict) and address in j:
-            cp = j[address]
-            return cp if isinstance(cp, list) else []
-        if isinstance(j, list):
-            return j[:limit]
-    except Exception:
-        pass
-    return []
-
-
-def _arkham_intel_flow(
-    session: requests.Session,
-    address: str,
-    api_key: str,
-    chain: str = "solana",
-    time_last: str = "30d",
-) -> list | None:
-    """Historical USD flow for address (in/out over time)."""
-    try:
-        r = session.get(
-            f"{ARKHAM_INTEL_BASE}/flow/address/{address}",
-            params={"chains": chain, "timeLast": time_last},
-            headers={"API-Key": api_key},
-            timeout=TIMEOUT,
-        )
-        if not r.ok:
-            return None
-        j = r.json()
-        return j if isinstance(j, list) else j.get("flow") or j.get("data")
-    except Exception:
-        pass
-    return None
 
 
 # --- Stated fee extraction from scraped text (e.g. "5% fee", "100 bps") ---
@@ -1370,376 +1262,483 @@ def run(
     if stated_fee_pct is not None:
         report.fee_comparison = {"stated_pct": stated_fee_pct, "on_chain_pct": None, "evidence": f"Stated: {stated_fee_pct}%"}
 
-    # 2) On-chain: Solana (Solscan) or Ethereum (Etherscan)
+    # 2) On-chain: Solana (Solscan) or Ethereum (Etherscan). Arkham is required whenever those APIs are used.
     solscan_key = (os.environ.get("SOLSCAN_PRO_API_KEY") or os.environ.get("SOLSCAN_API_KEY") or "").strip()
     etherscan_key = (os.environ.get("ETHERSCAN_API_KEY") or "").strip()
     arkham_key = (os.environ.get("ARKHAM_API_KEY") or "").strip()
 
     if _is_evm_chain(report.chain) and etherscan_key and not _over_budget(run_start):
-        report.on_chain_used = True
-        transfers_by_token = {}
-        ch_slug = report.chain
-        for token in (report.tokens_discovered or [])[:5]:
-            if _over_budget(run_start):
-                break
-            if not token.startswith("0x") or len(token) != 42:
-                continue
-            txs = _evm_token_transfers(SESSION, token, ch_slug, etherscan_key, limit=20)
-            if txs:
-                transfers_by_token[token] = [{"to": t.get("to"), "from": t.get("from"), "value": t.get("value"), "timeStamp": t.get("timeStamp")} for t in txs]
-                for txrow in txs:
-                    edge = _normalize_transfer_to_edge(txrow, token_symbol="TOKEN", chain=ch_slug)
-                    if edge:
-                        flow_edges.append(edge)
-        if transfers_by_token:
-            sniper_alerts = _heuristic_sniper(transfers_by_token, same_wallet_min_tokens=3)
-            report.sniper_alerts.extend(sniper_alerts)
-            for a in sniper_alerts:
-                report.findings.append(Finding(
-                    title="Same wallet bought early across multiple tokens [SNIPER RISK]",
-                    severity="High",
-                    url=target_url,
-                    category="Blockchain / Sniper",
-                    evidence=a.get("description", ""),
-                    impact="Possible platform or insider sniper buying every launch before retail.",
-                    remediation="Verify wallet is not platform-owned; consider fair launch or delay.",
-                    confidence="high",
-                    source="etherscan_api",
-                    proof=a.get("description", ""),
-                    verified=True,
-                ))
+        if not arkham_key:
+            report.findings.append(Finding(
+                title="ARKHAM_API_KEY required for Etherscan-backed on-chain investigation",
+                severity="Medium",
+                url=target_url,
+                category="Blockchain / Config",
+                evidence="ETHERSCAN_API_KEY is set but ARKHAM_API_KEY is missing.",
+                impact="On-chain wallet intelligence and labeling are part of the standard investigation path.",
+                remediation="Set ARKHAM_API_KEY in the environment and re-run.",
+            ))
+            report.errors.append("ARKHAM_API_KEY is required when ETHERSCAN_API_KEY is set.")
+        else:
+            report.on_chain_used = True
+            transfers_by_token = {}
+            ch_slug = report.chain
+            for token in (report.tokens_discovered or [])[:5]:
+                if _over_budget(run_start):
+                    break
+                if not token.startswith("0x") or len(token) != 42:
+                    continue
+                txs = _evm_token_transfers(SESSION, token, ch_slug, etherscan_key, limit=20)
+                if txs:
+                    transfers_by_token[token] = [{"to": t.get("to"), "from": t.get("from"), "value": t.get("value"), "timeStamp": t.get("timeStamp")} for t in txs]
+                    for txrow in txs:
+                        edge = _normalize_transfer_to_edge(txrow, token_symbol="TOKEN", chain=ch_slug)
+                        if edge:
+                            flow_edges.append(edge)
+            if transfers_by_token:
+                sniper_alerts = _heuristic_sniper(transfers_by_token, same_wallet_min_tokens=3)
+                report.sniper_alerts.extend(sniper_alerts)
+                for a in sniper_alerts:
+                    report.findings.append(Finding(
+                        title="Same wallet bought early across multiple tokens [SNIPER RISK]",
+                        severity="High",
+                        url=target_url,
+                        category="Blockchain / Sniper",
+                        evidence=a.get("description", ""),
+                        impact="Possible platform or insider sniper buying every launch before retail.",
+                        remediation="Verify wallet is not platform-owned; consider fair launch or delay.",
+                        confidence="high",
+                        source="etherscan_api",
+                        proof=a.get("description", ""),
+                        verified=True,
+                    ))
 
-        # Bridge contract detection: scan deployer/wallet txlist for interactions with known bridge contracts
-        if deployer_address and not _over_budget(run_start):
-            _bridge_raw_txs = _evm_account_txlist(SESSION, deployer_address, ch_slug, etherscan_key, page_size=50)
-            evm_bridge_hits = [
-                {
-                    "tx_hash": tx.get("hash", ""),
-                    "counterparty": tx.get("to", ""),
-                    "bridge": EVM_BRIDGE_CONTRACTS[tx.get("to", "").lower()],
-                    "timestamp": tx.get("timeStamp", ""),
-                    "value_eth": tx.get("value", "0"),
-                    "explorer_url": f"{_explorer_host_for_chain(ch_slug)}/tx/{tx.get('hash', '')}",
-                }
-                for tx in _bridge_raw_txs
-                if tx.get("to", "").lower() in EVM_BRIDGE_CONTRACTS
-            ]
-            if evm_bridge_hits:
-                _bridge_labels = sorted({h["bridge"] for h in evm_bridge_hits})
-                report.findings.append(Finding(
-                    title="EVM Bridge Interaction Detected",
-                    severity="Medium",
-                    url=target_url,
-                    category="Blockchain / Cross-chain",
-                    evidence=(
-                        f"Deployer/wallet {deployer_address[:12]}… interacted with "
-                        f"{len(evm_bridge_hits)} bridge transaction(s) on {ch_slug}: "
-                        + ", ".join(_bridge_labels[:4])
-                    ),
-                    impact=(
-                        "Funds may have crossed chain boundaries via a bridge protocol. "
-                        "Investigate origin and destination chains for full flow."
-                    ),
-                    remediation="Trace bridge transactions on Wormholescan, LayerZero Scan, or the relevant bridge explorer.",
-                    confidence="medium",
-                    source="etherscan_api",
-                    proof=", ".join(h["tx_hash"][:12] + "…" for h in evm_bridge_hits[:3]),
-                    verified=True,
-                ))
-                report.evm_bridge_hits = evm_bridge_hits[:10]
+            # Bridge contract detection: scan deployer/wallet txlist for interactions with known bridge contracts
+            if deployer_address and not _over_budget(run_start):
+                _bridge_raw_txs = _evm_account_txlist(SESSION, deployer_address, ch_slug, etherscan_key, page_size=50)
+                evm_bridge_hits = [
+                    {
+                        "tx_hash": tx.get("hash", ""),
+                        "counterparty": tx.get("to", ""),
+                        "bridge": EVM_BRIDGE_CONTRACTS[tx.get("to", "").lower()],
+                        "timestamp": tx.get("timeStamp", ""),
+                        "value_eth": tx.get("value", "0"),
+                        "explorer_url": f"{_explorer_host_for_chain(ch_slug)}/tx/{tx.get('hash', '')}",
+                    }
+                    for tx in _bridge_raw_txs
+                    if tx.get("to", "").lower() in EVM_BRIDGE_CONTRACTS
+                ]
+                if evm_bridge_hits:
+                    _bridge_labels = sorted({h["bridge"] for h in evm_bridge_hits})
+                    report.findings.append(Finding(
+                        title="EVM Bridge Interaction Detected",
+                        severity="Medium",
+                        url=target_url,
+                        category="Blockchain / Cross-chain",
+                        evidence=(
+                            f"Deployer/wallet {deployer_address[:12]}… interacted with "
+                            f"{len(evm_bridge_hits)} bridge transaction(s) on {ch_slug}: "
+                            + ", ".join(_bridge_labels[:4])
+                        ),
+                        impact=(
+                            "Funds may have crossed chain boundaries via a bridge protocol. "
+                            "Investigate origin and destination chains for full flow."
+                        ),
+                        remediation="Trace bridge transactions on Wormholescan, LayerZero Scan, or the relevant bridge explorer.",
+                        confidence="medium",
+                        source="etherscan_api",
+                        proof=", ".join(h["tx_hash"][:12] + "…" for h in evm_bridge_hits[:3]),
+                        verified=True,
+                    ))
+                    report.evm_bridge_hits = evm_bridge_hits[:10]
 
-            # Mixer/privacy service detection on EVM side (e.g. Tornado-style contracts)
-            evm_mixer_hits = _evm_detect_mixer_hits(_bridge_raw_txs, ch_slug)
-            if evm_mixer_hits:
-                _svc = _summarize_service_hits(evm_mixer_hits)
-                _incoming = sum(1 for h in evm_mixer_hits if h.get("direction") == "incoming")
-                _outgoing = sum(1 for h in evm_mixer_hits if h.get("direction") == "outgoing")
-                report.findings.append(Finding(
-                    title="EVM Mixer/Privacy Service Interaction Detected",
-                    severity="Medium",
-                    url=target_url,
-                    category="Blockchain / Mixer",
-                    evidence=(
-                        f"Deployer/wallet {deployer_address[:12]}… interacted with "
-                        f"{len(evm_mixer_hits)} known mixer/privacy transaction(s) on {ch_slug} "
-                        f"({_outgoing} outgoing, {_incoming} incoming): "
-                        + ", ".join(x["name"] for x in _svc[:4])
-                    ),
-                    impact=(
-                        "Funds may have passed through a privacy/mixing service. "
-                        "Treat as risk context and verify flows on-chain."
-                    ),
-                    remediation="Verify each tx and counterparty on explorer and corroborate with additional sources.",
-                    confidence="medium",
-                    source="etherscan_api",
-                    proof=", ".join(h["tx_hash"][:12] + "…" for h in evm_mixer_hits[:3]),
-                    verified=True,
-                ))
-                report.evm_mixer_hits = evm_mixer_hits[:10]
+                # Mixer/privacy service detection on EVM side (e.g. Tornado-style contracts)
+                evm_mixer_hits = _evm_detect_mixer_hits(_bridge_raw_txs, ch_slug)
+                if evm_mixer_hits:
+                    _svc = _summarize_service_hits(evm_mixer_hits)
+                    _incoming = sum(1 for h in evm_mixer_hits if h.get("direction") == "incoming")
+                    _outgoing = sum(1 for h in evm_mixer_hits if h.get("direction") == "outgoing")
+                    report.findings.append(Finding(
+                        title="EVM Mixer/Privacy Service Interaction Detected",
+                        severity="Medium",
+                        url=target_url,
+                        category="Blockchain / Mixer",
+                        evidence=(
+                            f"Deployer/wallet {deployer_address[:12]}… interacted with "
+                            f"{len(evm_mixer_hits)} known mixer/privacy transaction(s) on {ch_slug} "
+                            f"({_outgoing} outgoing, {_incoming} incoming): "
+                            + ", ".join(x["name"] for x in _svc[:4])
+                        ),
+                        impact=(
+                            "Funds may have passed through a privacy/mixing service. "
+                            "Treat as risk context and verify flows on-chain."
+                        ),
+                        remediation="Verify each tx and counterparty on explorer and corroborate with additional sources.",
+                        confidence="medium",
+                        source="etherscan_api",
+                        proof=", ".join(h["tx_hash"][:12] + "…" for h in evm_mixer_hits[:3]),
+                        verified=True,
+                    ))
+                    report.evm_mixer_hits = evm_mixer_hits[:10]
+
+            # Arkham Intel (EVM): deployer label, batch sniper/holder wallets, counterparties
+            ak_chn = evm_chain_slug_for_arkham(ch_slug)
+            if not _over_budget(run_start):
+                if deployer_address:
+                    label = legacy_label(SESSION, deployer_address, arkham_key)
+                    if label:
+                        report.wallet_labels[deployer_address] = label
+                        report.findings.append(Finding(
+                            title=f"Deployer wallet labeled (Arkham): {label}",
+                            severity="Info",
+                            url=target_url,
+                            category="Blockchain / Intel",
+                            evidence=f"Address {deployer_address[:12]}... → {label}",
+                            impact="Entity attribution helps assess insider or platform-operated risk.",
+                            remediation="Cross-check with platform's stated treasury/fee collector.",
+                        ))
+                addresses_to_label: list[str] = []
+                if deployer_address:
+                    addresses_to_label.append(deployer_address)
+                for a in report.sniper_alerts:
+                    w = a.get("wallet")
+                    if w and w not in addresses_to_label:
+                        addresses_to_label.append(w)
+                if addresses_to_label:
+                    batch_labels = intel_batch(SESSION, addresses_to_label[:30], arkham_key, chain=ak_chn)
+                    for addr, name in batch_labels.items():
+                        report.wallet_labels[addr] = name
+                    if batch_labels and not any(
+                        f.title.startswith("Deployer wallet labeled") for f in report.findings
+                    ):
+                        for addr, name in list(batch_labels.items())[:3]:
+                            report.findings.append(Finding(
+                                title=f"Wallet labeled (Arkham Intel): {name}",
+                                severity="Info",
+                                url=target_url,
+                                category="Blockchain / Intel",
+                                evidence=f"{addr[:12]}... → {name}",
+                                impact="Entity attribution for deployer/sniper wallets aids investigation.",
+                                remediation="Cross-check with platform and CEX off-ramp.",
+                                confidence="high",
+                                source="arkham_api",
+                                proof=f"{addr} → {name}",
+                                verified=True,
+                            ))
+                if deployer_address:
+                    counterparties = intel_counterparties(
+                        SESSION, deployer_address, arkham_key, chain=ak_chn, limit=8, time_last="30d",
+                    )
+                    if counterparties:
+                        names = []
+                        for cp in counterparties[:6]:
+                            addr_obj = cp.get("address") if isinstance(cp, dict) else None
+                            if isinstance(addr_obj, dict):
+                                addr_str = addr_obj.get("address")
+                                entity = addr_obj.get("arkhamEntity") or addr_obj.get("arkhamLabel")
+                                if entity and isinstance(entity, dict):
+                                    name = entity.get("name", "?")
+                                else:
+                                    name = addr_obj.get("name", "?")
+                                names.append(name)
+                                if addr_str and isinstance(addr_str, str):
+                                    report.counterparties.append({"address": addr_str, "name": name})
+                            elif isinstance(cp, dict):
+                                addr_str = cp.get("address") if isinstance(cp.get("address"), str) else None
+                                name = cp.get("name", "?")
+                                if addr_str:
+                                    report.counterparties.append({"address": addr_str, "name": name})
+                                if cp.get("name"):
+                                    names.append(cp["name"])
+                        if names:
+                            report.findings.append(Finding(
+                                title="Deployer top counterparties (Arkham) [INTEL]",
+                                severity="Info",
+                                url=target_url,
+                                category="Blockchain / Intel",
+                                evidence="Top counterparties (30d): " + ", ".join(names[:6]),
+                                impact="Reveals CEX off-ramp, linked entities, or OTC.",
+                                remediation="Use for flow analysis; check if any counterparty is platform-related.",
+                                confidence="high",
+                                source="arkham_api",
+                                proof="Counterparties: " + ", ".join(names[:6]),
+                                verified=True,
+                            ))
 
     elif solscan_key and not _over_budget(run_start):
-        report.on_chain_used = True
-        # --- Sniper across launches: token/transfer per token, earliest first ---
-        transfers_by_token = {}
-        for token in (report.tokens_discovered or [])[:5]:
-            if _over_budget(run_start):
-                break
-            txs = _solscan_token_transfers(SESSION, token, solscan_key, page_size=transfer_page, sort_order="asc")
-            if txs:
-                transfers_by_token[token] = txs
-                for t in txs:
-                    edge = _normalize_transfer_to_edge(t, token_symbol="TOKEN", chain="solana")
-                    if edge:
-                        flow_edges.append(edge)
-        if len(transfers_by_token) >= 2:
-            sniper_alerts = _heuristic_sniper(transfers_by_token, same_wallet_min_tokens=3)
-            report.sniper_alerts.extend(sniper_alerts)
-            for a in sniper_alerts:
-                report.findings.append(Finding(
-                    title="Same wallet bought early across multiple tokens [SNIPER RISK]",
-                    severity="High",
-                    url=target_url,
-                    category="Blockchain / Sniper",
-                    evidence=a.get("description", ""),
-                    impact="Possible platform or insider sniper buying every launch before retail.",
-                    remediation="Verify wallet is not platform-owned; consider fair launch or delay.",
-                    confidence="high",
-                    source="solscan_api",
-                    proof=a.get("description", ""),
-                    verified=True,
-                ))
-        # --- Deployer: serial launcher + defi (LP remove); collect account transfers for flow graph ---
-        if deployer_address:
-            txs = _solscan_account_transfers(SESSION, deployer_address, solscan_key, page_size=account_page)
-            if txs:
-                for t in txs:
-                    edge = _normalize_transfer_to_edge(t, token_symbol="SOL", chain="solana")
-                    if edge:
-                        flow_edges.append(edge)
-                tokens_involved = set()
-                for t in txs:
-                    for k in ("token_address", "mint", "token"):
-                        if t.get(k):
-                            tokens_involved.add(str(t[k]))
-                if len(tokens_involved) >= 5:
+        if not arkham_key:
+            report.findings.append(Finding(
+                title="ARKHAM_API_KEY required for Solscan-backed on-chain investigation",
+                severity="Medium",
+                url=target_url,
+                category="Blockchain / Config",
+                evidence="SOLSCAN_PRO_API_KEY (or SOLSCAN_API_KEY) is set but ARKHAM_API_KEY is missing.",
+                impact="On-chain wallet intelligence and labeling are part of the standard investigation path.",
+                remediation="Set ARKHAM_API_KEY in the environment and re-run.",
+            ))
+            report.errors.append("ARKHAM_API_KEY is required when Solscan API keys are set.")
+        else:
+            report.on_chain_used = True
+            # --- Sniper across launches: token/transfer per token, earliest first ---
+            transfers_by_token = {}
+            for token in (report.tokens_discovered or [])[:5]:
+                if _over_budget(run_start):
+                    break
+                txs = _solscan_token_transfers(SESSION, token, solscan_key, page_size=transfer_page, sort_order="asc")
+                if txs:
+                    transfers_by_token[token] = txs
+                    for t in txs:
+                        edge = _normalize_transfer_to_edge(t, token_symbol="TOKEN", chain="solana")
+                        if edge:
+                            flow_edges.append(edge)
+            if len(transfers_by_token) >= 2:
+                sniper_alerts = _heuristic_sniper(transfers_by_token, same_wallet_min_tokens=3)
+                report.sniper_alerts.extend(sniper_alerts)
+                for a in sniper_alerts:
                     report.findings.append(Finding(
-                        title="Deployer interacts with many tokens [POSSIBLE SERIAL LAUNCHER]",
+                        title="Same wallet bought early across multiple tokens [SNIPER RISK]",
+                        severity="High",
+                        url=target_url,
+                        category="Blockchain / Sniper",
+                        evidence=a.get("description", ""),
+                        impact="Possible platform or insider sniper buying every launch before retail.",
+                        remediation="Verify wallet is not platform-owned; consider fair launch or delay.",
+                        confidence="high",
+                        source="solscan_api",
+                        proof=a.get("description", ""),
+                        verified=True,
+                    ))
+            # --- Deployer: serial launcher + defi (LP remove); collect account transfers for flow graph ---
+            if deployer_address:
+                txs = _solscan_account_transfers(SESSION, deployer_address, solscan_key, page_size=account_page)
+                if txs:
+                    for t in txs:
+                        edge = _normalize_transfer_to_edge(t, token_symbol="SOL", chain="solana")
+                        if edge:
+                            flow_edges.append(edge)
+                    tokens_involved = set()
+                    for t in txs:
+                        for k in ("token_address", "mint", "token"):
+                            if t.get(k):
+                                tokens_involved.add(str(t[k]))
+                    if len(tokens_involved) >= 5:
+                        report.findings.append(Finding(
+                            title="Deployer interacts with many tokens [POSSIBLE SERIAL LAUNCHER]",
+                            severity="Medium",
+                            url=target_url,
+                            category="Blockchain / Deployer",
+                            evidence=f"Deployer {deployer_address[:8]}... has transfers involving {len(tokens_involved)}+ tokens.",
+                            impact="Serial token creators have higher rug/dead-token history in aggregate; check deployer on Solscan.",
+                            remediation="Audit deployer history (tokens created, LP retention, early sells) via Solscan/Arkham.",
+                        ))
+                # LP removal: deployer defi activities REMOVE_LIQ
+                defi = _solscan_account_defi_activities(
+                    SESSION, deployer_address, solscan_key,
+                    activity_types=["ACTIVITY_TOKEN_REMOVE_LIQ"],
+                    page_size=20,
+                )
+                if defi:
+                    report.liquidity_alerts.append({
+                        "address": deployer_address,
+                        "remove_liq_count": len(defi),
+                        "description": f"Deployer has {len(defi)} remove-liquidity (REMOVE_LIQ) activity/activities.",
+                    })
+                    report.findings.append(Finding(
+                        title="Deployer has remove-liquidity (LP pull) activity [RUG RISK]",
+                        severity="High",
+                        url=target_url,
+                        category="Blockchain / Liquidity",
+                        evidence=f"Deployer {deployer_address[:12]}...: {len(defi)} ACTIVITY_TOKEN_REMOVE_LIQ.",
+                        impact="LP can be pulled after launch; classic rug. Verify LP lock or burn.",
+                        remediation="Lock or burn LP; audit deployer for repeated remove-liq on past tokens.",
+                        confidence="high",
+                        source="solscan_api",
+                        proof=f"{len(defi)} REMOVE_LIQ activities for {deployer_address}",
+                        verified=True,
+                    ))
+                # Deployer outflows (balance_change) — dump / cash-out signal
+                if not _over_budget(run_start):
+                    balance_changes = _solscan_account_balance_change(SESSION, deployer_address, solscan_key, flow="out", page_size=15)
+                    if len(balance_changes) >= 5:
+                        report.findings.append(Finding(
+                            title="Deployer has many recent outflows [POSSIBLE DUMP/CASH-OUT]",
+                            severity="Medium",
+                            url=target_url,
+                            category="Blockchain / Intel",
+                            evidence=f"Deployer {deployer_address[:12]}...: {len(balance_changes)} outflow activities (Solscan balance_change).",
+                            impact="Frequent outflows can indicate cashing out or dumping; correlate with token sells.",
+                            remediation="Review deployer balance_change and transfer history on Solscan for timing vs token launches.",
+                        ))
+                    label = legacy_label(SESSION, deployer_address, arkham_key)
+                    if label:
+                        report.wallet_labels[deployer_address] = label
+                        report.findings.append(Finding(
+                            title=f"Deployer wallet labeled (Arkham): {label}",
+                            severity="Info",
+                            url=target_url,
+                            category="Blockchain / Intel",
+                            evidence=f"Address {deployer_address[:12]}... → {label}",
+                            impact="Entity attribution helps assess insider or platform-operated sniper risk.",
+                            remediation="Cross-check with platform's stated treasury/fee collector.",
+                        ))
+            # --- Token meta: mint/freeze authority (honeypot/rug) ---
+            for token in (report.tokens_discovered or [])[:2]:
+                if _over_budget(run_start):
+                    break
+                meta = _solscan_token_meta(SESSION, token, solscan_key)
+                if not meta:
+                    continue
+                mint_authority = meta.get("mint_authority") or meta.get("mintAuthority")
+                freeze_authority = meta.get("freeze_authority") or meta.get("freezeAuthority")
+                if mint_authority and str(mint_authority).lower() not in ("null", "none", "revoked", "n/a", ""):
+                    report.findings.append(Finding(
+                        title="Token has active mint authority [HONEYPOT/RUG RISK]",
+                        severity="High",
+                        url=target_url,
+                        category="Blockchain / Token",
+                        evidence=f"Mint authority: {str(mint_authority)[:20]}... (token {token[:12]}...). Creator can mint unlimited supply.",
+                        impact="Deployer can dilute holders to zero; revoke mint authority or verify lock.",
+                        remediation="Revoke mint authority on launch or use immutable mint; check on Solscan token meta.",
+                        confidence="high",
+                        source="solscan_api",
+                        proof=f"mint_authority={str(mint_authority)[:44]}, token={token}",
+                        verified=True,
+                    ))
+                if freeze_authority and str(freeze_authority).lower() not in ("null", "none", "revoked", "n/a", ""):
+                    report.findings.append(Finding(
+                        title="Token has active freeze authority [HONEYPOT RISK]",
+                        severity="High",
+                        url=target_url,
+                        category="Blockchain / Token",
+                        evidence=f"Freeze authority: {str(freeze_authority)[:20]}... (token {token[:12]}...). Creator can freeze accounts.",
+                        impact="Deployer can freeze sells (honeypot: buy works, sell blocked); revoke freeze authority.",
+                        remediation="Revoke freeze authority; check on Solscan token meta.",
+                        confidence="high",
+                        source="solscan_api",
+                        proof=f"freeze_authority={str(freeze_authority)[:44]}, token={token}",
+                        verified=True,
+                    ))
+            # --- Holder concentration + optional fee from transfers ---
+            on_chain_fee_pct = None
+            holder_addresses_for_arkham = []
+            for token in (report.tokens_discovered or [])[:3]:
+                if _over_budget(run_start):
+                    break
+                holders = _solscan_token_holders(SESSION, token, solscan_key, limit=15)
+                for h in holders[:3]:
+                    owner = h.get("owner") or h.get("address") or h.get("owner_address")
+                    if owner and owner not in holder_addresses_for_arkham:
+                        holder_addresses_for_arkham.append(owner)
+                conc = _heuristic_concentrated_holders(holders, top_n=10, threshold_pct=40.0)
+                report.liquidity_alerts.extend(conc)
+                for a in conc:
+                    report.findings.append(Finding(
+                        title="Concentrated token holders [RUG RISK]",
+                        severity="High",
+                        url=target_url,
+                        category="Blockchain / Liquidity",
+                        evidence=a.get("description", ""),
+                        impact="Top holders can dump and rug; verify LP lock and deployer sell pattern.",
+                        remediation="Check LP lock/burn; monitor deployer and top wallets for early sells (Solscan/Arkham).",
+                        confidence="high",
+                        source="solscan_api",
+                        proof=a.get("description", ""),
+                        verified=True,
+                    ))
+                # Fee from first token's transfers (Solscan may include fee in decoded)
+                if on_chain_fee_pct is None and stated_fee_pct is not None:
+                    txs = _solscan_token_transfers(SESSION, token, solscan_key, page_size=10, sort_order="desc")
+                    for t in txs:
+                        fee_pct = t.get("fee_pct") or t.get("fee_percent") or (float(t.get("fee", 0) or 0) * 100 if t.get("fee") else None)
+                        if fee_pct is not None and isinstance(fee_pct, (int, float)):
+                            on_chain_fee_pct = float(fee_pct)
+                            break
+            if stated_fee_pct is not None and report.fee_comparison:
+                report.fee_comparison["on_chain_pct"] = on_chain_fee_pct
+                report.fee_comparison["evidence"] = f"Stated: {stated_fee_pct}%" + (f"; on-chain observed: {on_chain_fee_pct}%" if on_chain_fee_pct is not None else "; on-chain fee not in API response")
+                if on_chain_fee_pct is not None and abs(on_chain_fee_pct - stated_fee_pct) > 0.5:
+                    report.findings.append(Finding(
+                        title="Stated fee vs on-chain fee mismatch [REVIEW]",
                         severity="Medium",
                         url=target_url,
-                        category="Blockchain / Deployer",
-                        evidence=f"Deployer {deployer_address[:8]}... has transfers involving {len(tokens_involved)}+ tokens.",
-                        impact="Serial token creators have higher rug/dead-token history in aggregate; check deployer on Solscan.",
-                        remediation="Audit deployer history (tokens created, LP retention, early sells) via Solscan/Arkham.",
+                        category="Blockchain / Fees",
+                        evidence=report.fee_comparison["evidence"],
+                        impact="Users may be charged different than advertised; or fee not applied consistently.",
+                        remediation="Align on-chain fee with stated fee; audit fee collector logic.",
+                        confidence="medium",
+                        source="solscan_api",
+                        proof=report.fee_comparison["evidence"],
+                        verified=False,
                     ))
-            # LP removal: deployer defi activities REMOVE_LIQ
-            defi = _solscan_account_defi_activities(
-                SESSION, deployer_address, solscan_key,
-                activity_types=["ACTIVITY_TOKEN_REMOVE_LIQ"],
-                page_size=20,
-            )
-            if defi:
-                report.liquidity_alerts.append({
-                    "address": deployer_address,
-                    "remove_liq_count": len(defi),
-                    "description": f"Deployer has {len(defi)} remove-liquidity (REMOVE_LIQ) activity/activities.",
-                })
-                report.findings.append(Finding(
-                    title="Deployer has remove-liquidity (LP pull) activity [RUG RISK]",
-                    severity="High",
-                    url=target_url,
-                    category="Blockchain / Liquidity",
-                    evidence=f"Deployer {deployer_address[:12]}...: {len(defi)} ACTIVITY_TOKEN_REMOVE_LIQ.",
-                    impact="LP can be pulled after launch; classic rug. Verify LP lock or burn.",
-                    remediation="Lock or burn LP; audit deployer for repeated remove-liq on past tokens.",
-                    confidence="high",
-                    source="solscan_api",
-                    proof=f"{len(defi)} REMOVE_LIQ activities for {deployer_address}",
-                    verified=True,
-                ))
-            # Deployer outflows (balance_change) — dump / cash-out signal
+            # --- Arkham Intel: batch labels + deployer counterparties ---
             if not _over_budget(run_start):
-                balance_changes = _solscan_account_balance_change(SESSION, deployer_address, solscan_key, flow="out", page_size=15)
-                if len(balance_changes) >= 5:
-                    report.findings.append(Finding(
-                        title="Deployer has many recent outflows [POSSIBLE DUMP/CASH-OUT]",
-                        severity="Medium",
-                        url=target_url,
-                        category="Blockchain / Intel",
-                        evidence=f"Deployer {deployer_address[:12]}...: {len(balance_changes)} outflow activities (Solscan balance_change).",
-                        impact="Frequent outflows can indicate cashing out or dumping; correlate with token sells.",
-                        remediation="Review deployer balance_change and transfer history on Solscan for timing vs token launches.",
-                    ))
-            if arkham_key:
-                label = _arkham_label(SESSION, deployer_address, arkham_key)
-                if label:
-                    report.wallet_labels[deployer_address] = label
-                    report.findings.append(Finding(
-                        title=f"Deployer wallet labeled (Arkham): {label}",
-                        severity="Info",
-                        url=target_url,
-                        category="Blockchain / Intel",
-                        evidence=f"Address {deployer_address[:12]}... → {label}",
-                        impact="Entity attribution helps assess insider or platform-operated sniper risk.",
-                        remediation="Cross-check with platform's stated treasury/fee collector.",
-                    ))
-        # --- Token meta: mint/freeze authority (honeypot/rug) ---
-        for token in (report.tokens_discovered or [])[:2]:
-            if _over_budget(run_start):
-                break
-            meta = _solscan_token_meta(SESSION, token, solscan_key)
-            if not meta:
-                continue
-            mint_authority = meta.get("mint_authority") or meta.get("mintAuthority")
-            freeze_authority = meta.get("freeze_authority") or meta.get("freezeAuthority")
-            if mint_authority and str(mint_authority).lower() not in ("null", "none", "revoked", "n/a", ""):
-                report.findings.append(Finding(
-                    title="Token has active mint authority [HONEYPOT/RUG RISK]",
-                    severity="High",
-                    url=target_url,
-                    category="Blockchain / Token",
-                    evidence=f"Mint authority: {str(mint_authority)[:20]}... (token {token[:12]}...). Creator can mint unlimited supply.",
-                    impact="Deployer can dilute holders to zero; revoke mint authority or verify lock.",
-                    remediation="Revoke mint authority on launch or use immutable mint; check on Solscan token meta.",
-                    confidence="high",
-                    source="solscan_api",
-                    proof=f"mint_authority={str(mint_authority)[:44]}, token={token}",
-                    verified=True,
-                ))
-            if freeze_authority and str(freeze_authority).lower() not in ("null", "none", "revoked", "n/a", ""):
-                report.findings.append(Finding(
-                    title="Token has active freeze authority [HONEYPOT RISK]",
-                    severity="High",
-                    url=target_url,
-                    category="Blockchain / Token",
-                    evidence=f"Freeze authority: {str(freeze_authority)[:20]}... (token {token[:12]}...). Creator can freeze accounts.",
-                    impact="Deployer can freeze sells (honeypot: buy works, sell blocked); revoke freeze authority.",
-                    remediation="Revoke freeze authority; check on Solscan token meta.",
-                    confidence="high",
-                    source="solscan_api",
-                    proof=f"freeze_authority={str(freeze_authority)[:44]}, token={token}",
-                    verified=True,
-                ))
-        # --- Holder concentration + optional fee from transfers ---
-        on_chain_fee_pct = None
-        holder_addresses_for_arkham = []
-        for token in (report.tokens_discovered or [])[:3]:
-            if _over_budget(run_start):
-                break
-            holders = _solscan_token_holders(SESSION, token, solscan_key, limit=15)
-            for h in holders[:3]:
-                owner = h.get("owner") or h.get("address") or h.get("owner_address")
-                if owner and owner not in holder_addresses_for_arkham:
-                    holder_addresses_for_arkham.append(owner)
-            conc = _heuristic_concentrated_holders(holders, top_n=10, threshold_pct=40.0)
-            report.liquidity_alerts.extend(conc)
-            for a in conc:
-                report.findings.append(Finding(
-                    title="Concentrated token holders [RUG RISK]",
-                    severity="High",
-                    url=target_url,
-                    category="Blockchain / Liquidity",
-                    evidence=a.get("description", ""),
-                    impact="Top holders can dump and rug; verify LP lock and deployer sell pattern.",
-                    remediation="Check LP lock/burn; monitor deployer and top wallets for early sells (Solscan/Arkham).",
-                    confidence="high",
-                    source="solscan_api",
-                    proof=a.get("description", ""),
-                    verified=True,
-                ))
-            # Fee from first token's transfers (Solscan may include fee in decoded)
-            if on_chain_fee_pct is None and stated_fee_pct is not None:
-                txs = _solscan_token_transfers(SESSION, token, solscan_key, page_size=10, sort_order="desc")
-                for t in txs:
-                    fee_pct = t.get("fee_pct") or t.get("fee_percent") or (float(t.get("fee", 0) or 0) * 100 if t.get("fee") else None)
-                    if fee_pct is not None and isinstance(fee_pct, (int, float)):
-                        on_chain_fee_pct = float(fee_pct)
-                        break
-        if stated_fee_pct is not None and report.fee_comparison:
-            report.fee_comparison["on_chain_pct"] = on_chain_fee_pct
-            report.fee_comparison["evidence"] = f"Stated: {stated_fee_pct}%" + (f"; on-chain observed: {on_chain_fee_pct}%" if on_chain_fee_pct is not None else "; on-chain fee not in API response")
-            if on_chain_fee_pct is not None and abs(on_chain_fee_pct - stated_fee_pct) > 0.5:
-                report.findings.append(Finding(
-                    title="Stated fee vs on-chain fee mismatch [REVIEW]",
-                    severity="Medium",
-                    url=target_url,
-                    category="Blockchain / Fees",
-                    evidence=report.fee_comparison["evidence"],
-                    impact="Users may be charged different than advertised; or fee not applied consistently.",
-                    remediation="Align on-chain fee with stated fee; audit fee collector logic.",
-                    confidence="medium",
-                    source="solscan_api",
-                    proof=report.fee_comparison["evidence"],
-                    verified=False,
-                ))
-        # --- Arkham Intel: batch labels + deployer counterparties ---
-        if arkham_key and not _over_budget(run_start):
-            addresses_to_label = []
-            if deployer_address:
-                addresses_to_label.append(deployer_address)
-            for a in report.sniper_alerts:
-                w = a.get("wallet")
-                if w and w not in addresses_to_label:
-                    addresses_to_label.append(w)
-            for addr in holder_addresses_for_arkham[:5]:
-                if addr and addr not in addresses_to_label:
-                    addresses_to_label.append(addr)
-            if addresses_to_label:
-                batch_labels = _arkham_intel_batch(SESSION, addresses_to_label[:30], arkham_key, chain="solana")
-                for addr, name in batch_labels.items():
-                    report.wallet_labels[addr] = name
-                if batch_labels and not any(f.title.startswith("Deployer wallet labeled") for f in report.findings):
-                    for addr, name in list(batch_labels.items())[:3]:
-                        report.findings.append(Finding(
-                            title=f"Wallet labeled (Arkham Intel): {name}",
-                            severity="Info",
-                            url=target_url,
-                            category="Blockchain / Intel",
-                            evidence=f"{addr[:12]}... → {name}",
-                            impact="Entity attribution for deployer/sniper/holders aids crime investigation.",
-                            remediation="Cross-check with platform and CEX off-ramp; use counterparties for flow.",
-                            confidence="high",
-                            source="arkham_api",
-                            proof=f"{addr} → {name}",
-                            verified=True,
-                        ))
-            if deployer_address:
-                counterparties = _arkham_intel_counterparties(SESSION, deployer_address, arkham_key, chain="solana", limit=8, time_last="30d")
-                if counterparties:
-                    names = []
-                    for cp in counterparties[:6]:
-                        addr_obj = cp.get("address") if isinstance(cp, dict) else None
-                        addr_str = None
-                        if isinstance(addr_obj, dict):
-                            addr_str = addr_obj.get("address")
-                            entity = addr_obj.get("arkhamEntity") or addr_obj.get("arkhamLabel")
-                            if entity and isinstance(entity, dict):
-                                name = entity.get("name", "?")
-                            else:
-                                name = addr_obj.get("name", "?")
-                            names.append(name)
-                            if addr_str and isinstance(addr_str, str):
-                                report.counterparties.append({"address": addr_str, "name": name})
-                        elif isinstance(cp, dict):
-                            addr_str = cp.get("address") if isinstance(cp.get("address"), str) else None
-                            name = cp.get("name", "?")
-                            if addr_str:
-                                report.counterparties.append({"address": addr_str, "name": name})
-                            if cp.get("name"):
-                                names.append(cp["name"])
-                    if names:
-                        report.findings.append(Finding(
-                            title="Deployer top counterparties (Arkham) [INTEL]",
-                            severity="Info",
-                            url=target_url,
-                            category="Blockchain / Intel",
-                            evidence="Top counterparties (30d): " + ", ".join(names[:6]),
-                            impact="Reveals CEX off-ramp, linked entities, or OTC; useful for tracing proceeds.",
-                            remediation="Use for flow analysis and compliance; check if any counterparty is platform-related.",
-                            confidence="high",
-                            source="arkham_api",
-                            proof="Counterparties: " + ", ".join(names[:6]),
-                            verified=True,
-                        ))
+                addresses_to_label = []
+                if deployer_address:
+                    addresses_to_label.append(deployer_address)
+                for a in report.sniper_alerts:
+                    w = a.get("wallet")
+                    if w and w not in addresses_to_label:
+                        addresses_to_label.append(w)
+                for addr in holder_addresses_for_arkham[:5]:
+                    if addr and addr not in addresses_to_label:
+                        addresses_to_label.append(addr)
+                if addresses_to_label:
+                    batch_labels = intel_batch(SESSION, addresses_to_label[:30], arkham_key, chain="solana")
+                    for addr, name in batch_labels.items():
+                        report.wallet_labels[addr] = name
+                    if batch_labels and not any(f.title.startswith("Deployer wallet labeled") for f in report.findings):
+                        for addr, name in list(batch_labels.items())[:3]:
+                            report.findings.append(Finding(
+                                title=f"Wallet labeled (Arkham Intel): {name}",
+                                severity="Info",
+                                url=target_url,
+                                category="Blockchain / Intel",
+                                evidence=f"{addr[:12]}... → {name}",
+                                impact="Entity attribution for deployer/sniper/holders aids crime investigation.",
+                                remediation="Cross-check with platform and CEX off-ramp; use counterparties for flow.",
+                                confidence="high",
+                                source="arkham_api",
+                                proof=f"{addr} → {name}",
+                                verified=True,
+                            ))
+                if deployer_address:
+                    counterparties = intel_counterparties(SESSION, deployer_address, arkham_key, chain="solana", limit=8, time_last="30d")
+                    if counterparties:
+                        names = []
+                        for cp in counterparties[:6]:
+                            addr_obj = cp.get("address") if isinstance(cp, dict) else None
+                            addr_str = None
+                            if isinstance(addr_obj, dict):
+                                addr_str = addr_obj.get("address")
+                                entity = addr_obj.get("arkhamEntity") or addr_obj.get("arkhamLabel")
+                                if entity and isinstance(entity, dict):
+                                    name = entity.get("name", "?")
+                                else:
+                                    name = addr_obj.get("name", "?")
+                                names.append(name)
+                                if addr_str and isinstance(addr_str, str):
+                                    report.counterparties.append({"address": addr_str, "name": name})
+                            elif isinstance(cp, dict):
+                                addr_str = cp.get("address") if isinstance(cp.get("address"), str) else None
+                                name = cp.get("name", "?")
+                                if addr_str:
+                                    report.counterparties.append({"address": addr_str, "name": name})
+                                if cp.get("name"):
+                                    names.append(cp["name"])
+                        if names:
+                            report.findings.append(Finding(
+                                title="Deployer top counterparties (Arkham) [INTEL]",
+                                severity="Info",
+                                url=target_url,
+                                category="Blockchain / Intel",
+                                evidence="Top counterparties (30d): " + ", ".join(names[:6]),
+                                impact="Reveals CEX off-ramp, linked entities, or OTC; useful for tracing proceeds.",
+                                remediation="Use for flow analysis and compliance; check if any counterparty is platform-related.",
+                                confidence="high",
+                                source="arkham_api",
+                                proof="Counterparties: " + ", ".join(names[:6]),
+                                verified=True,
+                            ))
                 # Multi-hop (deep): add 1-hop transfers from counterparties so flow graph shows paths beyond deployer
                 if is_deep and report.counterparties and not _over_budget(run_start):
                     for cp in report.counterparties[:3]:
@@ -1766,7 +1765,7 @@ def run(
                 category="Blockchain / Config",
                 evidence="Set SOLSCAN_PRO_API_KEY (Solana) or ETHERSCAN_API_KEY (Ethereum) for on-chain checks.",
                 impact="Without on-chain data, sniper/liquidity/fee abuse cannot be confirmed.",
-                remediation="Get API key for your chain; optionally ARKHAM_API_KEY for wallet labels. Re-run scan.",
+                remediation="Get API keys for your chain explorer (Solscan or Etherscan) and ARKHAM_API_KEY; re-run scan.",
             ))
         report.errors.append("No on-chain API key set; checks skipped.")
 
