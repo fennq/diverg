@@ -84,77 +84,17 @@
     }
     .card strong { display: block; margin-bottom: 0.25rem; color: var(--accent); }
     .card span { font-size: 0.9rem; color: var(--muted); }
-    .roadmap {
-      max-width: 720px;
-      margin: 0 auto 3rem;
+    .to-roadmap {
+      text-align: center;
+      margin: -1.5rem auto 2.5rem;
       padding: 0 clamp(1rem, 4vw, 1.5rem);
     }
-    .roadmap h2 {
-      font-size: 1.25rem;
-      margin-bottom: 0.35rem;
-      color: var(--muted);
-      font-weight: 500;
-    }
-    .roadmap .q2-badge {
-      display: inline-block;
-      font-size: 0.75rem;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
+    .to-roadmap a {
       color: var(--accent);
-      border: 1px solid var(--border);
-      background: var(--surface);
-      padding: 0.2rem 0.5rem;
-      border-radius: 6px;
-      margin-bottom: 1rem;
-    }
-    .roadmap .lead {
-      color: var(--text);
-      font-size: clamp(0.95rem, 2.8vw, 1.05rem);
-      margin-bottom: 1.25rem;
-      line-height: 1.65;
-    }
-    .roadmap ul {
-      list-style: none;
-      margin: 0 0 1.25rem;
-      padding: 0;
-    }
-    .roadmap li {
-      position: relative;
-      padding-left: 1.1rem;
-      margin-bottom: 0.75rem;
-      color: var(--muted);
+      text-decoration: none;
       font-size: 0.95rem;
-      line-height: 1.55;
     }
-    .roadmap li::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 0.55em;
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      background: var(--accent);
-      opacity: 0.85;
-    }
-    .roadmap li strong { color: var(--text); font-weight: 600; }
-    .roadmap .closing {
-      color: var(--text);
-      font-size: 0.95rem;
-      line-height: 1.6;
-      margin-bottom: 1.25rem;
-    }
-    .roadmap-callout {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem 1.15rem;
-      font-size: 0.9rem;
-      line-height: 1.55;
-      color: var(--muted);
-    }
-    .roadmap-callout strong { color: var(--text); font-weight: 600; }
+    .to-roadmap a:hover { text-decoration: underline; }
     footer {
       text-align: center;
       padding: 2rem clamp(1rem, 4vw, 2rem);
@@ -183,21 +123,7 @@
       <div class="card"><strong>Delivery</strong><span>Telegram bot for reports; dashboard coming.</span></div>
     </div>
   </section>
-  <section class="roadmap" aria-labelledby="roadmap-heading">
-    <p class="q2-badge">Q2 roadmap</p>
-    <h2 id="roadmap-heading">Blockchain &amp; investigations</h2>
-    <p class="lead">With our latest investigation wrapped, we are doubling down on the blockchain side of Diverg over the coming weeks—sharpening on-chain security and turning real-world case experience into a stronger product.</p>
-    <ul>
-      <li><strong>On-chain investigation</strong> — Expand how we track wallet activity, trace transactions, and surface meaningful insights faster and more clearly across our tools.</li>
-      <li><strong>Forensics</strong> — Refine tooling from what we have learned in the field so we can go deeper, move faster, and deliver more actionable intelligence.</li>
-      <li><strong>Detection &amp; reliability</strong> — Improve suspicious-behaviour signals, data aggregation, and the robustness of our blockchain analysis engine so risks surface earlier and outputs are easier to trust.</li>
-      <li><strong>Private platform</strong> — Keep advancing the private product with more advanced blockchain-focused capabilities for users who need deeper analysis and higher-level workflows.</li>
-    </ul>
-    <p class="closing">This phase is about focus: stronger on-chain investigations, clearer outputs, and a product shaped by hands-on work on serious cases.</p>
-    <div class="roadmap-callout">
-      <strong>Public vs private.</strong> Our public tools are for broad use and early access—they are not the same depth as full forensic run-downs such as our Drift case work, which is aimed at our private platform and professional investigations.
-    </div>
-  </section>
+  <p class="to-roadmap"><a href="roadmap.html">Roadmap &amp; extensibility — Q2 focus</a></p>
   <footer>
     Use only for <strong>authorized</strong> security testing. Get written permission and define scope.
   </footer>

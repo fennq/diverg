@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d1117" />
+  <title>Diverg — Roadmap &amp; extensibility</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+      padding: clamp(1.25rem, 4vw, 2rem);
+      padding-left: max(clamp(1.25rem, 4vw, 2rem), env(safe-area-inset-left, 0));
+      padding-right: max(clamp(1.25rem, 4vw, 2rem), env(safe-area-inset-right, 0));
+      padding-bottom: max(2rem, env(safe-area-inset-bottom, 0));
+    }
+    .back {
+      margin-bottom: 1.5rem;
+    }
+    .back a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    .back a:hover { text-decoration: underline; }
+    article {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: clamp(1.35rem, 4vw, 1.75rem);
+      font-weight: 600;
+      margin-bottom: 1rem;
+      line-height: 1.25;
+    }
+    .intro {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin-bottom: 2rem;
+      line-height: 1.65;
+    }
+    h2 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text);
+      margin: 2rem 0 0.75rem;
+    }
+    h2:first-of-type { margin-top: 0; }
+    ul {
+      list-style: disc;
+      padding-left: 1.25rem;
+      margin: 0 0 1rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    li { margin-bottom: 0.5rem; line-height: 1.55; }
+    li strong { color: var(--text); font-weight: 600; }
+    .sublead {
+      color: var(--muted);
+      font-size: 0.95rem;
+      margin: -0.25rem 0 0.75rem;
+      line-height: 1.55;
+    }
+    .callout {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.15rem;
+      margin-top: 1.25rem;
+      font-size: 0.9rem;
+      line-height: 1.55;
+      color: var(--muted);
+    }
+    .callout strong { color: var(--text); }
+    footer {
+      max-width: 720px;
+      margin: 3rem auto 0;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.8125rem;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <article>
+    <p class="back"><a href="index.html">← Back to home</a></p>
+    <h1>8. Roadmap and extensibility</h1>
+    <p class="intro">Our roadmap is focused on what we plan to ship in the <strong style="color: var(--text);">next 3 months</strong>. The list below is what we are building toward in that window, together with later enterprise themes and how the platform extends.</p>
+
+    <h2>8.1 Next 3 months (Q2)</h2>
+    <p class="sublead">With our latest investigation wrapped, we are doubling down on the blockchain side of Diverg—expanding on-chain investigation, forensics, and reliability, while advancing the private platform.</p>
+    <ul>
+      <li><strong>On-chain investigation</strong> — Expand how we track wallet activity, trace transactions, and surface meaningful insights faster and more clearly across our tools.</li>
+      <li><strong>Forensics</strong> — Refine tooling from real-world cases so we can go deeper, move faster, and deliver more actionable intelligence.</li>
+      <li><strong>Detection &amp; reliability</strong> — Improve suspicious-behaviour signals, data aggregation, and the robustness of our blockchain analysis engine so risks surface earlier and outputs are easier to trust.</li>
+      <li><strong>Private platform</strong> — Integrate more advanced blockchain-focused features for users who need deeper analysis and higher-level workflows.</li>
+    </ul>
+    <p class="sublead" style="margin-top: 1rem;">This phase is about sharpening our edge in on-chain security and investigations, and turning that experience into a stronger, more focused product.</p>
+    <div class="callout">
+      <strong>Public vs private.</strong> Our public tools are for general use and early access—they are not the same depth as full forensic run-downs such as our Drift case work, which is aimed at our private platform and professional investigations.
+    </div>
+
+    <h2>8.2 Later: Enterprise &amp; extensibility</h2>
+    <ul>
+      <li>SSO and RBAC for team management</li>
+      <li>Custom skill development framework</li>
+      <li>Advanced reporting and compliance templates</li>
+      <li>Threat intelligence feed integrations</li>
+      <li>Audit logging and compliance reporting</li>
+    </ul>
+
+    <h2>8.3 Extensibility</h2>
+    <p class="sublead" style="margin-bottom: 0.75rem;">The skill-based architecture enables third-party extensions. Enterprise customers can develop custom skills for:</p>
+    <ul>
+      <li>Proprietary internal systems</li>
+      <li>Custom threat intelligence sources</li>
+      <li>Industry-specific compliance checks</li>
+    </ul>
+  </article>
+  <footer>
+    <a href="index.html">Diverg</a> — use only for authorized security testing.
+  </footer>
+</body>
+</html>
