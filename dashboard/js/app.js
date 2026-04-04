@@ -509,6 +509,15 @@ function runChainLookup() {
         if (s.recent_signatures !== undefined) termLine(out, 'Txns    : ' + s.recent_signatures, null);
       }
       if (data.error) termLine(out, 'Note    : ' + data.error, 'yellow');
+      const ak = data.arkham;
+      if (ak) {
+        if (ak.explorer_url) termLine(out, 'Arkham  : ' + ak.explorer_url, 'dim');
+        const sm = ak.summary || {};
+        const label = sm.entity_name || sm.label_name || '';
+        if (label) termLine(out, 'Intel   : ' + label, 'green');
+        if (ak.error) termLine(out, 'Arkham  : ' + ak.error, 'yellow');
+        else if (ak.ok === false && !label) termLine(out, 'Arkham  : no summary returned', 'yellow');
+      }
     })
     .catch((err) => termLine(out, ts() + ' Lookup failed: ' + err.message, 'red'));
 }
@@ -566,6 +575,12 @@ function runTokenBundle() {
 
       if (data.risk_summary) {
         termLine(out, 'Summary    : ' + String(data.risk_summary).slice(0, 220), 'dim');
+      }
+      const ab = data.arkham;
+      if (ab && typeof ab === 'object') {
+        const n = ab.labeled_count != null ? ab.labeled_count : Object.keys(ab.batch_labels || {}).length;
+        if (n) termLine(out, 'Arkham     : ' + n + ' labeled wallet(s) in batch', 'dim');
+        if (ab.error) termLine(out, 'Arkham     : ' + ab.error, 'yellow');
       }
 
       const reasons = Array.isArray(data.risk_signals) ? data.risk_signals.slice(0, 3) : [];

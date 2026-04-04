@@ -16,7 +16,7 @@ Our blockchain investigation pipeline is powered by key data and intelligence pr
 - Improve report narratives with human-readable labels instead of bare addresses.  
 - Flag high-risk or sanctioned entities when present in Arkham’s dataset.
 
-*Requires `ARKHAM_API_KEY`. Request access at [Arkham Intel API](https://intel.arkm.com/api).*
+*Requires `ARKHAM_API_KEY` on the server for `POST /api/investigation/blockchain`, `POST /api/investigation/solana-bundle`, `POST /api/investigation/blockchain-full`, and for the `blockchain_investigation` skill whenever Solscan or Etherscan keys are used. Request access at [Arkham Intel API](https://intel.arkm.com/api).*
 
 ---
 
