@@ -26,7 +26,8 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
-from stealth import get_session, randomize_order
+from stealth import get_session, randomize_order, set_scan_seed
+from http_baseline import capture_baseline, is_soft_404, Baseline
 
 SESSION = get_session()
 TIMEOUT = 3
@@ -183,6 +184,11 @@ ALTERNATE_HOSTS: list[tuple[str, str, str]] = [
     ("sandbox", "staging", "Sandbox host"),
 ]
 
+ADMIN_BODY_MARKERS = (
+    "login", "password", "sign in", "sign-in", "log in", "log-in",
+    "admin panel", "dashboard", "management console", "username",
+    "<form", "type=\"password\"", "type='password'", "csrf",
+)
 DEBUG_MARKERS = ("actuator", "heapdump", "threaddump", "pprof", "debug toolbar", "prometheus", "grafana", "kibana")
 DOC_MARKERS = ("swagger", "openapi", "redoc", "api docs", "graphql")
 SUPPORT_MARKERS = ("zendesk", "freshdesk", "jira service", "help center", "ticket", "support")
@@ -289,6 +295,12 @@ def _classify_exposure(category: str, path: str, resp: requests.Response) -> tup
         return "restricted", note, platform
 
     if category == "admin":
+        if any(marker in body for marker in ADMIN_BODY_MARKERS):
+            note = "Admin or management surface detected (body markers present)"
+            exposure_type = "admin_confirmed"
+            if platform:
+                note += f" | Platform: {platform}"
+            return exposure_type, note, platform
         note = "Admin or management route returned content"
     elif category == "identity":
         if "openid-configuration" in path or "jwks" in path:
@@ -372,6 +384,8 @@ def _finding_for_surface(
     platform_prefix = f"{platform} " if platform else ""
 
     if category == "admin" and status == 200:
+        if exposure_type != "admin_confirmed":
+            return None
         return Finding(
             title=f"Publicly reachable {platform_prefix}admin or management surface".strip(),
             severity="High",
@@ -497,6 +511,14 @@ def scan_company_exposure(target_url: str, scan_type: str = "full") -> CompanyEx
     started_at = time.time()
     budget_sec = float(7 if scan_type == "quick" else SCAN_BUDGET)
 
+    set_scan_seed(target_url)
+
+    baseline: Baseline | None = None
+    try:
+        baseline = capture_baseline(SESSION, target_url)
+    except Exception:
+        pass
+
     categories = _select_categories(scan_type)
     seen_urls: set[str] = set()
     for category in categories:
@@ -514,6 +536,9 @@ def scan_company_exposure(target_url: str, scan_type: str = "full") -> CompanyEx
             if not resp or resp.status_code not in SIGNAL_STATUSES:
                 continue
 
+            if resp.status_code == 200 and baseline and is_soft_404(resp, baseline):
+                continue
+
             exposure_type, note, platform = _classify_exposure(category, path, resp)
             _record_surface(report, category, label, url, resp, exposure_type, note, platform)
 
@@ -524,6 +549,8 @@ def scan_company_exposure(target_url: str, scan_type: str = "full") -> CompanyEx
                 break
             resp = _probe(alt_url)
             if not resp or resp.status_code not in SIGNAL_STATUSES:
+                continue
+            if resp.status_code == 200 and baseline and is_soft_404(resp, baseline):
                 continue
             exposure_type, note, platform = _classify_exposure(category, "/", resp)
             note = f"{note} | Alternate host: {host}"

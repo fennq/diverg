@@ -254,10 +254,28 @@ def get_session(proxy: Optional[str] = None) -> StealthSession:
 # Utilities
 # ---------------------------------------------------------------------------
 
-def randomize_order(items: list) -> list:
-    """Shuffle a list of checks/paths so scan order is unpredictable."""
+_scan_seed: str | None = None
+
+
+def set_scan_seed(target_url: str) -> None:
+    """Set a deterministic seed derived from the target URL.
+
+    Call once per skill ``run()`` before any ``randomize_order`` calls so
+    that the same target always produces the same probe ordering.
+    """
+    global _scan_seed
+    _scan_seed = hashlib.sha256(target_url.encode()).hexdigest()
+
+
+def randomize_order(items: list, *, seed: str | None = None) -> list:
+    """Return a shuffled copy.  Uses a deterministic seed when available
+    so that repeated scans of the same target hit the same probe order."""
+    effective_seed = seed or _scan_seed
     shuffled = items.copy()
-    random.shuffle(shuffled)
+    if effective_seed is not None:
+        random.Random(effective_seed).shuffle(shuffled)
+    else:
+        random.shuffle(shuffled)
     return shuffled
 
 

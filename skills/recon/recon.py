@@ -29,6 +29,7 @@ PORT_SCAN_MAX_SEC_TOP1000_NATIVE = 12
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
 import stealth
+from http_baseline import capture_baseline, is_soft_404, Baseline
 from typing import Optional
 
 import dns.resolver
@@ -863,6 +864,7 @@ def discover_sensitive_files(
     target: str,
     max_paths: Optional[int] = None,
     timeout_sec: Optional[float] = None,
+    _baseline: Optional[Baseline] = None,
 ) -> list[SensitiveFileResult]:
     """Probe for sensitive files and paths that shouldn't be publicly accessible."""
     base_url = target if target.startswith("http") else f"https://{target}"
@@ -883,11 +885,13 @@ def discover_sensitive_files(
             if resp.status_code in (200, 301, 302, 403):
                 evidence_parts: list[str] = []
                 if resp.status_code == 200:
+                    if _baseline and is_soft_404(resp, _baseline):
+                        continue
+
                     content_type = resp.headers.get("Content-Type", "")
                     content_length = resp.headers.get("Content-Length", "")
                     body_preview = resp.text[:200].strip() if resp.text else ""
 
-                    # Filter out custom 404 pages and generic error pages
                     lower_body = body_preview.lower()
                     if any(marker in lower_body for marker in
                            ["not found", "404", "page not found", "does not exist"]):
@@ -1084,32 +1088,32 @@ TECH_HEADERS = [
     ("X-Fastly-Request-Id", "cdn"),
 ]
 
-FRAMEWORK_PATHS: list[tuple[str, str, list[str]]] = [
-    ("/wp-content/", "WordPress", ["cms"]),
-    ("/wp-includes/", "WordPress", ["cms"]),
-    ("/wp-json/wp/v2/", "WordPress REST API", ["cms", "api"]),
-    ("/drupal/", "Drupal", ["cms"]),
-    ("/sites/default/files/", "Drupal", ["cms"]),
-    ("/misc/drupal.js", "Drupal", ["cms"]),
-    ("/static/admin/", "Django", ["framework"]),
-    ("/django-admin/", "Django", ["framework"]),
-    ("/rails/info", "Ruby on Rails", ["framework"]),
-    ("/rails/info/routes", "Ruby on Rails", ["framework"]),
-    ("/assets/application.js", "Ruby on Rails", ["framework"]),
-    ("/laravel/", "Laravel", ["framework"]),
-    ("/vendor/laravel/", "Laravel", ["framework"]),
-    ("/yii/", "Yii", ["framework"]),
-    ("/symphony/", "Symfony", ["framework"]),
-    ("/craft/", "Craft CMS", ["cms"]),
-    ("/umbraco/", "Umbraco", ["cms"]),
-    ("/sitecore/", "Sitecore", ["cms"]),
-    ("/typo3/", "TYPO3", ["cms"]),
-    ("/ghost/api/", "Ghost", ["cms"]),
-    ("/strapi/", "Strapi", ["cms"]),
-    ("/_next/", "Next.js", ["framework", "javascript"]),
-    ("/_nuxt/", "Nuxt.js", ["framework", "javascript"]),
-    ("/remix-build/", "Remix", ["framework", "javascript"]),
-    ("/astro/", "Astro", ["framework"]),
+FRAMEWORK_PATHS: list[tuple[str, str, list[str], list[str]]] = [
+    ("/wp-content/", "WordPress", ["cms"], ["wp-content", "wordpress", "wp-includes"]),
+    ("/wp-includes/", "WordPress", ["cms"], ["wp-includes", "wordpress"]),
+    ("/wp-json/wp/v2/", "WordPress REST API", ["cms", "api"], ["wp/v2", "namespace", "routes"]),
+    ("/drupal/", "Drupal", ["cms"], ["drupal", "sites/default"]),
+    ("/sites/default/files/", "Drupal", ["cms"], ["drupal", "sites/default"]),
+    ("/misc/drupal.js", "Drupal", ["cms"], ["drupal", "Drupal"]),
+    ("/static/admin/", "Django", ["framework"], ["django", "csrfmiddlewaretoken", "admin"]),
+    ("/django-admin/", "Django", ["framework"], ["django", "csrfmiddlewaretoken", "login"]),
+    ("/rails/info", "Ruby on Rails", ["framework"], ["rails", "ruby", "routes"]),
+    ("/rails/info/routes", "Ruby on Rails", ["framework"], ["rails", "routes", "controller"]),
+    ("/assets/application.js", "Ruby on Rails", ["framework"], ["application", "turbo", "stimulus"]),
+    ("/laravel/", "Laravel", ["framework"], ["laravel", "blade"]),
+    ("/vendor/laravel/", "Laravel", ["framework"], ["laravel", "illuminate"]),
+    ("/yii/", "Yii", ["framework"], ["yii", "Yii"]),
+    ("/symphony/", "Symfony", ["framework"], ["symfony", "Symfony"]),
+    ("/craft/", "Craft CMS", ["cms"], ["craft", "Craft"]),
+    ("/umbraco/", "Umbraco", ["cms"], ["umbraco", "Umbraco"]),
+    ("/sitecore/", "Sitecore", ["cms"], ["sitecore", "Sitecore"]),
+    ("/typo3/", "TYPO3", ["cms"], ["typo3", "TYPO3"]),
+    ("/ghost/api/", "Ghost", ["cms"], ["ghost", "Ghost"]),
+    ("/strapi/", "Strapi", ["cms"], ["strapi", "Strapi"]),
+    ("/_next/", "Next.js", ["framework", "javascript"], ["_next", "__next", "next"]),
+    ("/_nuxt/", "Nuxt.js", ["framework", "javascript"], ["_nuxt", "__nuxt", "nuxt"]),
+    ("/remix-build/", "Remix", ["framework", "javascript"], ["remix", "Remix"]),
+    ("/astro/", "Astro", ["framework"], ["astro", "Astro"]),
 ]
 
 JS_FRAMEWORK_MARKERS: list[tuple[str, str, list[str]]] = [
@@ -1165,6 +1169,7 @@ def fingerprint_tech(
     target: str,
     timeout_sec: Optional[float] = None,
     max_paths: int = 14,
+    _baseline: Optional[Baseline] = None,
 ) -> list[TechResult]:
     results: list[TechResult] = []
     seen: set[str] = set()
@@ -1227,16 +1232,20 @@ def fingerprint_tech(
         except requests.RequestException:
             pass
 
-    # Framework-specific paths (cap count and time)
+    # Framework-specific paths (cap count and time) — require body evidence
     paths_to_check = stealth.randomize_order(FRAMEWORK_PATHS)[:max_paths]
-    for path, framework_name, cats in paths_to_check:
+    for path, framework_name, cats, body_markers in paths_to_check:
         if _over():
             break
         check_url = f"{url.rstrip('/')}{path}"
         try:
             resp = SESSION.get(check_url, timeout=4, allow_redirects=False)
             if resp.status_code == 200:
-                _add(framework_name, cats)
+                if _baseline and is_soft_404(resp, _baseline):
+                    continue
+                body_lower = (resp.text or "")[:8000].lower()
+                if any(m.lower() in body_lower for m in body_markers):
+                    _add(framework_name, cats)
         except requests.RequestException:
             continue
 
@@ -1256,10 +1265,18 @@ def run(
     base_domain = target.replace("https://", "").replace("http://", "").split("/")[0]
     run_start = time.time()
 
+    stealth.set_scan_seed(target)
+
+    baseline: Optional[Baseline] = None
+    try:
+        url_for_baseline = target if target.startswith("http") else f"https://{target}"
+        baseline = capture_baseline(SESSION, url_for_baseline)
+    except Exception:
+        pass
+
     def _over_budget() -> bool:
         return (time.time() - run_start) > RUN_BUDGET_SEC
 
-    # Fast phases first so we get value before budget runs out
     if scan_type in ("full", "techstack", "quick") and not _over_budget():
         try:
             remaining = max(2, RUN_BUDGET_SEC - (time.time() - run_start))
@@ -1270,6 +1287,7 @@ def run(
                     target,
                     timeout_sec=tech_timeout,
                     max_paths=14,
+                    _baseline=baseline,
                 )
                 report.technologies = future.result(timeout=tech_timeout + 5)
         except concurrent.futures.TimeoutError:
@@ -1294,7 +1312,8 @@ def run(
         try:
             remaining = max(2, RUN_BUDGET_SEC - (time.time() - run_start))
             report.sensitive_files = discover_sensitive_files(
-                target, max_paths=20, timeout_sec=min(remaining - 1, 14)
+                target, max_paths=20, timeout_sec=min(remaining - 1, 14),
+                _baseline=baseline,
             )
         except Exception as exc:
             report.errors.append(f"Sensitive file scan error: {exc}")

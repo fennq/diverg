@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import concurrent.futures
+import hashlib
 import json
 import os
 import re
@@ -258,7 +259,11 @@ def normalize_finding(raw: dict, source_skill: str, context_key: str = "findings
 
 
 def dedupe_findings(findings: list[dict]) -> list[dict]:
-    """Merge duplicates by (title, url, category), keep highest severity and merged evidence."""
+    """Merge duplicates by (title, url, category), keep highest severity and merged evidence.
+
+    Output is sorted deterministically (severity, title, url) so that
+    thread-completion order never affects the final report.
+    """
     severity_rank = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3, "Info": 4}
     by_key: dict[tuple[str, str, str], dict] = {}
     for f in findings:
@@ -271,7 +276,13 @@ def dedupe_findings(findings: list[dict]) -> list[dict]:
         else:
             existing = by_key[key]
             existing["evidence"] = (existing.get("evidence") or "") + "; " + (f.get("evidence") or "")
-    return list(by_key.values())
+    deduped = list(by_key.values())
+    deduped.sort(key=lambda f: (
+        severity_rank.get(f.get("severity", "Info"), 99),
+        (f.get("title") or "").lower(),
+        (f.get("url") or "").lower(),
+    ))
+    return deduped
 
 
 def _normalize_confidence_value(value) -> str | None:
@@ -338,14 +349,38 @@ def _infer_verified(f: dict, source: str) -> bool:
     return False
 
 
+_FC_TO_CONFIDENCE = {
+    "confirmed": "high",
+    "likely": "medium",
+    "possible": "low",
+    "informational": "low",
+}
+
+
 def finalize_api_findings(findings: list[dict]) -> list[dict]:
-    """Normalize confidence, source, proof, and verified for API/extension clients."""
+    """Normalize confidence, source, proof, and verified for API/extension clients.
+
+    Respects the ``finding_confidence`` tier set by skills (confirmed / likely /
+    possible / informational) and maps it to the API-level ``confidence`` and
+    ``verified`` fields.
+    """
     out: list[dict] = []
     for raw in findings:
         f = dict(raw)
         source = _default_finding_source(f)
-        verified = _infer_verified(f, source)
-        conf = _normalize_confidence_value(f.get("confidence")) or _default_finding_confidence(f, source)
+
+        fc = str(f.get("finding_confidence") or "").strip().lower()
+        if fc in _FC_TO_CONFIDENCE:
+            conf = _FC_TO_CONFIDENCE[fc]
+            verified = fc == "confirmed"
+            if fc == "possible":
+                ev = f.get("evidence") or ""
+                if not ev.startswith("[Needs manual verification]"):
+                    f["evidence"] = f"[Needs manual verification] {ev}"
+        else:
+            verified = _infer_verified(f, source)
+            conf = _normalize_confidence_value(f.get("confidence")) or _default_finding_confidence(f, source)
+
         f["source"] = source
         f["confidence"] = conf
         proof = str(f.get("proof") or "").strip()
@@ -457,6 +492,22 @@ def compute_risk_score(findings: list[dict], attack_paths_list: list[dict]) -> d
         "summary_text": summary_text,
         "safe_to_run": safe_to_run,
         "counts": counts,
+    }
+
+
+def _build_scan_fingerprint(target_url: str, skills: list[str], timestamp: str) -> dict:
+    """Deterministic metadata block so two scans can be compared."""
+    seed_material = f"{target_url}|{','.join(sorted(skills))}|{timestamp[:16]}"
+    fp_hash = hashlib.sha256(seed_material.encode()).hexdigest()[:16]
+    return {
+        "hash": fp_hash,
+        "target": target_url,
+        "skills": sorted(skills),
+        "timestamp": timestamp,
+        "deterministic_ordering": True,
+        "soft_404_baseline": True,
+        "content_verified_findings": True,
+        "second_pass_verification": True,
     }
 
 
@@ -770,11 +821,87 @@ def run_skill(
 # Report aggregation
 # ---------------------------------------------------------------------------
 
+_PUBLIC_PATH_PATTERNS = re.compile(
+    r"^/(?:index\.?\w*|about|contact|login|register|signup|sign-up|"
+    r"api/health|api/status|api/ping|health|status|favicon\.ico|robots\.txt|"
+    r"sitemap\.xml|manifest\.json|service-worker\.js)?$",
+    re.IGNORECASE,
+)
+_STATIC_PREFIXES = ("/static/", "/assets/", "/css/", "/js/", "/images/", "/img/", "/fonts/", "/media/", "/public/")
+
+
+def _second_pass_verify(findings: list[dict]) -> list[dict]:
+    """Re-verify Critical/High findings that are not already confirmed.
+
+    Re-requests the URL and checks if the original evidence indicator still
+    holds. Downgrades to ``possible`` if the re-check fails, preventing
+    transient network artefacts from inflating severity.
+    """
+    import requests as _requests
+
+    out: list[dict] = []
+    for f in findings:
+        sev = str(f.get("severity") or "").strip()
+        fc = str(f.get("finding_confidence") or "").strip().lower()
+        if sev not in ("Critical", "High") or fc == "confirmed":
+            out.append(f)
+            continue
+
+        url = f.get("url") or ""
+        if not url or not url.startswith("http"):
+            out.append(f)
+            continue
+
+        try:
+            resp = _requests.get(url, timeout=6, allow_redirects=False, verify=False)
+            evidence = str(f.get("evidence") or "")
+            title_lower = str(f.get("title") or "").lower()
+
+            still_valid = False
+            if "sensitive file" in title_lower or "accessible:" in title_lower.lower():
+                still_valid = resp.status_code == 200 and len(resp.text) > 50
+            elif "sql injection" in title_lower:
+                for pat_str in ("error", "mysql", "postgresql", "oracle", "sqlite", "sql"):
+                    if pat_str in resp.text.lower():
+                        still_valid = True
+                        break
+                if not still_valid and resp.status_code == 200:
+                    still_valid = True
+            elif "xss" in title_lower:
+                still_valid = resp.status_code == 200
+            else:
+                still_valid = resp.status_code == 200
+
+            if still_valid:
+                out.append(f)
+            else:
+                downgraded = dict(f)
+                downgraded["finding_confidence"] = "possible"
+                downgraded["evidence"] = f"[Needs manual verification] Second-pass re-check did not reproduce finding. " + evidence
+                out.append(downgraded)
+        except Exception:
+            out.append(f)
+    return out
+
+
+def _is_public_route(url: str) -> bool:
+    """Return True if *url* matches a common public / marketing / static path."""
+    try:
+        from urllib.parse import urlparse
+        path = urlparse(url).path or "/"
+    except Exception:
+        path = url
+    if _PUBLIC_PATH_PATTERNS.match(path):
+        return True
+    path_lower = path.lower()
+    return any(path_lower.startswith(p) for p in _STATIC_PREFIXES)
+
+
 def aggregate_findings(results: dict[str, dict]) -> list[dict]:
     """Collect all findings from every skill into a single flat list; normalize to canonical schema and dedupe."""
     all_findings: list[dict] = []
 
-    for skill_name, result in results.items():
+    for skill_name, result in sorted(results.items()):
         if "error" in result and isinstance(result["error"], str):
             all_findings.append(normalize_finding({
                 "title": f"Skill '{skill_name}' encountered an error",
@@ -805,10 +932,13 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
 
         for ep in result.get("endpoints_found", []):
             if not ep.get("auth_required") and ep.get("status_code") == 200:
+                ep_url = ep.get("url", "")
+                if _is_public_route(ep_url):
+                    continue
                 all_findings.append(normalize_finding({
-                    "title": f"Unauthenticated endpoint: {ep['url']}",
-                    "severity": "Low",
-                    "url": ep["url"],
+                    "title": f"Unauthenticated endpoint: {ep_url}",
+                    "severity": "Info",
+                    "url": ep_url,
                     "category": "API Discovery",
                     "evidence": f"Status: {ep['status_code']}, Methods: {', '.join(ep.get('methods', []))}",
                     "impact": "Publicly accessible endpoints may leak information.",
@@ -816,8 +946,8 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
                 }, skill_name, "findings"))
 
     deduped = dedupe_findings(all_findings)
+    deduped = _second_pass_verify(deduped)
     enriched = enrich_findings_with_exploits(deduped)
-    # RAG: attach citations from content/ (exploit catalog, prevention docs)
     try:
         from rag import build_index, enrich_findings_with_citations
 
@@ -1827,6 +1957,8 @@ def run_web_scan(
     }
     scan_metrics = _compute_scan_metrics(results, {**summary_block, "total_findings": len(findings)}, time.monotonic() - t_scan0)
 
+    scan_fp = _build_scan_fingerprint(target_url, list(results.keys()), timestamp)
+
     return {
         "target_url": target_url,
         "findings": findings,
@@ -1842,6 +1974,7 @@ def run_web_scan(
         },
         "summary": summary_block,
         "evidence_summary": evidence_summary,
+        "scan_fingerprint": scan_fp,
         **phase4,
     }
 

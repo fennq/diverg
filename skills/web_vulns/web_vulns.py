@@ -20,7 +20,8 @@ import requests
 from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from stealth import get_session, randomize_order
+from stealth import get_session, randomize_order, set_scan_seed
+from http_baseline import capture_baseline, is_soft_404, Baseline
 SESSION = get_session()
 
 
@@ -62,6 +63,7 @@ class Finding:
     impact: str
     remediation: str
     cvss: str = ""
+    finding_confidence: str = ""  # confirmed / likely / possible / informational
 
 
 @dataclass
@@ -220,6 +222,66 @@ XSS_REFLECTION_PATTERNS = [
 # Optional callback URL for XSS execution proof. If set, we send a proof payload that triggers a GET to this URL when executed in a browser.
 XSS_CALLBACK_URL = os.environ.get("DIVERG_XSS_CALLBACK_URL", "").strip()
 
+_NON_EXEC_PARENTS = {"title", "textarea", "style", "noscript", "noframes"}
+
+
+def _xss_in_executable_context(resp_text: str, payload: str) -> bool:
+    """Return True only if *payload* appears in an executable HTML context.
+
+    Rejects reflections that are entity-encoded, inside HTML comments,
+    or inside non-executable elements like <title>, <textarea>, <style>.
+    """
+    try:
+        soup = BeautifulSoup(resp_text, "html.parser")
+    except Exception:
+        return False
+
+    payload_lower = payload.lower()
+    text_lower = resp_text.lower()
+
+    if payload_lower not in text_lower:
+        return False
+
+    for comment in soup.find_all(string=lambda t: isinstance(t, type(soup.new_string(""))) is False):
+        pass
+
+    from bs4 import Comment
+    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+        if payload_lower in str(comment).lower():
+            return False
+
+    for tag_name in _NON_EXEC_PARENTS:
+        for tag in soup.find_all(tag_name):
+            if payload_lower in tag.get_text().lower():
+                return False
+
+    for script in soup.find_all("script"):
+        if payload_lower in str(script).lower():
+            return True
+
+    for tag in soup.find_all(True):
+        for attr_name, attr_val in (tag.attrs or {}).items():
+            if attr_name.lower().startswith("on"):
+                val_str = attr_val if isinstance(attr_val, str) else " ".join(attr_val)
+                if payload_lower in val_str.lower() or "alert" in val_str.lower():
+                    return True
+            if attr_name.lower() in ("href", "src", "data", "action") and isinstance(attr_val, str):
+                if attr_val.strip().lower().startswith("javascript:"):
+                    return True
+
+    tag_patterns = [
+        re.compile(r"<(?:img|svg|body|audio|video|details|marquee|select|textarea|input)\b[^>]*\bon\w+\s*=", re.IGNORECASE),
+        re.compile(r"<script\b", re.IGNORECASE),
+    ]
+    for pat in tag_patterns:
+        match = pat.search(resp_text)
+        if match:
+            region = resp_text[max(0, match.start() - 10):match.end() + 200]
+            if payload[:20].lower() in region.lower():
+                return True
+
+    return False
+
 
 def test_xss(url: str) -> list[Finding]:
     findings: list[Finding] = []
@@ -241,8 +303,9 @@ def test_xss(url: str) -> list[Finding]:
                 resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                 for pattern in XSS_REFLECTION_PATTERNS:
                     if pattern.search(resp.text):
+                        executable = _xss_in_executable_context(resp.text, payload)
                         evidence_extra = ""
-                        if XSS_CALLBACK_URL and not _budget_expired(_t0):
+                        if executable and XSS_CALLBACK_URL and not _budget_expired(_t0):
                             proof_payload = '<img src=x onerror="fetch(\'' + XSS_CALLBACK_URL + '?xss_proof=1\')">'
                             proof_params = {k: v[0] for k, v in params.items()}
                             proof_params[param_name] = proof_payload
@@ -252,15 +315,28 @@ def test_xss(url: str) -> list[Finding]:
                                 evidence_extra = " Proof: callback payload sent; verify receipt at your listener for execution proof."
                             except requests.RequestException:
                                 evidence_extra = " Proof: callback URL configured but proof request failed."
+
+                        if executable:
+                            tag = "[CONFIRMED]"
+                            sev = "High"
+                            conf_note = "Payload reflected in executable HTML context."
+                            fc = "confirmed"
+                        else:
+                            tag = "[REFLECTED - verify manually]"
+                            sev = "Medium"
+                            conf_note = "Payload reflected but not in a clearly executable context (may be encoded, commented, or in non-script element)."
+                            fc = "possible"
+
                         findings.append(Finding(
-                            title=f"Reflected XSS via parameter '{param_name}' [CONFIRMED]",
-                            severity="High",
+                            title=f"Reflected XSS via parameter '{param_name}' {tag}",
+                            severity=sev,
                             url=test_url,
                             category="OWASP-A03 Injection (XSS)",
-                            evidence=f"Payload: {payload}\nReflected in response (matched: {pattern.pattern[:60]}). Verification: payload sent and reflection observed.{evidence_extra}",
+                            evidence=f"Payload: {payload}\n{conf_note} Matched: {pattern.pattern[:60]}.{evidence_extra}",
                             impact="An attacker could execute arbitrary JavaScript in victim browsers, steal session cookies, or deface pages.",
                             remediation="Sanitize and output-encode all user-supplied input before rendering in HTML. Implement a strict Content-Security-Policy.",
                             cvss="6.1 (Medium)",
+                            finding_confidence=fc,
                         ))
                         return findings
             except requests.RequestException:
@@ -427,19 +503,28 @@ def test_sqli(url: str) -> list[Finding]:
         if _budget_expired(_t0):
             return findings
         # --- Error-based ---
-        for payload in randomize_order(SQLI_ERROR_PATTERNS_PAYLOADS := SQLI_PAYLOADS_ERROR):
+        for payload in randomize_order(SQLI_PAYLOADS_ERROR):
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
                     resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                     for pat in SQLI_ERROR_PATTERNS:
                         if pat.search(resp.text):
+                            if baseline and pat.search(baseline.text):
+                                continue
                             proof = _try_sqli_extract(url, pn)
+                            if proof:
+                                tag = "[CONFIRMED]"
+                                fc = "confirmed"
+                                conf_note = f"Proof: extracted DB version: {proof}."
+                            else:
+                                tag = "[LIKELY]"
+                                fc = "likely"
+                                conf_note = "DB error pattern matched; extraction not confirmed."
                             evidence = (
-                                f"Payload: {payload}\nDB error pattern in response: {pat.pattern[:80]}\nVerification: bypass tested; DB error reflected."
-                                + (f" Proof: extracted value: {proof}." if proof else "")
+                                f"Payload: {payload}\nDB error pattern in response: {pat.pattern[:80]}\n{conf_note}"
                             )
                             findings.append(Finding(
-                                title=f"SQL Injection (error-based) via '{pn}' [CONFIRMED]",
+                                title=f"SQL Injection (error-based) via '{pn}' {tag}",
                                 severity="Critical",
                                 url=test_url,
                                 category="OWASP-A03 Injection (SQLi)",
@@ -447,6 +532,7 @@ def test_sqli(url: str) -> list[Finding]:
                                 impact="An attacker could read, modify, or delete database contents and potentially execute OS commands.",
                                 remediation="Use parameterized queries / prepared statements. Never concatenate user input into SQL.",
                                 cvss="9.8 (Critical)",
+                                finding_confidence=fc,
                             ))
                             return findings
                 except requests.RequestException:
@@ -489,7 +575,7 @@ def test_sqli(url: str) -> list[Finding]:
                 except requests.RequestException:
                     continue
 
-        # --- Boolean blind ---
+        # --- Boolean blind (retry to confirm consistency) ---
         if _budget_expired(_t0):
             return findings
         for true_payload, false_payload in randomize_order(SQLI_PAYLOADS_BOOLEAN):
@@ -507,45 +593,80 @@ def test_sqli(url: str) -> list[Finding]:
                     if len_diff > 50 and baseline:
                         true_like_baseline = abs(len(resp_true.text) - baseline_len) < abs(len(resp_false.text) - baseline_len)
                         if true_like_baseline:
+                            resp_true2 = _req().get(true_url, timeout=TIMEOUT, allow_redirects=False)
+                            resp_false2 = _req().get(false_url, timeout=TIMEOUT, allow_redirects=False)
+                            len_diff2 = abs(len(resp_true2.text) - len(resp_false2.text))
+                            if len_diff2 < 30:
+                                continue
+                            proof = _try_sqli_extract(url, pn)
+                            if proof:
+                                tag = "[CONFIRMED]"
+                                sev = "Critical"
+                                fc = "confirmed"
+                                conf_note = f"Confirmed via consistent boolean diff and extraction (version: {proof})."
+                            else:
+                                tag = "[POSSIBLE]"
+                                sev = "Medium"
+                                fc = "possible"
+                                conf_note = "[Needs manual verification] Consistent boolean response diff observed but no data extraction."
                             findings.append(Finding(
-                                title=f"Possible Blind SQL Injection (boolean) via '{pn}' [UNCONFIRMED]",
-                                severity="High",
+                                title=f"Blind SQL Injection (boolean) via '{pn}' {tag}",
+                                severity=sev,
                                 url=true_url,
                                 category="OWASP-A03 Injection (SQLi)",
-                                evidence=f"True/False payloads tested; response length diff: {len_diff} bytes. Verification: inferential only; confirm with manual testing.",
+                                evidence=f"True/False payloads tested; response length diff: {len_diff}/{len_diff2} bytes (consistent). {conf_note}",
                                 impact="An attacker could extract database contents one bit at a time via boolean inference if confirmed.",
                                 remediation="Use parameterized queries / prepared statements.",
                                 cvss="9.8 (Critical)",
+                                finding_confidence=fc,
                             ))
                             return findings
                 except requests.RequestException:
                     continue
 
-        # --- Time-based blind ---
+        # --- Time-based blind (baseline comparison + retry) ---
         if _budget_expired(_t0):
             return findings
         for payload, delay in randomize_order(SQLI_PAYLOADS_TIME):
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
+                    start_bl = time.time()
+                    _req().get(url, timeout=TIMEOUT, allow_redirects=False)
+                    baseline_time = time.time() - start_bl
+
                     start = time.time()
-                    _req().get(test_url, timeout=TIMEOUT + delay, allow_redirects=False)
+                    _req().get(test_url, timeout=TIMEOUT + delay + 2, allow_redirects=False)
                     elapsed = time.time() - start
-                    if elapsed >= delay * 0.8:
-                        start2 = time.time()
-                        _req().get(url, timeout=TIMEOUT, allow_redirects=False)
-                        baseline_time = time.time() - start2
-                        if elapsed > baseline_time + (delay * 0.6):
-                            findings.append(Finding(
-                                title=f"Blind SQL Injection (time-based) via '{pn}' [CONFIRMED]",
-                                severity="Critical",
-                                url=test_url,
-                                category="OWASP-A03 Injection (SQLi)",
-                                evidence=f"Payload: {payload}\nResponse delayed {elapsed:.1f}s (baseline: {baseline_time:.1f}s, expected: {delay}s). Verification: delay observed; bypass tested.",
-                                impact="An attacker could extract database contents via time-based inference.",
-                                remediation="Use parameterized queries / prepared statements.",
-                                cvss="9.8 (Critical)",
-                            ))
-                            return findings
+
+                    if elapsed < delay * 0.8:
+                        continue
+                    if elapsed < baseline_time + (delay * 0.7):
+                        continue
+
+                    start2 = time.time()
+                    _req().get(test_url, timeout=TIMEOUT + delay + 2, allow_redirects=False)
+                    elapsed2 = time.time() - start2
+
+                    if elapsed2 < delay * 0.8:
+                        continue
+
+                    tag = "[LIKELY]"
+                    sev = "High"
+                    fc = "likely"
+                    conf_note = f"[Needs manual verification] Delay observed twice ({elapsed:.1f}s, {elapsed2:.1f}s vs baseline {baseline_time:.1f}s)."
+
+                    findings.append(Finding(
+                        title=f"Blind SQL Injection (time-based) via '{pn}' {tag}",
+                        severity=sev,
+                        url=test_url,
+                        category="OWASP-A03 Injection (SQLi)",
+                        evidence=f"Payload: {payload}\n{conf_note}",
+                        impact="An attacker could extract database contents via time-based inference.",
+                        remediation="Use parameterized queries / prepared statements.",
+                        cvss="9.8 (Critical)",
+                        finding_confidence=fc,
+                    ))
+                    return findings
                 except requests.RequestException:
                     continue
 
@@ -1182,9 +1303,9 @@ SENSITIVE_PATHS = [
     ("debug.log", [re.compile(r"ERROR|WARN|Exception|Traceback", re.IGNORECASE)]),
     ("error.log", [re.compile(r"ERROR|WARN|Exception|Traceback", re.IGNORECASE)]),
     ("access.log", [re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}.*?(GET|POST)")]),
-    ("admin/", []),
-    ("administrator/", []),
-    ("phpmyadmin/", []),
+    ("admin/", [re.compile(r"<form[^>]*(?:login|password|sign.?in)|admin.?panel|dashboard|log.?in|username", re.IGNORECASE)]),
+    ("administrator/", [re.compile(r"<form[^>]*(?:login|password|sign.?in)|admin.?panel|dashboard|log.?in|username", re.IGNORECASE)]),
+    ("phpmyadmin/", [re.compile(r"phpMyAdmin|phpmyadmin|pma_navigation|pmahomme", re.IGNORECASE)]),
     (".well-known/security.txt", [re.compile(r"Contact:|Policy:", re.IGNORECASE)]),
 ]
 
@@ -1230,7 +1351,7 @@ def _severity_for_path(path: str) -> tuple[str, str, str]:
     )
 
 
-def test_sensitive_files(url: str) -> list[Finding]:
+def test_sensitive_files(url: str, baseline: Optional[Baseline] = None) -> list[Finding]:
     findings: list[Finding] = []
     _t0 = time.time()
     parsed = urlparse(url)
@@ -1244,18 +1365,7 @@ def test_sensitive_files(url: str) -> list[Finding]:
             resp = _req().get(check_url, timeout=TIMEOUT, allow_redirects=False)
 
             if resp.status_code == 200 and len(resp.text) > 0:
-                if not indicators:
-                    if resp.status_code == 200 and len(resp.text) > 50:
-                        sev, impact, remed = _severity_for_path(path)
-                        findings.append(Finding(
-                            title=f"Accessible: /{path}",
-                            severity=sev,
-                            url=check_url,
-                            category="OWASP-A05 Security Misconfiguration (Sensitive File)",
-                            evidence=f"HTTP {resp.status_code}, {len(resp.text)} bytes returned",
-                            impact=impact,
-                            remediation=remed,
-                        ))
+                if baseline and is_soft_404(resp, baseline):
                     continue
 
                 for indicator in indicators:
@@ -1269,6 +1379,7 @@ def test_sensitive_files(url: str) -> list[Finding]:
                             evidence=f"HTTP {resp.status_code}\nContent matched: {indicator.pattern[:60]}\nFirst 200 chars: {resp.text[:200]}",
                             impact=impact,
                             remediation=remed,
+                            finding_confidence="confirmed",
                         ))
                         break
         except requests.RequestException:
@@ -1305,6 +1416,7 @@ def test_security_headers(url: str) -> list[Finding]:
                     evidence=f"Response headers do not include '{header}'",
                     impact=f"Missing {header} header reduces defense-in-depth against common web attacks.",
                     remediation=f"Add the '{header}' response header with an appropriate value.",
+                    finding_confidence="confirmed",
                 ))
     except requests.RequestException:
         pass
@@ -1320,6 +1432,14 @@ def run(target_url: str, scan_type: str = "full", crawl_depth: int = 2) -> str:
     run_start = time.time()
     max_pages = int(os.environ.get("DIVERG_WEB_VULN_MAX_PAGES", "8"))
     max_depth_cap = int(os.environ.get("DIVERG_WEB_CRAWL_MAX_DEPTH", "4"))
+
+    set_scan_seed(target_url)
+
+    baseline: Optional[Baseline] = None
+    try:
+        baseline = capture_baseline(_req(), target_url)
+    except Exception:
+        pass
 
     try:
         if scan_type == "full":
@@ -1351,11 +1471,6 @@ def run(target_url: str, scan_type: str = "full", crawl_depth: int = 2) -> str:
         ("redirect", "Open Redirect", test_open_redirect),
     )
 
-    global_tests = (
-        ("files", "Sensitive Files", test_sensitive_files),
-        ("headers", "Security Headers", test_security_headers),
-    )
-
     for page in pages:
         if _run_budget_expired(run_start):
             break
@@ -1368,14 +1483,16 @@ def run(target_url: str, scan_type: str = "full", crawl_depth: int = 2) -> str:
                 except Exception as exc:
                     report.errors.append(f"{label} test error on {page}: {exc}")
 
-    for key, label, func in global_tests:
-        if _run_budget_expired(run_start):
-            break
-        if scan_type in ("full", key):
-            try:
-                report.findings.extend(func(target_url))
-            except Exception as exc:
-                report.errors.append(f"{label} test error: {exc}")
+    if not _run_budget_expired(run_start) and scan_type in ("full", "files"):
+        try:
+            report.findings.extend(test_sensitive_files(target_url, baseline=baseline))
+        except Exception as exc:
+            report.errors.append(f"Sensitive Files test error: {exc}")
+    if not _run_budget_expired(run_start) and scan_type in ("full", "headers"):
+        try:
+            report.findings.extend(test_security_headers(target_url))
+        except Exception as exc:
+            report.errors.append(f"Security Headers test error: {exc}")
 
     return json.dumps(asdict(report), indent=2)
 
