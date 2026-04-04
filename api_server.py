@@ -16,9 +16,9 @@ Scan endpoints:
   POST /api/poc/simulate         Run PoC for a finding
 
 Investigation (console):
-  POST /api/investigation/blockchain   Solana via Helius + EVM via public RPC (+ optional Etherscan tx list)
-  POST /api/investigation/blockchain-full  Full blockchain_investigation skill (crime_report, flow_graph; server API keys)
-  POST /api/investigation/solana-bundle  Token mint: holders, cluster %, coordination / risk score (extension parity)
+  POST /api/investigation/blockchain   Solana via Helius + EVM via public RPC; requires server ARKHAM_API_KEY (Intel summary)
+  POST /api/investigation/blockchain-full  Full blockchain_investigation skill (crime_report, flow_graph; server API keys incl. ARKHAM_API_KEY)
+  POST /api/investigation/solana-bundle  Token mint: holders, cluster %, coordination / risk score; requires server ARKHAM_API_KEY
   POST /api/investigation/domain       OSINT + recon + headers (full skill JSON)
   POST /api/investigation/reputation   OSINT context + entity reputation
 
@@ -117,6 +117,82 @@ ALLOWED_ORIGINS = [
 ]
 MAX_REQUEST_SIZE = 2 * 1024 * 1024  # 2 MB
 IS_PRODUCTION = os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("DIVERG_PRODUCTION")
+
+_INVESTIGATION_DIR = str(ROOT / "investigation")
+if _INVESTIGATION_DIR not in sys.path:
+    sys.path.insert(0, _INVESTIGATION_DIR)
+
+
+def _arkham_env_error_response():
+    """Return (jsonify(...), status) if ARKHAM_API_KEY is missing on the server; else None."""
+    if (os.environ.get("ARKHAM_API_KEY") or "").strip():
+        return None
+    return jsonify({
+        "error": "ARKHAM_API_KEY must be set on the server for blockchain investigation endpoints.",
+        "hint": "Request access at https://intel.arkm.com/api and add the key to the server environment or .env.",
+    }), 400
+
+
+def _attach_arkham_intel_block(out: dict, addr: str) -> None:
+    """Mutate out with arkham explorer URL, summary, and optional error (never silent)."""
+    try:
+        import arkham_intel as ai
+    except ImportError:
+        out["arkham"] = {
+            "explorer_url": "",
+            "summary": {},
+            "ok": False,
+            "error": "arkham_intel module unavailable on server",
+        }
+        return
+    key = (os.environ.get("ARKHAM_API_KEY") or "").strip()
+    sess = requests.Session() if requests else None
+    data, err = ai.address_intelligence_all(addr, api_key=key, session=sess)
+    out["arkham"] = {
+        "explorer_url": ai.explorer_url_for_address(addr),
+        "summary": ai.summarize_for_report(data),
+        "ok": err is None,
+        "error": err,
+    }
+
+
+def _enrich_solana_bundle_arkham(raw: dict) -> dict:
+    """Batch Arkham labels for focus cluster + top holders (requires ARKHAM_API_KEY, already validated)."""
+    if not raw.get("ok") or not requests:
+        return raw
+    key = (os.environ.get("ARKHAM_API_KEY") or "").strip()
+    if not key:
+        raw["arkham"] = {"ok": False, "error": "ARKHAM_API_KEY missing", "batch_labels": {}}
+        return raw
+    try:
+        import arkham_intel as ai
+    except ImportError:
+        raw["arkham"] = {"ok": False, "error": "arkham_intel unavailable", "batch_labels": {}}
+        return raw
+    wallets: list[str] = []
+    for w in (raw.get("focus_cluster_wallets") or [])[:40]:
+        if isinstance(w, str) and w.strip():
+            wallets.append(w.strip())
+    for row in (raw.get("top_holders") or [])[:15]:
+        if not isinstance(row, dict):
+            continue
+        wa = row.get("wallet")
+        if isinstance(wa, str) and wa.strip() and wa not in wallets:
+            wallets.append(wa.strip())
+    wallets = wallets[:50]
+    if not wallets:
+        raw["arkham"] = {"ok": True, "batch_labels": {}, "wallets_queried": 0}
+        return raw
+    sess = requests.Session()
+    labels = ai.intel_batch(sess, wallets, key, chain="solana")
+    raw["arkham"] = {
+        "ok": True,
+        "batch_labels": labels,
+        "wallets_queried": len(wallets),
+        "labeled_count": len(labels),
+    }
+    return raw
+
 
 # ── Rate limiter ──────────────────────────────────────────────────────────
 
@@ -1062,6 +1138,9 @@ def investigation_blockchain():
     addr = sanitize_text(data.get("address") or "", 128).strip()
     if not addr:
         return jsonify({"error": "Missing address"}), 400
+    ark_miss = _arkham_env_error_response()
+    if ark_miss is not None:
+        return ark_miss
     network = sanitize_text(data.get("network") or "mainnet", 16).lower()
     if network not in ("mainnet", "devnet"):
         network = "mainnet"
@@ -1086,6 +1165,7 @@ def investigation_blockchain():
             out["summary"] = _summarize_chain_evm(raw)
         except Exception as e:
             return jsonify({"error": str(e), "address": addr, "chain": "evm"}), 200
+        _attach_arkham_intel_block(out, addr)
         _reward_investigation(g.user["id"], "blockchain")
         return jsonify(out)
 
@@ -1125,6 +1205,7 @@ def investigation_blockchain():
         raw["getTokenAccountsByOwner"] = {"error": str(e)}
     out["raw"] = raw
     out["summary"] = _summarize_chain_solana(raw)
+    _attach_arkham_intel_block(out, addr)
     _reward_investigation(g.user["id"], "blockchain")
     return jsonify(out)
 
@@ -1163,6 +1244,10 @@ def investigation_blockchain_full():
 
     if not deployer and not token_addresses:
         return jsonify({"error": "Provide address, deployer_address, or token_addresses"}), 400
+
+    ark_miss = _arkham_env_error_response()
+    if ark_miss is not None:
+        return ark_miss
 
     target_url = sanitize_text(data.get("target_url") or "", 2048).strip()
     chain = sanitize_text(data.get("chain") or "solana", 32).lower().strip()
@@ -1375,6 +1460,10 @@ def investigation_solana_bundle():
     if not api_key:
         return jsonify({"error": "Helius API key required. Add it in Settings or set HELIUS_API_KEY on the server."}), 400
 
+    ark_miss = _arkham_env_error_response()
+    if ark_miss is not None:
+        return ark_miss
+
     exclude_wallets = None
     ex = data.get("exclude_wallets")
     if isinstance(ex, list):
@@ -1438,6 +1527,7 @@ def investigation_solana_bundle():
 
     if isinstance(out, dict) and out.get("ok"):
         out = _enrich_solana_bundle_payload(out)
+        out = _enrich_solana_bundle_arkham(out)
     payload = out if isinstance(out, dict) else {"ok": False, "error": "Unexpected response"}
     if isinstance(payload, dict) and payload.get("ok"):
         _reward_investigation(g.user["id"], "solana_bundle")
