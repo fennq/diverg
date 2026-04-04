@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Whitepaper | Diverg Documentation</title>
+  <link rel="canonical" href="https://divergsec.com/resources/docs/whitepaper.html">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://divergsec.com/resources/docs/whitepaper.html">
+  <meta property="og:title" content="Diverg Whitepaper | Security &amp; Blockchain Investigation">
+  <meta property="og:description" content="Comprehensive technical whitepaper for the Diverg security and blockchain investigation platform.">
+  <meta property="og:image" content="https://divergsec.com/assets/og-image.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="../../assets/favicon.png?v=2">
+  <link rel="shortcut icon" href="../../favicon.png?v=2" type="image/png">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../../styles.css?v=2">
+  <link rel="stylesheet" href="docs.css">
+</head>
+<body class="docs-page">
+  <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+    <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+    <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+    </svg>
+  </button>
+
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="../../" class="logo">
+        <img src="../../assets/logo.png" alt="Diverg" class="logo-img" width="32" height="32" loading="eager">
+      </a>
+      <nav class="nav-links">
+        <a href="../../product/">Product</a>
+        <a href="../../solutions/">Solutions</a>
+        <a href="../../company/">Company</a>
+        <a href="../../careers/">Careers</a>
+        <a href="../">Resources</a>
+      </nav>
+      <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Toggle menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div class="nav-actions">
+        <a href="https://dash.divergsec.com/login" class="btn btn-primary">Get Started</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+  <div class="docs-container">
+    <aside class="docs-sidebar-left" id="docsSidebar">
+      <div class="docs-nav-section">
+        <p class="docs-sidebar-title">Getting Started</p>
+        <ul class="docs-nav">
+          <li class="docs-nav-item"><a href="index.html">Welcome</a></li>
+          <li class="docs-nav-item"><a href="quickstart.html">Quick Start</a></li>
+          <li class="docs-nav-item"><a href="installation.html">Installation</a></li>
+        </ul>
+      </div>
+      
+      <div class="docs-nav-section">
+        <p class="docs-sidebar-title">Core Concepts</p>
+        <ul class="docs-nav">
+          <li class="docs-nav-item"><a href="what-is-diverg.html">What is Diverg?</a></li>
+          <li class="docs-nav-item"><a href="architecture.html">Architecture</a></li>
+          <li class="docs-nav-item"><a href="skills.html">Skills System</a></li>
+          <li class="docs-nav-item"><a href="fact-only.html">Fact-Only Reporting</a></li>
+        </ul>
+      </div>
+      
+      <div class="docs-nav-section">
+        <p class="docs-sidebar-title">Features</p>
+        <ul class="docs-nav">
+          <li class="docs-nav-item"><a href="web-security.html">Web Security</a></li>
+          <li class="docs-nav-item"><a href="blockchain.html">Blockchain</a></li>
+          <li class="docs-nav-item"><a href="osint.html">OSINT</a></li>
+          <li class="docs-nav-item"><a href="reporting.html">Reporting</a></li>
+        </ul>
+      </div>
+      
+      <div class="docs-nav-section">
+        <p class="docs-sidebar-title">Reference</p>
+        <ul class="docs-nav">
+          <li class="docs-nav-item"><a href="whitepaper.html" class="active">Whitepaper</a></li>
+          <li class="docs-nav-item"><a href="api.html">API Reference</a></li>
+          <li class="docs-nav-item"><a href="integrations.html">Integrations</a></li>
+          <li class="docs-nav-item"><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <div class="docs-content-wrapper">
+      <main class="docs-content">
+        <article class="docs-article">
+          <header class="docs-header">
+            <h1>Diverg Whitepaper</h1>
+            <p class="docs-meta">A comprehensive technical document covering the Diverg platform's architecture, methodology, and capabilities.</p>
+          </header>
+
+          <h2 id="executive-summary">1. Executive Summary</h2>
+          <p>Diverg is an autonomous security and blockchain investigation platform designed for modern security teams. Unlike traditional toolchains that require analysts to switch between multiple disconnected products, Diverg provides a unified environment where web security assessment, blockchain analysis, and open-source intelligence (OSINT) converge into cohesive investigations.</p>
+          
+          <div class="highlight-box">
+            <h4>Key Differentiators</h4>
+            <ul>
+              <li><strong>Unified Platform:</strong> Web, blockchain, and OSINT in one workflow</li>
+              <li><strong>Fact-Only Reporting:</strong> No synthetic or placeholder data ever</li>
+              <li><strong>Modular Architecture:</strong> Skill-based system that adapts to targets</li>
+              <li><strong>Multi-Modal Delivery:</strong> CLI, browser extension, API, and enterprise deployments</li>
+            </ul>
+          </div>
+
+          <h2 id="problem-statement">2. Problem Statement</h2>
+          
+          <h3 id="fragmented-toolchains">2.1 Fragmented Toolchains</h3>
+          <p>Security investigations today require analysts to operate across numerous disconnected tools. A typical blockchain investigation might involve:</p>
+          <ul>
+            <li>Block explorers (Etherscan, Solscan) for transaction lookup</li>
+            <li>Labeling services (Arkham, Nansen) for entity identification</li>
+            <li>Visualization tools (Bubblemaps) for flow analysis</li>
+            <li>Web scanners (Burp, Nuclei) for infrastructure assessment</li>
+            <li>OSINT tools (WHOIS, DNS enumeration) for correlation</li>
+            <li>Spreadsheets or notebooks for manual correlation</li>
+          </ul>
+          <p>This fragmentation creates friction, increases investigation time, and raises the risk of missed connections between data points.</p>
+          
+          <h3 id="data-integrity">2.2 Data Integrity Issues</h3>
+          <p>Many security tools present synthetic or placeholder data when real data sources are unavailable. This creates a fundamental trust problem: analysts cannot distinguish between verified findings and generated examples, leading to potentially critical errors in security assessments.</p>
+
+          <h2 id="solution">3. The Diverg Solution</h2>
+          
+          <h3 id="unified-investigation">3.1 Unified Investigation Model</h3>
+          <p>Diverg introduces a single platform where investigations can span multiple surfaces simultaneously. A single command or API call can initiate reconnaissance across:</p>
+          <ul>
+            <li><strong>Web Infrastructure:</strong> Domains, subdomains, technologies, vulnerabilities</li>
+            <li><strong>Blockchain Networks:</strong> Wallets, tokens, transactions, flows, counterparties</li>
+            <li><strong>Open Sources:</strong> WHOIS, DNS, historical data, public records</li>
+          </ul>
+          <p>Results are correlated automatically, surfacing connections that might be missed when using separate tools.</p>
+          
+          <h3 id="skill-architecture">3.2 Modular Skill Architecture</h3>
+          <p>The platform is built around a skill-based architecture where each capability is encapsulated as a discrete, composable unit:</p>
+          
+          <h4>Core Skills</h4>
+          <ul>
+            <li><strong>Reconnaissance:</strong> Port scanning, subdomain enumeration, tech fingerprinting</li>
+            <li><strong>Web Vulnerabilities:</strong> XSS, SQLi, CSRF, misconfiguration detection</li>
+            <li><strong>Security Headers:</strong> CSP, HSTS, CORS, and custom header analysis</li>
+            <li><strong>SSL/TLS Analysis:</strong> Certificate validation, cipher suites, protocol versions</li>
+            <li><strong>Authentication Testing:</strong> Session management, cookie flags, brute-force detection</li>
+            <li><strong>API Security:</strong> Endpoint discovery, parameter fuzzing, auth bypass checks</li>
+            <li><strong>Blockchain Analysis:</strong> Wallet profiling, token tracking, flow mapping</li>
+            <li><strong>OSINT Collection:</strong> WHOIS, DNS, email patterns, historical archives</li>
+          </ul>
+          
+          <p>Skills can be combined dynamically based on target type. Investigating a DeFi protocol triggers different skill combinations than assessing a traditional web application.</p>
+
+          <h2 id="fact-only">4. Fact-Only Reporting Philosophy</h2>
+          
+          <h3 id="transparency">4.1 Radical Transparency</h3>
+          <p>Every Diverg report explicitly distinguishes between:</p>
+          <ul>
+            <li><strong>Verified Findings:</strong> Data sourced from live APIs and active testing</li>
+            <li><strong>Skipped Checks:</strong> Tests not performed due to missing configuration</li>
+            <li><strong>Tool Limitations:</strong> Known constraints that may affect coverage</li>
+          </ul>
+          
+          <h3 id="degraded-operation">4.2 Graceful Degradation</h3>
+          <p>When API keys are unavailable (e.g., no Solscan Pro access), Diverg continues operating with available skills rather than failing or substituting fake data. The report clearly marks which blockchain checks were skipped, allowing analysts to supplement manually if needed.</p>
+
+          <h2 id="technology">5. Technical Architecture</h2>
+          
+          <h3 id="methodologies">5.1 Established Methodologies</h3>
+          <p>Diverg aligns with industry-standard frameworks:</p>
+          <ul>
+            <li><strong>OWASP Testing Guide:</strong> For web application security assessment</li>
+            <li><strong>PTES (Penetration Testing Execution Standard):</strong> For structured penetration testing</li>
+            <li><strong>MITRE ATT&CK:</strong> For threat modeling and attack simulation</li>
+          </ul>
+          
+          <h3 id="data-sources">5.2 Data Source Integrations</h3>
+          <p>Native integrations with major security and blockchain data providers:</p>
+          <ul>
+            <li><strong>Blockchain:</strong> Solscan Pro, Arkham, Etherscan, Bubblemaps</li>
+            <li><strong>Web Intelligence:</strong> Wappalyzer, Shodan, Censys</li>
+            <li><strong>Historical Data:</strong> Wayback Machine, Common Crawl</li>
+            <li><strong>Threat Intel:</strong> Custom feeds and commercial providers (enterprise)</li>
+          </ul>
+          
+          <h3 id="deployment-models">5.3 Deployment Models</h3>
+          <ul>
+            <li><strong>Cloud SaaS:</strong> Managed investigations via web dashboard and API</li>
+            <li><strong>CLI Tool:</strong> Local execution for developers and security researchers</li>
+            <li><strong>Browser Extension:</strong> One-click investigations from any webpage</li>
+            <li><strong>Enterprise On-Premise:</strong> Self-hosted deployments with custom integrations</li>
+          </ul>
+
+          <h2 id="capabilities">6. Detailed Capabilities</h2>
+          
+          <h3 id="web-security">6.1 Web Security Assessment</h3>
+          <p>Comprehensive web infrastructure testing including:</p>
+          <ul>
+            <li>Port scanning with service detection and banner grabbing</li>
+            <li>Subdomain enumeration via DNS brute force and certificate transparency</li>
+            <li>Technology fingerprinting with version detection</li>
+            <li>Vulnerability scanning for OWASP Top 10 and beyond</li>
+            <li>Authentication and session management testing</li>
+            <li>API endpoint discovery and security testing</li>
+          </ul>
+          
+          <h3 id="blockchain">6.2 Blockchain Investigation</h3>
+          <p>Multi-chain analysis supporting Ethereum, Solana, and other major networks:</p>
+          <ul>
+            <li>Wallet profiling with transaction history and balance tracking</li>
+            <li>Token analysis including holder distribution and movement patterns</li>
+            <li>Fund flow visualization with interactive diagrams</li>
+            <li>Counterparty mapping and entity labeling</li>
+            <li>Exchange deposit identification for asset recovery</li>
+            <li>Smart contract interaction analysis</li>
+          </ul>
+          
+          <h3 id="osint">6.3 OSINT Intelligence</h3>
+          <p>Public data collection and correlation:</p>
+          <ul>
+            <li>Domain registration and WHOIS history</li>
+            <li>DNS enumeration and infrastructure mapping</li>
+            <li>Email pattern discovery and contact identification</li>
+            <li>Historical website analysis via archived data</li>
+            <li>Social media and public record correlation</li>
+          </ul>
+          
+          <h3 id="reporting">6.4 Reporting and Output</h3>
+          <p>Multiple output formats for different audiences:</p>
+          <ul>
+            <li><strong>Executive Summary:</strong> High-level findings for leadership</li>
+            <li><strong>Technical Report:</strong> Detailed findings with evidence and remediation</li>
+            <li><strong>Raw Data:</strong> JSON/CSV export for further analysis</li>
+            <li><strong>Visual Flows:</strong> Interactive diagrams for blockchain investigations</li>
+            <li><strong>Telegram Delivery:</strong> Instant alerts for monitoring use cases</li>
+          </ul>
+
+          <h2 id="use-cases">7. Use Cases</h2>
+          
+          <h3 id="crypto-security">7.1 Crypto & DeFi Security</h3>
+          <p>Pre-investment due diligence and ongoing security monitoring for cryptocurrency projects:</p>
+          <ul>
+            <li>Token launch assessment and deployer wallet analysis</li>
+            <li>Smart contract review preparation and risk scoring</li>
+            <li>Holder distribution analysis and centralization detection</li>
+            <li>Rug pull indicator identification</li>
+            <li>Liquidity pool and DEX integration analysis</li>
+          </ul>
+          
+          <h3 id="incident-response">7.2 Incident Response</h3>
+          <p>Rapid investigation support for security breaches and attacks:</p>
+          <ul>
+            <li>Attack timeline reconstruction from blockchain and web logs</li>
+            <li>Attacker wallet tracking across multiple chains</li>
+            <li>Fund destination identification (exchanges, mixers, bridges)</li>
+            <li>Evidence packaging for law enforcement or legal action</li>
+            <li>Root cause analysis and vulnerability identification</li>
+          </ul>
+          
+          <h3 id="due-diligence">7.3 Due Diligence</h3>
+          <p>Comprehensive security assessment for investments and acquisitions:</p>
+          <ul>
+            <li>Infrastructure attack surface mapping</li>
+            <li>Historical vulnerability and breach assessment</li>
+            <li>Blockchain entity reputation analysis</li>
+            <li>Technical debt and security posture evaluation</li>
+            <li>Defensible risk reports for stakeholder presentations</li>
+          </ul>
+          
+          <h3 id="monitoring">7.4 Continuous Monitoring</h3>
+          <p>Automated ongoing security surveillance:</p>
+          <ul>
+            <li>Scheduled security scans with change detection</li>
+            <li>Wallet activity monitoring for suspicious transactions</li>
+            <li>New vulnerability alerting for tracked assets</li>
+            <li>Configuration drift detection</li>
+            <li>Integration with Slack, Telegram, email, and webhooks</li>
+          </ul>
+
+          <h2 id="roadmap">8. Roadmap and Extensibility</h2>
+          <p>Our roadmap is focused on what we plan to ship in the <strong>next 3 months</strong>. The list below is what we are building toward in that window.</p>
+          
+          <h3 id="near-term">8.1 Next 3 months (Q2)</h3>
+          <p>With our latest investigation wrapped, we are doubling down on the blockchain side of Diverg—expanding on-chain investigation, forensics, and reliability, while advancing the private platform.</p>
+          <ul>
+            <li><strong>On-chain investigation:</strong> Expand how we track wallet activity, trace transactions, and surface meaningful insights faster and more clearly across our tools.</li>
+            <li><strong>Forensics:</strong> Refine tooling from real-world cases so we can go deeper, move faster, and deliver more actionable intelligence.</li>
+            <li><strong>Detection &amp; reliability:</strong> Improve suspicious-behaviour signals, data aggregation, and the robustness of our blockchain analysis engine so risks surface earlier and outputs are easier to trust.</li>
+            <li><strong>Private platform:</strong> Integrate more advanced blockchain-focused features for users who need deeper analysis and higher-level workflows.</li>
+          </ul>
+          <p>This phase is about sharpening our edge in on-chain security and investigations, and turning that experience into a stronger, more focused product.</p>
+          <div class="highlight-box">
+            <h4>Public vs private</h4>
+            <p>Our public tools are for general use and early access—they are not the same depth as full forensic run-downs such as our Drift case work, which is aimed at our private platform and professional investigations.</p>
+          </div>
+          
+          <h3 id="enterprise">8.2 Later: Enterprise &amp; extensibility</h3>
+          <ul>
+            <li>SSO and RBAC for team management</li>
+            <li>Custom skill development framework</li>
+            <li>Advanced reporting and compliance templates</li>
+            <li>Threat intelligence feed integrations</li>
+            <li>Audit logging and compliance reporting</li>
+          </ul>
+          
+          <h3 id="extensibility">8.3 Extensibility</h3>
+          <p>The skill-based architecture enables third-party extensions. Enterprise customers can develop custom skills for:</p>
+          <ul>
+            <li>Proprietary internal systems</li>
+            <li>Custom threat intelligence sources</li>
+            <li>Industry-specific compliance checks</li>
+            <li>Integration with existing security infrastructure</li>
+          </ul>
+
+          <h2 id="conclusion">9. Conclusion</h2>
+          <p>Diverg represents a new approach to security investigation—one that treats the analyst's time as valuable and their trust as paramount. By unifying web security, blockchain analysis, and OSINT into a single platform with a strict fact-only reporting philosophy, we enable security teams to work more efficiently and with greater confidence in their findings.</p>
+          
+          <p>The platform is available now for select partners and enterprise customers. For hands-on evaluation, <a href="https://dash.divergsec.com/login">request a demonstration</a>.</p>
+
+          <footer class="docs-footer">
+            <p>&copy; 2026 Diverg. All rights reserved. — <a href="https://dash.divergsec.com/login">Request a demo</a>.</p>
+          </footer>
+        </article>
+      </main>
+    </div>
+
+    <aside class="docs-sidebar-right">
+      <p class="toc-title">Table of Contents</p>
+      <ul class="toc-list">
+        <li><a href="#executive-summary">1. Executive Summary</a></li>
+        <li><a href="#problem-statement">2. Problem Statement</a></li>
+        <li><a href="#solution">3. The Diverg Solution</a></li>
+        <li><a href="#fact-only">4. Fact-Only Reporting</a></li>
+        <li><a href="#technology">5. Technical Architecture</a></li>
+        <li><a href="#capabilities">6. Detailed Capabilities</a></li>
+        <li><a href="#use-cases">7. Use Cases</a></li>
+        <li><a href="#roadmap">8. Roadmap</a></li>
+        <li><a href="#conclusion">9. Conclusion</a></li>
+      </ul>
+    </aside>
+  </div>
+
+  <script src="docs-ui.js"></script>
+</body>
+</html>
