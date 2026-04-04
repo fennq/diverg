@@ -1,7 +1,7 @@
 """
 Generic on-chain fetch for any investigation: wallets + optional token.
 
-Uses: Solana RPC (public), Helius (optional), Arkham (optional), FrontrunPro (optional paid API;
+Uses: Solana RPC (public), Helius (optional), Arkham (required for labeled intel — set ARKHAM_API_KEY), FrontrunPro (optional paid API;
       without API, use address_finder_url() for Twitter → wallet), Solscan (token holders/metadata).
 
 Import from scripts with: sys.path.insert(0, "investigation"); from blockchain_fetch import run_blockchain_research
@@ -39,9 +39,10 @@ except ImportError:
     token_holders_total = token_metadata = throttle = None
 
 try:
-    from arkham_client import address_intelligence_all, summarize_for_report
+    from arkham_intel import address_intelligence_all as _arkham_intel_tuple
+    from arkham_intel import summarize_for_report
 except ImportError:
-    address_intelligence_all = None
+    _arkham_intel_tuple = None
     summarize_for_report = None
 
 try:
@@ -170,14 +171,21 @@ def fetch_wallet(addr: str) -> dict[str, Any]:
         out["helius_history"] = out["helius_transfers"] = None
         out["helius_identity"] = out["helius_funded_by"] = out["helius_balances"] = None
         out["helius_enhanced_transactions"] = out["helius_das_assets"] = None
-    if address_intelligence_all:
-        raw = address_intelligence_all(addr)
-        out["arkham_intelligence"] = raw
-        out["arkham_summary"] = summarize_for_report(raw) if summarize_for_report else {}
-        time.sleep(0.3)
-    else:
+    ark_key = (os.environ.get("ARKHAM_API_KEY") or "").strip()
+    if not ark_key:
         out["arkham_intelligence"] = None
         out["arkham_summary"] = {}
+        out["arkham_error"] = "ARKHAM_API_KEY is required for Arkham wallet intelligence in this pipeline."
+    elif _arkham_intel_tuple is None:
+        out["arkham_intelligence"] = None
+        out["arkham_summary"] = {}
+        out["arkham_error"] = "arkham_intel module unavailable"
+    else:
+        raw, aerr = _arkham_intel_tuple(addr, api_key=ark_key)
+        out["arkham_intelligence"] = raw
+        out["arkham_summary"] = summarize_for_report(raw) if summarize_for_report else {}
+        out["arkham_error"] = aerr
+        time.sleep(0.3)
     if wallet_enrichment and frontrunpro_configured():
         out["frontrunpro"] = wallet_enrichment(addr)
         time.sleep(0.3)
@@ -257,7 +265,14 @@ def _validate_wallet_data(data: dict[str, Any]) -> dict[str, Any]:
             h_name = str(helius_id.get("name") or helius_id.get("label") or "").strip().lower()
         a_name = ""
         if isinstance(arkham_sum, dict):
-            a_name = str(arkham_sum.get("name") or arkham_sum.get("entity") or arkham_sum.get("label") or "").strip().lower()
+            a_name = str(
+                arkham_sum.get("entity_name")
+                or arkham_sum.get("label_name")
+                or arkham_sum.get("name")
+                or arkham_sum.get("entity")
+                or arkham_sum.get("label")
+                or "",
+            ).strip().lower()
         if h_name and a_name:
             match = h_name == a_name or h_name in a_name or a_name in h_name
             checks.append({
@@ -664,7 +679,7 @@ def run_blockchain_research(
         "wallets": [],
         "token": None,
         "helius_used": bool(os.environ.get("HELIUS_API_KEY")),
-        "arkham_used": bool(address_intelligence_all is not None and os.environ.get("ARKHAM_API_KEY")),
+        "arkham_used": bool(_arkham_intel_tuple is not None and os.environ.get("ARKHAM_API_KEY")),
         "frontrunpro_used": bool(wallet_enrichment and frontrunpro_configured()),
         "bags_used": bool(bags_configured()),
     }

@@ -48,7 +48,7 @@ Together, the investigation PDF + security scan PDF form the complete package fo
      # or add HELIUS_API_KEY=... to .env
      ./venv/bin/python scripts/run_synq_research.py
      ```
-   - **Arkham (optional):** address intelligence (labels, entities). Request API access at [Arkham Intel API](https://intel.arkm.com/api), then set `ARKHAM_API_KEY` in the environment or `.env`:
+   - **Arkham (required for wallet intel in this pipeline):** address intelligence (labels, entities). Request API access at [Arkham Intel API](https://intel.arkm.com/api), then set `ARKHAM_API_KEY` in the environment or `.env` (without it, `fetch_wallet` records `arkham_error` and skips Arkham payloads):
      ```bash
      export ARKHAM_API_KEY=your_arkham_key
      ./venv/bin/python scripts/run_synq_research.py
@@ -116,7 +116,7 @@ The core logic lives in `investigation/blockchain_fetch.py`; `run_synq_research.
 - `SYNQ_Investigation_Report.pdf` — Generated PDF.
 - `solscan_client.py` — Solscan api-v2 client (token holders, metadata).
 - `onchain_clients.py` — Solana RPC + Helius (Wallet API: identity, funded-by, balances; history, transfers; Enhanced Transactions; DAS getAssetsByOwner/getAsset).
-- `arkham_client.py` — Arkham Intel API (address intelligence); requires `ARKHAM_API_KEY`.
+- `arkham_intel.py` — Shared Arkham Intel API helpers (batch labels, counterparties, `/all` intelligence). `arkham_client.py` is a thin backward-compatible wrapper; set `ARKHAM_API_KEY` for any Arkham-backed feature.
 - `frontrunpro_client.py` — FrontrunPro: **no-cost** `address_finder_url(query)` (Twitter @ or wallet fragment → Address Finder URL; no key). Optional paid API: set `FRONTRUNPRO_API_KEY` + `FRONTRUNPRO_BASE_URL` for linked wallets, KOL list, CA history.
 - `bags_client.py` — Bags API client (Section 1): creators, lifetime fees, claim events for token intelligence. Requires `BAGS_API_KEY`.
 - `blockchain_fetch.py` — Generic fetch: `run_blockchain_research(wallet_addresses, token_mint=..., output_path=...)`. Used by `run_synq_research.py` and `run_blockchain_research.py`.
