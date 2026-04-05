@@ -41,6 +41,7 @@ let serverScans = [];
 let serverFindings = [];
 let serverSummary = null;
 let currentUser = null;
+let lastScanReport = null;
 
 // ── Init ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -295,6 +296,138 @@ function skillLabel(name) {
   return name.replace(/_/g, ' ');
 }
 
+function escHtml(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function renderSimpleList(items, emptyText = 'No data') {
+  if (!Array.isArray(items) || !items.length) {
+    return `<div class="analytics-empty">${emptyText}</div>`;
+  }
+  return items.join('');
+}
+
+function setupScanTabs() {
+  const pills = document.querySelectorAll('#scanResultsTabs .toggle-pill');
+  if (!pills.length) return;
+  pills.forEach((pill) => {
+    pill.onclick = () => {
+      pills.forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+      const tab = pill.dataset.scanTab;
+      document.querySelectorAll('.scan-tab-panel').forEach((panel) => {
+        panel.classList.toggle('active', panel.id === `scanTab-${tab}`);
+      });
+    };
+  });
+}
+
+function renderScanAnalytics(report, findings) {
+  lastScanReport = report || {};
+  const summary = report.summary || {};
+  const evidence = report.evidence_summary || {};
+  const metrics = report.scan_metrics || {};
+  const diagnostics = Array.isArray(report.scan_diagnostics) ? report.scan_diagnostics : [];
+  const skillsRun = Array.isArray(report.skills_run) ? report.skills_run : [];
+  const attackPaths = Array.isArray(report.attack_paths) ? report.attack_paths : [];
+  const roleCounts = report.attack_path_role_counts || {};
+  const gapAnalysis = Array.isArray(report.gap_analysis) ? report.gap_analysis : [];
+  const suggestions = Array.isArray(report.suggested_next_tests) ? report.suggested_next_tests : [];
+  const remediation = report.remediation_plan || {};
+  const siteClass = report.site_classification || {};
+  const confidenceCounts = evidence.confidence_counts || {};
+  const verifiedCount = evidence.verified_count || findings.filter((f) => f.verified).length;
+  const score = typeof report.risk_score === 'number' ? report.risk_score : 0;
+  const verdict = report.risk_verdict || report.risk_summary || 'Unknown';
+  const runtime = Number(metrics.elapsed_sec || metrics.duration_sec || metrics.runtime_sec || 0);
+  const pages = Number(metrics.pages_crawled || 0);
+  const endpoints = Number(metrics.endpoints_found || 0);
+
+  document.getElementById('scanSummaryScore').textContent = String(score);
+  document.getElementById('scanSummaryVerdict').textContent = verdict;
+  document.getElementById('scanSummaryFindings').textContent = String(findings.length);
+  document.getElementById('scanSummarySeverities').textContent = `${summary.critical || 0} critical / ${summary.high || 0} high`;
+  document.getElementById('scanSummaryVerified').textContent = String(verifiedCount);
+  document.getElementById('scanSummaryConfidence').textContent = `${confidenceCounts.high || 0} high confidence`;
+  document.getElementById('scanSummaryPaths').textContent = String(attackPaths.length);
+  document.getElementById('scanSummaryRoles').textContent = `${Object.values(roleCounts).reduce((a, b) => a + Number(b || 0), 0)} role signals`;
+  document.getElementById('scanSummarySkills').textContent = String(skillsRun.length);
+  document.getElementById('scanSummaryDuration').textContent = `${runtime.toFixed(1)}s runtime`;
+  document.getElementById('scanSummaryDiagnostics').textContent = String(diagnostics.length);
+  document.getElementById('scanSummarySafe').textContent = `Safe: ${report.safe_to_run ? 'yes' : 'no'}`;
+
+  document.getElementById('scanEvidenceVerified').textContent = String(verifiedCount);
+  document.getElementById('scanEvidenceHigh').textContent = String(confidenceCounts.high || 0);
+  document.getElementById('scanEvidenceMedium').textContent = String(confidenceCounts.medium || 0);
+  document.getElementById('scanEvidenceLow').textContent = String(confidenceCounts.low || 0);
+
+  const sourceRows = Object.entries(evidence.source_breakdown || {})
+    .slice(0, 8)
+    .map(([k, v]) => `<div class="analytics-item"><span>${escHtml(k)}</span><span class="analytics-pill">${v}</span></div>`);
+  document.getElementById('scanEvidenceSources').innerHTML = renderSimpleList(sourceRows, 'No evidence source data');
+
+  const byCategory = {};
+  findings.forEach((f) => {
+    const key = f.category || 'Other';
+    byCategory[key] = (byCategory[key] || 0) + 1;
+  });
+  const categoryRows = Object.entries(byCategory)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([k, v]) => `<div class="analytics-item"><span>${escHtml(k)}</span><span class="analytics-pill">${v}</span></div>`);
+  document.getElementById('scanCategoryBreakdown').innerHTML = renderSimpleList(categoryRows, 'No category analytics');
+
+  document.getElementById('scanMetricDuration').textContent = `${runtime.toFixed(1)}s`;
+  document.getElementById('scanMetricPages').textContent = String(pages);
+  document.getElementById('scanMetricEndpoints').textContent = String(endpoints);
+  document.getElementById('scanMetricSkills').textContent = String(skillsRun.length);
+  document.getElementById('scanSkillsRun').innerHTML = renderSimpleList(
+    skillsRun.map((s) => `<div class="analytics-item"><span>${escHtml(skillLabel(s))}</span><span class="analytics-pill">${escHtml(s)}</span></div>`),
+    'No skill execution data'
+  );
+
+  document.getElementById('scanClassification').innerHTML = renderSimpleList([
+    `<div class="analytics-item"><span>Crypto classified</span><span class="analytics-pill">${siteClass.is_crypto ? 'yes' : 'no'}</span></div>`,
+    `<div class="analytics-item"><span>Crypto confidence</span><span class="analytics-pill">${siteClass.confidence ?? 0}</span></div>`,
+    `<div class="analytics-item"><span>Auth supplied</span><span class="analytics-pill">${report.auth_supplied ? 'yes' : 'no'}</span></div>`,
+  ], 'No classification data');
+  document.getElementById('scanGuidance').innerHTML = renderSimpleList(
+    suggestions.map((g) => `<div class="analytics-item analytics-item-stack"><strong>${escHtml(g.action || 'Next step')}</strong><span>${escHtml(g.reason || '')}</span></div>`),
+    'No follow-up guidance'
+  );
+
+  const renderRemediation = (id, items) => {
+    document.getElementById(id).innerHTML = renderSimpleList(
+      (items || []).slice(0, 8).map((item) => `<div class="analytics-item analytics-item-stack"><strong>${escHtml(item.title || 'Finding')}</strong><span>${escHtml(item.remediation || '')}</span></div>`),
+      'No items'
+    );
+  };
+  renderRemediation('scanRemediationNow', remediation.fix_now);
+  renderRemediation('scanRemediationSoon', remediation.fix_soon);
+  renderRemediation('scanRemediationHarden', remediation.harden);
+
+  document.getElementById('scanPathCount').textContent = String(attackPaths.length);
+  document.getElementById('scanPathTopScore').textContent = String(
+    attackPaths.reduce((max, p) => Math.max(max, Number(p.exploitability_score || 0)), 0)
+  );
+  document.getElementById('scanPathEntry').textContent = String(roleCounts.entry || 0);
+  document.getElementById('scanPathPrivilege').textContent = String(roleCounts.privilege || 0);
+  document.getElementById('scanPathPivot').textContent = String(roleCounts.pivot || 0);
+  document.getElementById('scanPathImpact').textContent = String((roleCounts.data || 0) + (roleCounts.financial || 0));
+  document.getElementById('scanGapAnalysis').innerHTML = renderSimpleList(
+    gapAnalysis.map((g) => `<div class="analytics-item analytics-item-stack"><strong>${escHtml(g.chain_template || 'Coverage gap')}</strong><span>${escHtml(g.reason || '')}</span></div>`),
+    'No attack-path gaps'
+  );
+
+  document.getElementById('scanDiagnosticsList').innerHTML = renderSimpleList(
+    diagnostics.map((d) => `<div class="analytics-item analytics-item-stack"><strong>${escHtml((d.skill || 'scanner') + ' · ' + (d.level || 'info'))}</strong><span>${escHtml(d.message || '')}</span></div>`),
+    'No diagnostics'
+  );
+}
+
 // ── Scanner (streaming) ─────────────────────────────────────────────────
 async function launchScan() {
   const url = document.getElementById('scanUrl').value.trim();
@@ -391,7 +524,7 @@ async function launchScan() {
     }
 
     progressBox.classList.remove('show');
-    showScanResults(url, scope, findings, attackPaths, report.risk_score);
+    showScanResults(url, scope, findings, attackPaths, report);
     syncDashboardData();
   } catch (err) {
     termLine(terminal, ts() + ' Scan failed: ' + err.message, 'red');
@@ -399,7 +532,7 @@ async function launchScan() {
   }
 }
 
-function showScanResults(url, scope, findingsInput, pathsInput, scoreInput) {
+function showScanResults(url, scope, findingsInput, pathsInput, report) {
   const container = document.getElementById('scanResults');
   const body = document.getElementById('scanResultsBody');
   const countEl = document.getElementById('scanFindingsCount');
@@ -462,13 +595,15 @@ function showScanResults(url, scope, findingsInput, pathsInput, scoreInput) {
   const totalFindings = findings.length;
   const critCount = findings.filter(f => f.severity === 'critical').length;
   const highCount = findings.filter(f => f.severity === 'high').length;
-  const score = typeof scoreInput === 'number'
-    ? scoreInput
+  const score = typeof report?.risk_score === 'number'
+    ? report.risk_score
     : Math.max(0, 100 - critCount * 25 - highCount * 15 - (totalFindings - critCount - highCount) * 5);
 
   addToHistory(url, scope, totalFindings, score, critCount, highCount);
   updateStats();
   renderFindings(findings, url);
+  renderScanAnalytics(report || {}, findings);
+  setupScanTabs();
 }
 
 function renderFindings(newFindings, url) {

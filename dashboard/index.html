@@ -251,13 +251,102 @@
       </div>
       <div class="progress-box" id="scanProgress"><div class="terminal" id="scanTerminal"></div></div>
       <div id="scanResults" style="display:none;">
-        <div class="card">
-          <div class="card-header"><span class="card-title">Findings</span><span id="scanFindingsCount" style="font-family:var(--mono);font-size:0.75rem;color:var(--text-dim);"></span><button class="btn btn-ghost" onclick="clearScan()">Clear</button></div>
-          <div class="card-body flush"><div class="data-table" style="border:none;box-shadow:none;"><table><thead><tr><th class="col-num">#</th><th>Finding</th><th>Severity</th><th>Category</th><th>Confidence</th></tr></thead><tbody id="scanResultsBody"></tbody></table></div></div>
+        <div class="stats-grid scan-summary-grid">
+          <div class="stat-card"><div class="stat-value" id="scanSummaryScore">0</div><div class="stat-label">Risk Score</div><div class="stat-meta" id="scanSummaryVerdict">Pending</div></div>
+          <div class="stat-card"><div class="stat-value" id="scanSummaryFindings">0</div><div class="stat-label">Findings</div><div class="stat-meta" id="scanSummarySeverities">0 critical / 0 high</div></div>
+          <div class="stat-card"><div class="stat-value" id="scanSummaryVerified">0</div><div class="stat-label">Verified</div><div class="stat-meta" id="scanSummaryConfidence">0 high confidence</div></div>
+          <div class="stat-card"><div class="stat-value" id="scanSummaryPaths">0</div><div class="stat-label">Attack Paths</div><div class="stat-meta" id="scanSummaryRoles">0 role signals</div></div>
+          <div class="stat-card"><div class="stat-value" id="scanSummarySkills">0</div><div class="stat-label">Skills Run</div><div class="stat-meta" id="scanSummaryDuration">0s runtime</div></div>
+          <div class="stat-card"><div class="stat-value" id="scanSummaryDiagnostics">0</div><div class="stat-label">Diagnostics</div><div class="stat-meta" id="scanSummarySafe">Safe: unknown</div></div>
         </div>
-        <div class="card" id="attackPathsCard" style="display:none;">
-          <div class="card-header"><span class="card-title">Attack Paths</span><span id="attackPathsCount" style="font-family:var(--mono);font-size:0.75rem;color:var(--text-dim);"></span></div>
-          <div class="card-body"><div class="attack-paths" id="attackPathsBody"></div></div>
+        <div class="toggle-pills" id="scanResultsTabs" style="margin-bottom:14px;">
+          <div class="toggle-pill active" data-scan-tab="overview">Overview</div>
+          <div class="toggle-pill" data-scan-tab="findings">Findings</div>
+          <div class="toggle-pill" data-scan-tab="attack-paths">Attack Paths</div>
+          <div class="toggle-pill" data-scan-tab="diagnostics">Diagnostics</div>
+        </div>
+        <div class="scan-tab-panel active" id="scanTab-overview">
+          <div class="analytics-grid-two">
+            <div class="card">
+              <div class="card-header"><span class="card-title">Evidence Analytics</span></div>
+              <div class="card-body">
+                <div class="mini-stat-grid">
+                  <div class="mini-stat"><span class="mini-stat-label">Verified</span><span class="mini-stat-value" id="scanEvidenceVerified">0</span></div>
+                  <div class="mini-stat"><span class="mini-stat-label">High Confidence</span><span class="mini-stat-value" id="scanEvidenceHigh">0</span></div>
+                  <div class="mini-stat"><span class="mini-stat-label">Medium Confidence</span><span class="mini-stat-value" id="scanEvidenceMedium">0</span></div>
+                  <div class="mini-stat"><span class="mini-stat-label">Low Confidence</span><span class="mini-stat-value" id="scanEvidenceLow">0</span></div>
+                </div>
+                <div class="analytics-list" id="scanEvidenceSources"></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header"><span class="card-title">Category Analytics</span></div>
+              <div class="card-body"><div class="analytics-list" id="scanCategoryBreakdown"></div></div>
+            </div>
+          </div>
+          <div class="analytics-grid-two">
+            <div class="card">
+              <div class="card-header"><span class="card-title">Execution Analytics</span></div>
+              <div class="card-body">
+                <div class="mini-stat-grid">
+                  <div class="mini-stat"><span class="mini-stat-label">Duration</span><span class="mini-stat-value" id="scanMetricDuration">0s</span></div>
+                  <div class="mini-stat"><span class="mini-stat-label">Pages</span><span class="mini-stat-value" id="scanMetricPages">0</span></div>
+                  <div class="mini-stat"><span class="mini-stat-label">Endpoints</span><span class="mini-stat-value" id="scanMetricEndpoints">0</span></div>
+                  <div class="mini-stat"><span class="mini-stat-label">Skills</span><span class="mini-stat-value" id="scanMetricSkills">0</span></div>
+                </div>
+                <div class="analytics-list" id="scanSkillsRun"></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header"><span class="card-title">Classification & Guidance</span></div>
+              <div class="card-body">
+                <div class="analytics-list" id="scanClassification"></div>
+                <div class="analytics-list" id="scanGuidance"></div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">Remediation Plan</span></div>
+            <div class="card-body">
+              <div class="analytics-grid-three">
+                <div><div class="analytics-subtitle">Fix Now</div><div class="analytics-list" id="scanRemediationNow"></div></div>
+                <div><div class="analytics-subtitle">Fix Soon</div><div class="analytics-list" id="scanRemediationSoon"></div></div>
+                <div><div class="analytics-subtitle">Harden</div><div class="analytics-list" id="scanRemediationHarden"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="scan-tab-panel" id="scanTab-findings">
+          <div class="card">
+            <div class="card-header"><span class="card-title">Findings</span><span id="scanFindingsCount" style="font-family:var(--mono);font-size:0.75rem;color:var(--text-dim);"></span><button class="btn btn-ghost" onclick="clearScan()">Clear</button></div>
+            <div class="card-body flush"><div class="data-table" style="border:none;box-shadow:none;"><table><thead><tr><th class="col-num">#</th><th>Finding</th><th>Severity</th><th>Category</th><th>Confidence</th></tr></thead><tbody id="scanResultsBody"></tbody></table></div></div>
+          </div>
+        </div>
+        <div class="scan-tab-panel" id="scanTab-attack-paths">
+          <div class="card" id="attackPathsCard" style="display:none;">
+            <div class="card-header"><span class="card-title">Attack Paths</span><span id="attackPathsCount" style="font-family:var(--mono);font-size:0.75rem;color:var(--text-dim);"></span></div>
+            <div class="card-body"><div class="attack-paths" id="attackPathsBody"></div></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">Attack Path Analytics</span></div>
+            <div class="card-body">
+              <div class="mini-stat-grid">
+                <div class="mini-stat"><span class="mini-stat-label">Chain Count</span><span class="mini-stat-value" id="scanPathCount">0</span></div>
+                <div class="mini-stat"><span class="mini-stat-label">Top Score</span><span class="mini-stat-value" id="scanPathTopScore">0</span></div>
+                <div class="mini-stat"><span class="mini-stat-label">Entry Signals</span><span class="mini-stat-value" id="scanPathEntry">0</span></div>
+                <div class="mini-stat"><span class="mini-stat-label">Privilege Signals</span><span class="mini-stat-value" id="scanPathPrivilege">0</span></div>
+                <div class="mini-stat"><span class="mini-stat-label">Pivot Signals</span><span class="mini-stat-value" id="scanPathPivot">0</span></div>
+                <div class="mini-stat"><span class="mini-stat-label">Impact Signals</span><span class="mini-stat-value" id="scanPathImpact">0</span></div>
+              </div>
+              <div class="analytics-list" id="scanGapAnalysis"></div>
+            </div>
+          </div>
+        </div>
+        <div class="scan-tab-panel" id="scanTab-diagnostics">
+          <div class="card">
+            <div class="card-header"><span class="card-title">Diagnostics & Scan Gaps</span></div>
+            <div class="card-body"><div class="analytics-list" id="scanDiagnosticsList"></div></div>
+          </div>
         </div>
       </div>
     </div>
