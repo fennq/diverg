@@ -409,15 +409,20 @@ function showScanResults(url, scope, findingsInput, pathsInput, scoreInput) {
     severity: String(f.severity || 'low').toLowerCase(),
     category: f.category || 'Other',
     confidence: f.confidence || '',
+    verified: !!f.verified,
+    evidence: f.evidence || f.proof || '',
   }));
-  const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
-  findings.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+  const severityOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+  findings.sort((a, b) => (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5));
 
   countEl.textContent = findings.length + ' issues';
 
-  body.innerHTML = findings.map((f, idx) =>
-    `<tr><td class="col-num">${idx + 1}</td><td class="col-primary">${f.title}</td><td><span class="badge badge-${f.severity}">${f.severity}</span></td><td>${f.category}</td><td style="font-size:0.6875rem;color:var(--text-dim);">${f.confidence}</td></tr>`
-  ).join('');
+  body.innerHTML = findings.map((f, idx) => {
+    const verifiedBadge = f.verified ? '<span style="color:#22c55e;font-size:0.7rem;margin-left:4px;" title="Verified">&#x2713;</span>' : '';
+    const confLabel = f.confidence ? `<span class="conf-${f.confidence}" style="font-size:0.6875rem;">${f.confidence}</span>` : '';
+    const evidenceRow = f.evidence ? `<tr class="evidence-row" id="ev-${idx}" style="display:none;"><td></td><td colspan="4"><pre style="white-space:pre-wrap;font-size:0.75rem;color:var(--text-dim);margin:0;max-height:200px;overflow:auto;">${f.evidence.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre></td></tr>` : '';
+    return `<tr style="cursor:pointer;" onclick="var r=document.getElementById('ev-${idx}');if(r)r.style.display=r.style.display==='none'?'table-row':'none';"><td class="col-num">${idx + 1}</td><td class="col-primary">${f.title}${verifiedBadge}</td><td><span class="badge badge-${f.severity}">${f.severity}</span></td><td>${f.category}</td><td>${confLabel}</td></tr>${evidenceRow}`;
+  }).join('');
 
   container.style.display = 'block';
 
@@ -471,9 +476,12 @@ function renderFindingsPage() {
   const body = document.getElementById('findingsBody');
   if (!body || !findings.length) return;
 
-  body.innerHTML = findings.slice(0, 50).map((f, i) =>
-    `<tr><td class="col-num">${i + 1}</td><td class="col-primary">${f.title}</td><td><span class="badge badge-${(f.severity || 'low').toLowerCase()}">${f.severity}</span></td><td>${f.category}</td><td class="col-mono" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;">${f.target || ''}</td><td class="col-mono">${f.date || ''}</td></tr>`
-  ).join('');
+  body.innerHTML = findings.slice(0, 50).map((f, i) => {
+    const sev = (f.severity || 'low').toLowerCase();
+    const verifiedBadge = f.verified ? '<span style="color:#22c55e;font-size:0.7rem;margin-left:4px;" title="Verified">&#x2713;</span>' : '';
+    const confLabel = f.confidence ? `<span style="font-size:0.6875rem;color:var(--text-dim);">${f.confidence}</span>` : '';
+    return `<tr><td class="col-num">${i + 1}</td><td class="col-primary">${f.title}${verifiedBadge}</td><td><span class="badge badge-${sev}">${sev}</span></td><td>${f.category}</td><td>${confLabel}</td><td class="col-mono" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;">${f.target || ''}</td><td class="col-mono">${f.date || ''}</td></tr>`;
+  }).join('');
 }
 
 function clearScan() {
@@ -775,6 +783,8 @@ async function syncDashboardData() {
           target: row.target_url || '',
           date: row.scanned_at || '',
           confidence: f.confidence || '',
+          verified: !!f.verified,
+          evidence: f.evidence || f.proof || '',
         };
       });
       localStorage.setItem('dv_findings', JSON.stringify(serverFindings.slice(0, 2000)));

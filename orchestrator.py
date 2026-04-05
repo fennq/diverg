@@ -228,6 +228,8 @@ def normalize_finding(raw: dict, source_skill: str, context_key: str = "findings
             out["context"] = str(raw["context"]).strip()
         if raw.get("finding_type"):
             out["finding_type"] = str(raw["finding_type"]).strip()
+        if raw.get("finding_confidence"):
+            out["finding_confidence"] = str(raw["finding_confidence"]).strip()
         return out
     if context_key == "ssl_findings":
         check = str(raw.get("check", "")).strip()
@@ -237,6 +239,8 @@ def normalize_finding(raw: dict, source_skill: str, context_key: str = "findings
         out["severity"] = str(raw.get("severity", "Info"))
         out["evidence"] = detail or check
         out["category"] = "Transport and Browser Security"
+        if raw.get("finding_confidence"):
+            out["finding_confidence"] = str(raw["finding_confidence"]).strip()
         return out
     # Standard finding shape (findings from web_vulns, auth_test, api_test, company_exposure, etc.)
     out["title"] = str(raw.get("title") or raw.get("check") or raw.get("header") or "Untitled finding").strip()
@@ -251,6 +255,8 @@ def normalize_finding(raw: dict, source_skill: str, context_key: str = "findings
         out["verification_steps"] = raw["verification_steps"]
     if raw.get("confidence"):
         out["confidence"] = str(raw["confidence"]).strip()
+    if raw.get("finding_confidence"):
+        out["finding_confidence"] = str(raw["finding_confidence"]).strip()
     if raw.get("context"):
         out["context"] = str(raw["context"]).strip()
     if raw.get("finding_type"):
