@@ -219,13 +219,18 @@ def normalize_finding(raw: dict, source_skill: str, context_key: str = "findings
         status = str(raw.get("status", "")).strip()
         value = raw.get("value") or ""
         rec = str(raw.get("recommendation", "")).strip()
+        ctx = str(raw.get("context", "")).strip()
         out["title"] = f"HTTP header: {header} — {status}"
         out["severity"] = str(raw.get("severity", "Info"))
         out["evidence"] = f"Header: {header}; Value: {value}; Recommendation: {rec}"
+        if ctx:
+            out["evidence"] += f"; Context: {ctx}"
         out["category"] = "Transport and Browser Security"
+        if ctx:
+            out["impact"] = ctx
         out["remediation"] = rec or out["remediation"]
-        if raw.get("context"):
-            out["context"] = str(raw["context"]).strip()
+        if ctx:
+            out["context"] = ctx
         if raw.get("finding_type"):
             out["finding_type"] = str(raw["finding_type"]).strip()
         if raw.get("finding_confidence"):
@@ -909,18 +914,13 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
 
     for skill_name, result in sorted(results.items()):
         if "error" in result and isinstance(result["error"], str):
-            all_findings.append(normalize_finding({
-                "title": f"Skill '{skill_name}' encountered an error",
-                "severity": "Info",
-                "evidence": result["error"],
-                "impact": "Some tests could not be completed.",
-                "remediation": "Check skill configuration and try again.",
-            }, skill_name, "findings"))
             continue
 
         for key in ("findings", "header_findings", "ssl_findings"):
             for raw in result.get(key, []):
                 if not isinstance(raw, dict):
+                    continue
+                if key == "header_findings" and str(raw.get("status") or "").strip().lower() == "error":
                     continue
                 all_findings.append(normalize_finding(raw, skill_name, key))
 
@@ -964,6 +964,48 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
     except Exception:
         pass
     return finalize_api_findings(enriched)
+
+
+def aggregate_scan_diagnostics(results: dict[str, dict]) -> list[dict]:
+    """Collect scanner/runtime diagnostics separately from target findings."""
+    diagnostics: list[dict] = []
+    for skill_name, result in sorted(results.items()):
+        if not isinstance(result, dict):
+            continue
+        skill_error = str(result.get("error") or "").strip()
+        if skill_error:
+            diagnostics.append({
+                "skill": skill_name,
+                "level": "error",
+                "message": skill_error,
+            })
+        for err in result.get("errors", []) or []:
+            msg = str(err).strip()
+            if msg:
+                diagnostics.append({
+                    "skill": skill_name,
+                    "level": "warning",
+                    "message": msg,
+                })
+        for raw in result.get("header_findings", []) or []:
+            if not isinstance(raw, dict):
+                continue
+            if str(raw.get("status") or "").strip().lower() != "error":
+                continue
+            diagnostics.append({
+                "skill": skill_name,
+                "level": "warning",
+                "message": str(raw.get("value") or raw.get("recommendation") or "Header analysis error").strip(),
+            })
+    seen: set[tuple[str, str, str]] = set()
+    deduped: list[dict] = []
+    for diag in diagnostics:
+        key = (diag["skill"], diag["level"], diag["message"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(diag)
+    return deduped
 
 
 def aggregate_company_surfaces(results: dict[str, dict]) -> list[dict]:
@@ -1948,6 +1990,7 @@ def run_web_scan(
                     results[key] = {"error": str(exc), "skill": key}
 
     findings = aggregate_findings(results)
+    scan_diagnostics = aggregate_scan_diagnostics(results)
     company_surfaces = aggregate_company_surfaces(results)
     timestamp = datetime.now(timezone.utc).isoformat()
     evidence_summary = build_evidence_summary(findings)
@@ -1968,6 +2011,7 @@ def run_web_scan(
     return {
         "target_url": target_url,
         "findings": findings,
+        "scan_diagnostics": scan_diagnostics,
         "company_surfaces": company_surfaces,
         "scanned_at": timestamp,
         "skills_run": list(results.keys()),
@@ -2228,6 +2272,7 @@ def run_web_scan_streaming(
             yield from _drain_queue()
 
     findings = aggregate_findings(results)
+    scan_diagnostics = aggregate_scan_diagnostics(results)
     company_surfaces = aggregate_company_surfaces(results)
     timestamp = datetime.now(timezone.utc).isoformat()
     evidence_summary = build_evidence_summary(findings)
@@ -2248,6 +2293,7 @@ def run_web_scan_streaming(
     report = {
         "target_url": target_url,
         "findings": findings,
+        "scan_diagnostics": scan_diagnostics,
         "company_surfaces": company_surfaces,
         "scanned_at": timestamp,
         "skills_run": list(results.keys()),

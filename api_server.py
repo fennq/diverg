@@ -801,6 +801,7 @@ def api_scan():
             "id": scan_id,
             "target_url": result["target_url"],
             "findings": result["findings"],
+            "scan_diagnostics": result.get("scan_diagnostics"),
             "scanned_at": result["scanned_at"],
             "summary": result.get("summary"),
             "skills_run": result.get("skills_run"),

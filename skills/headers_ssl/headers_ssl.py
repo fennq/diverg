@@ -82,16 +82,10 @@ SECURITY_HEADERS = {
         "context": "Prevents browsers from guessing content types. Trivial to add and universally recommended. Low real-world risk on most sites.",
     },
     "X-Frame-Options": {
-        "severity": "Medium",
+        "severity": "Low",
         "recommendation": "Add 'X-Frame-Options: DENY' or 'SAMEORIGIN' to prevent clickjacking.",
         "finding_type": "hardening",
         "context": "Real clickjacking risk requires the page to have authenticated actions or sensitive forms. For static or marketing pages this is a best-practice gap, not an active threat.",
-    },
-    "X-XSS-Protection": {
-        "severity": "Low",
-        "recommendation": "Add 'X-XSS-Protection: 1; mode=block' (legacy browsers) or rely on CSP.",
-        "finding_type": "hardening",
-        "context": "Deprecated in modern browsers. CSP is the real XSS defense. Only relevant for legacy IE/Edge clients.",
     },
     "Referrer-Policy": {
         "severity": "Low",

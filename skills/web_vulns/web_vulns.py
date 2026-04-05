@@ -1275,8 +1275,6 @@ SENSITIVE_PATHS = [
     (".git/config", [re.compile(r"\[core\]|\[remote")]),
     (".env", [re.compile(r"(DB_|APP_|SECRET|KEY|PASSWORD|TOKEN|API).*?=", re.IGNORECASE)]),
     (".htaccess", [re.compile(r"RewriteEngine|AuthType|Deny|Allow", re.IGNORECASE)]),
-    ("robots.txt", [re.compile(r"(Disallow|Allow|Sitemap):", re.IGNORECASE)]),
-    ("sitemap.xml", [re.compile(r"<urlset|<sitemapindex", re.IGNORECASE)]),
     ("wp-config.php.bak", [re.compile(r"DB_NAME|DB_USER|DB_PASSWORD", re.IGNORECASE)]),
     ("wp-config.php~", [re.compile(r"DB_NAME|DB_USER|DB_PASSWORD", re.IGNORECASE)]),
     ("wp-config.php.old", [re.compile(r"DB_NAME|DB_USER|DB_PASSWORD", re.IGNORECASE)]),
@@ -1319,7 +1317,6 @@ SENSITIVE_PATHS = [
     ("admin/", [re.compile(r"<form[^>]*(?:login|password|sign.?in)|admin.?panel|dashboard|log.?in|username", re.IGNORECASE)]),
     ("administrator/", [re.compile(r"<form[^>]*(?:login|password|sign.?in)|admin.?panel|dashboard|log.?in|username", re.IGNORECASE)]),
     ("phpmyadmin/", [re.compile(r"phpMyAdmin|phpmyadmin|pma_navigation|pmahomme", re.IGNORECASE)]),
-    (".well-known/security.txt", [re.compile(r"Contact:|Policy:", re.IGNORECASE)]),
 ]
 
 
@@ -1409,7 +1406,6 @@ SECURITY_HEADERS = {
     "Content-Security-Policy": ("CSP header missing — no XSS mitigation at browser level", "Medium"),
     "X-Content-Type-Options": ("X-Content-Type-Options missing — MIME sniffing possible", "Low"),
     "X-Frame-Options": ("X-Frame-Options missing — clickjacking possible", "Medium"),
-    "X-XSS-Protection": ("X-XSS-Protection missing — legacy XSS filter not enabled", "Low"),
     "Referrer-Policy": ("Referrer-Policy missing — referrer leakage possible", "Low"),
     "Permissions-Policy": ("Permissions-Policy missing — browser features not restricted", "Low"),
 }
@@ -1501,7 +1497,7 @@ def run(target_url: str, scan_type: str = "full", crawl_depth: int = 2) -> str:
             report.findings.extend(test_sensitive_files(target_url, baseline=baseline))
         except Exception as exc:
             report.errors.append(f"Sensitive Files test error: {exc}")
-    if not _run_budget_expired(run_start) and scan_type in ("full", "headers"):
+    if not _run_budget_expired(run_start) and scan_type == "headers":
         try:
             report.findings.extend(test_security_headers(target_url))
         except Exception as exc:

@@ -61,6 +61,13 @@ FINANCIAL_PATTERNS = [
 
 def _classify_finding(f: dict) -> list[str]:
     """Return list of roles this finding supports (can be multiple)."""
+    source_skill = str(f.get("_source_skill") or "").lower()
+    finding_type = (f.get("finding_type") or "").lower()
+    category = (f.get("category") or "").lower()
+    if finding_type in {"positive", "hardening", "informational"}:
+        return []
+    if source_skill == "headers_ssl" or "transport and browser security" in category:
+        return []
     text = f"{f.get('title','')} {f.get('category','')} {f.get('impact','')}".lower()
     roles = []
     for pat in ENTRY_PATTERNS:
@@ -83,9 +90,6 @@ def _classify_finding(f: dict) -> list[str]:
         if re.search(pat, text, re.I):
             roles.append(ROLE_FINANCIAL)
             break
-    ftype = (f.get("finding_type") or "").lower()
-    if ftype == "hardening":
-        roles = [r for r in roles if r not in (ROLE_PRIVILEGE, ROLE_FINANCIAL)]
     # Fallback by severity/category
     if not roles:
         cat = (f.get("category") or "").lower()
@@ -98,12 +102,16 @@ def _classify_finding(f: dict) -> list[str]:
             roles.append(ROLE_PIVOT)
         elif sev == "Critical" and "payment" in text:
             roles.append(ROLE_FINANCIAL)
-    return roles if roles else [ROLE_ENTRY]  # default: can be entry
+    return roles
 
 
 def _finding_has_evidence(f: dict) -> bool:
     """True if finding has enough evidence to include in chains (zero FP: no vague steps)."""
-    if (f.get("finding_type") or "").lower() == "positive":
+    finding_type = (f.get("finding_type") or "").lower()
+    if finding_type in {"positive", "hardening", "informational"}:
+        return False
+    severity = str(f.get("severity") or "Info").strip().lower()
+    if severity in {"info", "low"}:
         return False
     url = (f.get("url") or "").strip()
     evidence = (f.get("evidence") or "").strip()
@@ -255,9 +263,25 @@ def _build_paths(findings: list[dict], max_variants_per_template: int = 2) -> li
         for variant_idx in range(min(max_variants_per_template, max(len(by_role[r]) for r in template) or 1)):
             steps_list: list[PathStep] = []
             refs: list[str] = []
+            used_findings: set[tuple[str, str]] = set()
             for role in template:
                 cands = by_role[role]
-                cand = cands[min(variant_idx, len(cands) - 1)]
+                cand = None
+                for idx, candidate in enumerate(cands):
+                    if idx < variant_idx:
+                        continue
+                    candidate_sig = (
+                        str(candidate.get("title") or "")[:160],
+                        str(candidate.get("url") or "")[:500],
+                    )
+                    if candidate_sig in used_findings:
+                        continue
+                    cand = candidate
+                    used_findings.add(candidate_sig)
+                    break
+                if cand is None:
+                    steps_list = []
+                    break
                 ev = (cand.get("evidence") or "")[:220]
                 steps_list.append(PathStep(
                     role=role,
@@ -268,6 +292,9 @@ def _build_paths(findings: list[dict], max_variants_per_template: int = 2) -> li
                     evidence_excerpt=ev,
                 ))
                 refs.append(f"{cand.get('title','')} [{cand.get('_source_skill','')}]")
+
+            if len(steps_list) != len(template):
+                continue
 
             sig = tuple((s.role, s.finding_title[:60]) for s in steps_list)
             if sig in seen_signatures:
@@ -286,9 +313,8 @@ def _build_paths(findings: list[dict], max_variants_per_template: int = 2) -> li
             else:
                 impact_summary = f"Chain: {' → '.join(template)}."
 
-            if ROLE_FINANCIAL in template or ROLE_DATA in template:
-                if not any(s.severity in ("High", "Critical") for s in steps_list):
-                    continue
+            if not any(s.severity in ("High", "Critical") for s in steps_list):
+                continue
             paths.append(AttackPath(
                 chain_type=" → ".join(template),
                 steps=steps_list,

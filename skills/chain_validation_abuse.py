@@ -61,6 +61,7 @@ class ChainValidationReport:
     target_url: str
     is_crypto: bool
     crypto_confidence: float
+    classification_note: str = ""
     findings: list[Finding] = field(default_factory=list)
     recommended_routes: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -94,6 +95,7 @@ def run(
     findings: list[Finding] = []
     errors: list[str] = []
     recommended_routes: list[str] = []
+    classification_note = ""
 
     if getattr(det, "is_crypto", False):
         confidence = getattr(det, "confidence", 0)
@@ -102,31 +104,22 @@ def run(
             "account_subaccount_id_substitution",
             "parameter_trust_body_header",
         ]
-        findings.append(Finding(
-            title="Target classified as crypto/DeFi — run Diverg batch validation checks",
-            severity="Info",
-            url=base,
-            category="Chain / Batch Validation",
-            evidence=f"Crypto confidence: {confidence}. Signals: {getattr(det, 'signals', [])[:8]}.",
-            impact="Batch vs single path and account-id substitution checks are recommended (see content/diverg-batch-validation-routes.md).",
-            remediation="Compare validation on batch vs single endpoints; verify account_id/subaccount_id are not trusted from request body without signer check.",
-        ))
+        classification_note = (
+            f"Crypto confidence: {confidence}. Signals: {getattr(det, 'signals', [])[:8]}. "
+            "Batch-vs-single and account/subaccount validation checks are enabled."
+        )
     else:
-        findings.append(Finding(
-            title="Site not classified as crypto/DeFi — generic batch/IDOR checks still applied",
-            severity="Info",
-            url=base,
-            category="Chain / Batch Validation",
-            evidence="Crypto detection confidence below threshold or no crypto signals. This skill ran due to scope=crypto or goal (e.g. batch validation, crypto audit).",
-            impact="Batch-like endpoints and account_id/subaccount_id in request body are still checked; findings apply to any API with batch or account parameters.",
-            remediation="If the site is crypto-related, use scope=crypto or goal 'crypto audit' for full Diverg batch validation checks.",
-        ))
+        classification_note = (
+            "Crypto detection confidence below threshold or no crypto signals. "
+            "Only generic batch/account parameter checks will run."
+        )
 
     if not SESSION or not requests:
         report = ChainValidationReport(
             target_url=base,
             is_crypto=getattr(det, "is_crypto", False),
             crypto_confidence=getattr(det, "confidence", 0.0),
+            classification_note=classification_note,
             findings=findings,
             recommended_routes=recommended_routes,
             errors=errors + ["requests not available"],
@@ -219,6 +212,7 @@ def run(
         target_url=base,
         is_crypto=getattr(det, "is_crypto", False),
         crypto_confidence=getattr(det, "confidence", 0.0),
+        classification_note=classification_note,
         findings=findings,
         recommended_routes=recommended_routes,
         errors=errors[:10],

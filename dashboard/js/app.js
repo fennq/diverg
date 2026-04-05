@@ -439,8 +439,18 @@ function showScanResults(url, scope, findingsInput, pathsInput, scoreInput) {
         : Array.isArray(p.path)
           ? p.path
           : [p.title || p.description || 'Attack path'];
-      const chain = steps.map(s => `<span class="step">${String(s)}</span>`).join('<span class="arrow">→</span>');
-      const sev = String(p.severity || 'medium').toLowerCase();
+      const chain = steps.map((s) => {
+        if (s && typeof s === 'object') {
+          const role = s.role ? `[${String(s.role)}] ` : '';
+          const label = s.finding_title || s.title || s.name || 'attack step';
+          return `<span class="step">${role}${label}</span>`;
+        }
+        return `<span class="step">${String(s)}</span>`;
+      }).join('<span class="arrow">→</span>');
+      const sev = String(
+        p.severity
+        || (Array.isArray(p.steps) && p.steps.some((s) => ['critical', 'high'].includes(String(s.severity || '').toLowerCase())) ? 'high' : 'medium')
+      ).toLowerCase();
       const impact = p.impact || p.summary || p.description || '';
       return `<div class="attack-path"><div><div class="attack-path-chain">${chain}</div><div class="attack-path-impact">${impact}</div></div><div class="attack-path-severity"><span class="badge badge-${sev}">${sev}</span></div></div>`;
     }).join('');

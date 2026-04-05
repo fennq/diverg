@@ -27,6 +27,7 @@ CRYPTO_KEYWORDS = [
     "swap", "dex", "defi", "decentralized", "token", "tokens", "nft", "nfts",
     "bridge", "cross-chain", "layerzero", "wormhole", "peggo",
     "stake", "staking", "unstake", "delegate", "validator",
+    "rpc", "rpc endpoint", "solana rpc", "priority fee", "jito", "block engine",
     "liquidity", "pool", "lp ", "amm", "order book", "limit order", "market order",
     "subaccount", "subaccountid", "account id", "chain id", "contract address",
     "sign message", "sign transaction", "signature", "signer",
@@ -39,6 +40,7 @@ CRYPTO_DOMAIN_HINTS = [
     "phantom", "metamask", "walletconnect", "opensea", "blur", "magiceden",
     "anchor", "aave", "compound", "lido", "wormhole", "layerzero",
     "cosmos", "osmosis", "sei", "sui", "aptos", "base.org", "zksync",
+    "helius", "alchemy", "quicknode", "ankr", "moralis", "chainstack", "blockdaemon", "jito",
     "defi", "crypto", "token", "swap", "bridge", "staking",
 ]
 # Script/API path hints
@@ -81,7 +83,7 @@ def detect_from_content(html_or_js: str, url: str = "") -> CryptoDetectionResult
     for hint in CRYPTO_DOMAIN_HINTS:
         if hint in domain:
             signals.append(f"domain hint: {hint}")
-            score += 0.15
+            score += 0.2
 
     # Keyword hits in content
     for kw in CRYPTO_KEYWORDS:
