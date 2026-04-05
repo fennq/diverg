@@ -528,6 +528,111 @@
     solOut.innerHTML = '';
   }
 
+  async function resolveApiBaseWithFallback(rawBase) {
+    const explicit = (rawBase || '').trim().replace(/\/+$/, '');
+    if (explicit) return explicit;
+    if (typeof window !== 'undefined' && window.DivergAPI && typeof window.DivergAPI.detectApiBase === 'function') {
+      return await window.DivergAPI.detectApiBase();
+    }
+    return 'http://127.0.0.1:5000';
+  }
+
+  async function runServerSolanaBundleScan(mint, wallet) {
+    const raw = await chrome.storage.local.get(['diverg_api_base_url', 'diverg_auth_token', 'heliusApiKey']);
+    const token = (raw.diverg_auth_token || '').trim();
+    if (!token) return { ok: false, skipped: true, error: 'No JWT configured.' };
+    const base = await resolveApiBaseWithFallback(raw.diverg_api_base_url || '');
+    const body = { mint };
+    if (wallet) body.wallet = wallet;
+    const heliusKey = (raw.heliusApiKey || '').trim();
+    if (heliusKey) body.helius_api_key = heliusKey;
+    const res = await fetch(`${base}/api/investigation/solana-bundle`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + token,
+      },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, error: data.error || `HTTP ${res.status}` };
+    }
+    return Object.assign({ ok: true, _source: 'server_api' }, data);
+  }
+
+  async function runServerBlockchainFull(address) {
+    const raw = await chrome.storage.local.get(['diverg_api_base_url', 'diverg_auth_token']);
+    const token = (raw.diverg_auth_token || '').trim();
+    if (!token) return { ok: false, skipped: true, error: 'No JWT configured.' };
+    const base = await resolveApiBaseWithFallback(raw.diverg_api_base_url || '');
+    const res = await fetch(`${base}/api/investigation/blockchain-full`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + token,
+      },
+      body: JSON.stringify({
+        address,
+        deployer_address: address,
+        chain: 'solana',
+        flow_depth: 'full',
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      return { ok: false, error: data.error || `HTTP ${res.status}` };
+    }
+    return Object.assign({ ok: true, _source: 'server_api' }, data);
+  }
+
+  function renderBlockchainFullResult(data, address) {
+    const parts = [];
+    const score = data.risk_score != null ? Number(data.risk_score) : null;
+    const verdict = data.risk_verdict ? String(data.risk_verdict) : (data.crime_report && data.crime_report.verdict ? String(data.crime_report.verdict) : '');
+    parts.push(
+      `<div class="sol-card-mini highlight">` +
+        `<div class="sol-k-mini">Assessment</div>` +
+        `<div class="sol-v-mini">${escapeHtml(score != null ? `${score}/100` : '—')} · ${escapeHtml(verdict || 'Unknown')}</div>` +
+        (data.risk_summary ? `<div class="sol-v-mini" style="font-size:11px;margin-top:6px">${escapeHtml(String(data.risk_summary).slice(0, 280))}</div>` : '') +
+      `</div>`
+    );
+    if (address) {
+      parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">Address</div><div class="sol-v-mini mono">${escapeHtml(address)}</div></div>`);
+    }
+
+    const cr = data.crime_report || {};
+    const eq = cr.evidence_quality || {};
+    const cc = eq.confidence_counts || {};
+    const findings = Array.isArray(cr.findings_with_evidence) ? cr.findings_with_evidence : [];
+    parts.push(
+      `<div class="sol-card-mini">` +
+        `<div class="sol-k-mini">Evidence</div>` +
+        `<div class="sol-v-mini">Strict: ${escapeHtml(String(findings.length))} · Verified: ${escapeHtml(String(Number(eq.verified_count || 0)))} · High confidence: ${escapeHtml(String(Number(cc.high || 0)))}${eq.quality ? ` · Quality: ${escapeHtml(String(eq.quality))}` : ''}</div>` +
+      `</div>`
+    );
+
+    if (findings.length) {
+      parts.push('<div class="sol-h3-mini">Top verified signals</div><ul class="sol-list-mini">');
+      findings.slice(0, 6).forEach((f) => {
+        const sev = f && f.severity ? String(f.severity) : 'Info';
+        const title = f && f.title ? String(f.title) : 'Finding';
+        const conf = f && f.confidence ? String(f.confidence) : '';
+        const proof = f && f.proof ? String(f.proof).replace(/\s+/g, ' ').slice(0, 96) : '';
+        parts.push(
+          `<li><strong>[${escapeHtml(sev)}]</strong> ${escapeHtml(title)}` +
+            (conf ? ` · ${escapeHtml(conf)} confidence` : '') +
+            (f && f.verified ? ' · verified' : ' · unverified') +
+            (proof ? `<br><span style="opacity:.8">proof: ${escapeHtml(proof)}</span>` : '') +
+          `</li>`
+        );
+      });
+      parts.push('</ul>');
+    }
+    parts.push('<p class="sol-disclaimer-mini">Source: Diverg backend investigation (Arkham-enabled when server key is configured).</p>');
+    solOut.innerHTML = parts.join('');
+  }
+
   function renderSolResult(data) {
     solState.textContent = '';
     solState.className = 'popup-sol-status';
@@ -545,7 +650,9 @@
         `</div>`
       );
     }
-    parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">Mint</div><div class="sol-v-mini mono">${escapeHtml(data.mint)}</div></div>`);
+    if (data.mint) {
+      parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">Mint</div><div class="sol-v-mini mono">${escapeHtml(data.mint)}</div></div>`);
+    }
     const tm = data.token_metadata;
     if (tm && (tm.symbol || tm.name)) {
       const line = [tm.symbol, tm.name].filter(Boolean).join(' · ');
@@ -742,71 +849,84 @@
     });
     solState.textContent =
       mode === 'token'
-        ? 'Deep bundle scan (Helius)… often several minutes — keep this tab open.'
-        : 'Calling Helius…';
+        ? 'Checking Diverg API (Arkham-enabled) first…'
+        : 'Checking Diverg API full investigation…';
     solState.className = 'popup-sol-status scanning';
     solOut.innerHTML = '';
 
     const bundle = typeof globalThis !== 'undefined' && globalThis.divergSolanaBundle ? globalThis.divergSolanaBundle : null;
-    if (!bundle || typeof bundle.runBundleSnapshot !== 'function') {
-      renderSolError('Solana module missing — reload the extension.');
-      return;
-    }
+    solAnalyze.disabled = true;
+    const btnText = solAnalyze.querySelector('span');
+    if (btnText) btnText.textContent = 'Analyzing…';
 
-    chrome.storage.local.get(['heliusApiKey'], (o) => {
-      const key = (o.heliusApiKey || '').trim();
-      if (!key) {
-        renderSolError('Add your Helius API key in Options.');
-        return;
-      }
-      solAnalyze.disabled = true;
-      const btnText = solAnalyze.querySelector('span');
-      if (btnText) btnText.textContent = 'Analyzing…';
-
-      if (mode === 'token') {
-        bundle
-          .runBundleSnapshot(key, mint, { wallet: wallet || null })
-          .then((data) => {
-            if (!data || !data.ok) {
-              renderSolError((data && data.error) || 'Request failed');
-              return;
-            }
-            renderSolResult(data);
-          })
-          .catch((e) => {
-            renderSolError(e.message || 'Network error');
-          })
-          .finally(() => {
-            solAnalyze.disabled = false;
-            if (btnText) btnText.textContent = 'Analyze Solana';
-          });
-      } else {
-        // Address scan mode - run deep wallet analysis
-        if (typeof bundle.analyzeWalletBundle === 'function') {
-          bundle
-            .analyzeWalletBundle(key, walletOnly, { onProgress: (msg) => {
-              solState.textContent = msg;
-            }})
-            .then((data) => {
-              if (!data || !data.ok) {
-                renderSolError((data && data.error) || 'Request failed');
-                return;
-              }
-              renderSolResult({ ...data, mode: 'wallet_deep_graph' });
-            })
-            .catch((e) => {
-              renderSolError(e.message || 'Network error');
-            })
-            .finally(() => {
-              solAnalyze.disabled = false;
-              if (btnText) btnText.textContent = 'Analyze Solana';
-            });
+    (async () => {
+      try {
+        if (mode === 'token') {
+          const serverData = await runServerSolanaBundleScan(mint, wallet || null);
+          if (serverData && serverData.ok) {
+            solState.textContent = 'Done (Diverg API + Arkham intelligence).';
+            solState.className = 'popup-sol-status';
+            renderSolResult(serverData);
+            return;
+          }
         } else {
-          renderSolError('Wallet analysis not available in this version.');
-          solAnalyze.disabled = false;
-          if (btnText) btnText.textContent = 'Analyze Solana';
+          const serverData = await runServerBlockchainFull(walletOnly);
+          if (serverData && serverData.ok) {
+            solState.textContent = 'Done (Diverg full blockchain investigation).';
+            solState.className = 'popup-sol-status';
+            renderBlockchainFullResult(serverData, walletOnly);
+            return;
+          }
         }
+
+        // Fallback: local Helius scan when server JWT/API path is unavailable.
+        if (!bundle || typeof bundle.runBundleSnapshot !== 'function') {
+          renderSolError('Server API unavailable and local Solana module missing — reload extension.');
+          return;
+        }
+        const raw = await chrome.storage.local.get(['heliusApiKey']);
+        const key = (raw.heliusApiKey || '').trim();
+        if (!key) {
+          renderSolError('Server API unavailable. Add JWT for Arkham-backed results or add Helius key for local fallback.');
+          return;
+        }
+
+        if (mode === 'token') {
+          solState.textContent = 'Falling back to local Helius scan…';
+          const data = await bundle.runBundleSnapshot(key, mint, { wallet: wallet || null });
+          if (!data || !data.ok) {
+            renderSolError((data && data.error) || 'Local fallback failed');
+            return;
+          }
+          solState.textContent = 'Done (local Helius fallback).';
+          solState.className = 'popup-sol-status';
+          renderSolResult(data);
+          return;
+        }
+
+        if (typeof bundle.analyzeWalletBundle !== 'function') {
+          renderSolError('Server API unavailable and wallet fallback is not available in this extension version.');
+          return;
+        }
+        solState.textContent = 'Falling back to local wallet analysis…';
+        const data = await bundle.analyzeWalletBundle(key, walletOnly, {
+          onProgress: (msg) => {
+            solState.textContent = msg;
+          },
+        });
+        if (!data || !data.ok) {
+          renderSolError((data && data.error) || 'Local fallback failed');
+          return;
+        }
+        solState.textContent = 'Done (local Helius fallback).';
+        solState.className = 'popup-sol-status';
+        renderSolResult({ ...data, mode: 'wallet_deep_graph' });
+      } catch (e) {
+        renderSolError((e && e.message) || 'Network error');
+      } finally {
+        solAnalyze.disabled = false;
+        if (btnText) btnText.textContent = 'Analyze Solana';
       }
-    });
+    })();
   });
 })();
