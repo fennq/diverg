@@ -131,3 +131,26 @@ def test_fp_memory_suppression_filters_matching_findings() -> None:
     assert [f["title"] for f in kept] == ["Real confirmed issue"]
     assert dropped == 1
     assert breakdown.get("fp_memory_match", 0) == 1
+
+
+def test_medium_consensus_gate_downgrades_unstable_medium() -> None:
+    findings = orchestrator.finalize_api_findings(
+        [
+            _mk(
+                "HTTP header: Strict-Transport-Security — misconfigured",
+                severity="Medium",
+                category="Transport and Browser Security",
+                evidence="Header appeared misconfigured in one sample.",
+                finding_confidence="confirmed",
+            )
+        ]
+    )
+
+    def _always_false(_f, attempts=2):
+        return False
+
+    gated, stats = orchestrator.enforce_medium_consensus_gate(findings, checker=_always_false)
+    assert stats["medium_checked"] == 1
+    assert stats["medium_downgraded"] == 1
+    assert str(gated[0].get("finding_confidence") or "").lower() == "possible"
+    assert gated[0].get("verified") is False

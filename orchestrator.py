@@ -1258,6 +1258,116 @@ def _second_pass_verify(findings: list[dict]) -> list[dict]:
     return out
 
 
+def _check_medium_finding_reproducible(f: dict, attempts: int = 2, timeout_sec: int = 4) -> bool:
+    """Cheap reproducibility check for medium-severity findings.
+
+    This avoids expensive full re-scans by only re-checking a small subset of
+    findings that are known to fluctuate (headers/error-disclosure style rows).
+    """
+    import requests as _requests
+
+    title = str(f.get("title") or "")
+    title_l = title.lower()
+    url = str(f.get("url") or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return True
+
+    if title_l.startswith("http header: "):
+        # Title format: HTTP header: <Header-Name> — <status>
+        try:
+            parts = title.split(":", 1)[1].split("—", 1)
+            header_name = parts[0].strip()
+            expected = parts[1].strip().lower() if len(parts) > 1 else ""
+        except Exception:
+            return True
+        seen = 0
+        for _ in range(max(1, attempts)):
+            try:
+                resp = _requests.get(url, timeout=timeout_sec, allow_redirects=True, verify=False)
+                headers_l = {k.lower(): v for k, v in resp.headers.items()}
+                present = header_name.lower() in headers_l
+                if expected == "missing":
+                    ok = not present
+                elif expected == "present":
+                    ok = present
+                elif expected == "misconfigured":
+                    ok = present and not str(headers_l.get(header_name.lower()) or "").strip()
+                else:
+                    ok = present
+                if ok:
+                    seen += 1
+            except Exception:
+                continue
+        return seen >= max(1, attempts)
+
+    if "verbose error" in title_l or "internal path disclosure" in title_l:
+        # Require repeated observation of error/path leakage markers.
+        markers = (
+            "traceback",
+            "exception",
+            "stack trace",
+            "internal server error",
+            "/var/",
+            " at line ",
+        )
+        seen = 0
+        for _ in range(max(1, attempts)):
+            try:
+                resp = _requests.get(url, timeout=timeout_sec, allow_redirects=True, verify=False)
+                body = (resp.text or "").lower()
+                if any(m in body for m in markers):
+                    seen += 1
+            except Exception:
+                continue
+        return seen >= max(1, attempts)
+
+    # Other medium findings are left as-is to avoid over-pruning.
+    return True
+
+
+def enforce_medium_consensus_gate(findings: list[dict], checker=None) -> tuple[list[dict], dict[str, int]]:
+    """Stabilize scoring by re-checking only medium findings quickly.
+
+    Alternative to 3 full scans: targeted consensus on medium rows only.
+    """
+    if checker is None:
+        checker = _check_medium_finding_reproducible
+    try:
+        max_checks = int(os.environ.get("DIVERG_MEDIUM_CONSENSUS_MAX", "8") or "8")
+    except ValueError:
+        max_checks = 8
+    try:
+        attempts = int(os.environ.get("DIVERG_MEDIUM_CONSENSUS_ATTEMPTS", "2") or "2")
+    except ValueError:
+        attempts = 2
+
+    out: list[dict] = []
+    stats = {"medium_checked": 0, "medium_confirmed": 0, "medium_downgraded": 0}
+    checks = 0
+    for f in findings:
+        sev = str(f.get("severity") or "").strip().lower()
+        if sev != "medium" or checks >= max_checks:
+            out.append(f)
+            continue
+        checks += 1
+        stats["medium_checked"] += 1
+        if checker(f, attempts=attempts):
+            stats["medium_confirmed"] += 1
+            out.append(f)
+            continue
+        downgraded = dict(f)
+        downgraded["finding_confidence"] = "possible"
+        downgraded["confidence"] = "low"
+        downgraded["verified"] = False
+        downgraded["evidence"] = (
+            "[Needs manual verification] Medium consensus gate could not reproduce this finding repeatedly. "
+            + str(f.get("evidence") or "")
+        )
+        out.append(downgraded)
+        stats["medium_downgraded"] += 1
+    return out, stats
+
+
 def _is_public_route(url: str) -> bool:
     """Return True if *url* matches a common public / marketing / static path."""
     try:
@@ -1316,6 +1426,7 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
 
     deduped = dedupe_findings(all_findings)
     deduped = _second_pass_verify(deduped)
+    deduped, medium_stats = enforce_medium_consensus_gate(deduped)
     deduped, replay_stats = enforce_replay_gate(deduped)
     enriched = enrich_findings_with_exploits(deduped)
     try:
@@ -1332,6 +1443,7 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
     strict_only, dropped, breakdown = filter_strict_positive_findings(finalized, fp_suppressions=fp_suppressions)
     aggregate_findings._last_heuristic_dropped = dropped
     aggregate_findings._last_strict_filter_breakdown = breakdown
+    aggregate_findings._last_medium_consensus_stats = medium_stats
     aggregate_findings._last_replay_gate_stats = replay_stats
     return strict_only
 
@@ -1377,6 +1489,7 @@ def aggregate_scan_diagnostics(results: dict[str, dict]) -> list[dict]:
         deduped.append(diag)
     dropped = int(getattr(aggregate_findings, "_last_heuristic_dropped", 0) or 0)
     breakdown = getattr(aggregate_findings, "_last_strict_filter_breakdown", {}) or {}
+    medium_stats = getattr(aggregate_findings, "_last_medium_consensus_stats", {}) or {}
     replay_stats = getattr(aggregate_findings, "_last_replay_gate_stats", {}) or {}
     if dropped > 0:
         breakdown_text = ", ".join(f"{k}: {v}" for k, v in breakdown.items()) if breakdown else "no reason breakdown"
@@ -1397,6 +1510,18 @@ def aggregate_scan_diagnostics(results: dict[str, dict]) -> list[dict]:
                 f"downgraded {int(replay_stats.get('replay_downgraded', 0))}."
             ),
             "meta": replay_stats,
+        })
+    if medium_stats:
+        deduped.append({
+            "skill": "orchestrator",
+            "level": "info",
+            "message": (
+                "Medium consensus gate checked "
+                f"{int(medium_stats.get('medium_checked', 0))} findings; "
+                f"confirmed {int(medium_stats.get('medium_confirmed', 0))}, "
+                f"downgraded {int(medium_stats.get('medium_downgraded', 0))}."
+            ),
+            "meta": medium_stats,
         })
     return deduped
 
