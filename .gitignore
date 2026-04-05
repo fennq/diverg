@@ -52,6 +52,7 @@ content/*proof-results.json
 
 # Internal content and product docs (local only — do not commit)
 content/
+!content/false_positive_memory.json
 agents/
 contracts/
 PUBLIC.md
@@ -71,3 +72,6 @@ twitter/
 drift-exploit-*.md
 drift-attacker-evidence-packet.*
 node_modules/
+
+# Cursor planning artifacts (keep repo clean)
+.cursor/plans/

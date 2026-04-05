@@ -1,0 +1,24 @@
+{
+  "version": "v1",
+  "description": "Persistent suppressions for known false-positive patterns.",
+  "rules": [
+    {
+      "active": true,
+      "title_contains": "possible race condition: multiple 200 responses to concurrent requests",
+      "category_contains": "business logic / concurrency",
+      "source_equals": "race_condition"
+    },
+    {
+      "active": true,
+      "title_contains": "server accepted zero or manipulated payment parameter",
+      "category_contains": "payment / financial impact",
+      "source_equals": "payment_financial"
+    },
+    {
+      "active": true,
+      "title_contains": "batch-like endpoint responds to get",
+      "category_contains": "chain / batch validation",
+      "source_equals": "chain_validation_abuse"
+    }
+  ]
+}

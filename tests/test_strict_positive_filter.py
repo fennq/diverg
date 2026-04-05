@@ -18,6 +18,7 @@ def _mk(
     *,
     severity: str = "High",
     evidence: str = "Request payload returned 500 with SQL syntax error.",
+    category: str = "Injection",
     finding_type: str = "vulnerability",
     finding_confidence: str | None = "confirmed",
     status: str | None = None,
@@ -26,7 +27,7 @@ def _mk(
         "title": title,
         "severity": severity,
         "url": "https://example.com/test",
-        "category": "Injection",
+        "category": category,
         "evidence": evidence,
         "impact": "Impact",
         "remediation": "Fix",
@@ -81,3 +82,52 @@ def test_strict_filter_repeatability_same_input_same_output() -> None:
     assert [f["title"] for f in kept_1] == [f["title"] for f in kept_2]
     assert dropped_1 == dropped_2
     assert breakdown_1 == breakdown_2
+
+
+def test_strict_filter_enforces_replay_gate_for_high_critical() -> None:
+    findings = orchestrator.finalize_api_findings(
+        [
+            _mk(
+                "Critical SQLi",
+                severity="Critical",
+                evidence="payload caused sql error and stack trace in response body",
+                finding_confidence="confirmed",
+            )
+        ]
+    )
+
+    def _replay_fail(_f, timeout_sec=6):
+        return {"ok": False, "status": "replay_failed", "reason": "timeout"}
+
+    gated, stats = orchestrator.enforce_replay_gate(findings, replay_fn=_replay_fail)
+    assert stats["replay_checked"] == 1
+    assert stats["replay_downgraded"] == 1
+    assert gated[0]["verified"] is False
+    assert str(gated[0].get("finding_confidence") or "").lower() == "possible"
+
+
+def test_fp_memory_suppression_filters_matching_findings() -> None:
+    findings = orchestrator.finalize_api_findings(
+        [
+            _mk("Known noisy title", category="Business Logic / Concurrency", finding_confidence="confirmed"),
+            _mk("Real confirmed issue", category="Injection", finding_confidence="confirmed"),
+        ]
+    )
+    for f in findings:
+        if f["title"] == "Known noisy title":
+            f["source"] = "race_condition"
+            f["_source_skill"] = "race_condition"
+    kept, dropped, breakdown = orchestrator.filter_strict_positive_findings(
+        findings,
+        fp_suppressions=[
+            {
+                "active": True,
+                "title_contains": "known noisy title",
+                "category_contains": "business logic / concurrency",
+                "source_equals": "race_condition",
+            }
+        ],
+    )
+    assert [f["title"] for f in kept] == ["Real confirmed issue"]
+    assert dropped == 1
+    assert breakdown.get("fp_memory_match", 0) == 1

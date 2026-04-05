@@ -117,10 +117,14 @@ ALLOWED_ORIGINS = [
 ]
 MAX_REQUEST_SIZE = 2 * 1024 * 1024  # 2 MB
 IS_PRODUCTION = os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("DIVERG_PRODUCTION")
+DIVERG_JWT_SECRET = os.environ.get("DIVERG_JWT_SECRET", "").strip()
+DIVERG_AUDIT_LOG_RETENTION_DAYS = int(os.environ.get("DIVERG_AUDIT_LOG_RETENTION_DAYS", "90") or "90")
+DIVERG_ENABLE_STRICT_PROOF_API = (os.environ.get("DIVERG_ENABLE_STRICT_PROOF_API", "1").strip().lower() in ("1", "true", "yes"))
 
 _INVESTIGATION_DIR = str(ROOT / "investigation")
 if _INVESTIGATION_DIR not in sys.path:
     sys.path.insert(0, _INVESTIGATION_DIR)
+FP_MEMORY_PATH = ROOT / "content" / "false_positive_memory.json"
 
 
 def _arkham_env_error_response():
@@ -249,6 +253,8 @@ CREATE TABLE IF NOT EXISTS users (
     id           TEXT PRIMARY KEY,
     email        TEXT UNIQUE NOT NULL,
     name         TEXT DEFAULT '',
+    role         TEXT DEFAULT 'analyst',
+    org_id       TEXT DEFAULT '',
     password     TEXT,
     provider     TEXT DEFAULT 'email',
     avatar_url   TEXT DEFAULT '',
@@ -299,6 +305,19 @@ CREATE TABLE IF NOT EXISTS referral_events (
     referee_id  TEXT NOT NULL UNIQUE,
     credited_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT,
+    role        TEXT,
+    org_id      TEXT,
+    action      TEXT NOT NULL,
+    target      TEXT,
+    status      TEXT DEFAULT 'ok',
+    metadata    TEXT DEFAULT '{}',
+    ip          TEXT DEFAULT '',
+    created_at  TEXT NOT NULL
+);
 """
 
 
@@ -317,6 +336,11 @@ def _db():
 def init_db():
     with _db() as conn:
         conn.executescript(SCHEMA)
+        user_cols = [row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()]
+        if "role" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'analyst'")
+        if "org_id" not in user_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN org_id TEXT DEFAULT ''")
         cols = [row[1] for row in conn.execute("PRAGMA table_info(scans)").fetchall()]
         if "user_id" not in cols:
             conn.execute("ALTER TABLE scans ADD COLUMN user_id TEXT DEFAULT ''")
@@ -325,6 +349,8 @@ def init_db():
                ON points_ledger (user_id, reason, IFNULL(ref_type,''), ref_id)
                WHERE ref_id IS NOT NULL"""
         )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_user_action ON audit_log(user_id, action)")
 
 
 def _count_severity(findings: list, level: str) -> int:
@@ -390,6 +416,53 @@ def _reward_poc(user_id: str) -> None:
         pass
 
 
+def _audit_log(user_id: str, action: str, *, status: str = "ok", target: str = "", metadata: dict | None = None) -> None:
+    meta = metadata or {}
+    try:
+        ip = _get_client_ip()
+    except Exception:
+        ip = ""
+    role = ""
+    org_id = ""
+    if user_id:
+        try:
+            with _db() as conn:
+                row = conn.execute("SELECT role, org_id FROM users WHERE id = ?", (user_id,)).fetchone()
+                if row:
+                    role = str(row["role"] or "")
+                    org_id = str(row["org_id"] or "")
+        except Exception:
+            pass
+    try:
+        with _db() as conn:
+            conn.execute(
+                """INSERT INTO audit_log (user_id, role, org_id, action, target, status, metadata, ip, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    user_id or "",
+                    role,
+                    org_id,
+                    action[:120],
+                    target[:400],
+                    status[:24],
+                    json.dumps(meta, default=str)[:4000],
+                    ip[:80],
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+    except Exception:
+        pass
+
+
+def _cleanup_old_audit_logs() -> None:
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max(7, DIVERG_AUDIT_LOG_RETENTION_DAYS))
+        with _db() as conn:
+            conn.execute("DELETE FROM audit_log WHERE created_at < ?", (cutoff.isoformat(),))
+    except Exception:
+        pass
+
+
 # ── Auth helpers ────────────────────────────────────────────────────────────
 
 def hash_password(pw: str) -> str:
@@ -439,7 +512,7 @@ def get_current_user():
     try:
         with _db() as conn:
             row = conn.execute(
-                "SELECT id, email, name, provider, avatar_url, created_at FROM users WHERE id = ?",
+                "SELECT id, email, name, role, org_id, provider, avatar_url, created_at FROM users WHERE id = ?",
                 (payload["sub"],),
             ).fetchone()
         return dict(row) if row else None
@@ -457,6 +530,25 @@ def require_auth(f):
         g.user = user
         return f(*args, **kwargs)
     return decorated
+
+
+def require_role(*allowed_roles):
+    allowed = {str(r).strip().lower() for r in allowed_roles if str(r).strip()}
+
+    def _decorator(f):
+        @wraps(f)
+        def _wrapped(*args, **kwargs):
+            user = get_current_user()
+            if not user:
+                return jsonify({"error": "Authentication required"}), 401
+            role = str(user.get("role") or "analyst").lower()
+            if allowed and role not in allowed:
+                return jsonify({"error": "Forbidden for role", "required_roles": sorted(allowed)}), 403
+            g.user = user
+            return f(*args, **kwargs)
+        return _wrapped
+
+    return _decorator
 
 
 def validate_email(email: str) -> bool:
@@ -547,6 +639,10 @@ def auth_register():
     email = sanitize_text(data.get("email") or "", 254).lower()
     password = (data.get("password") or "")
     name = sanitize_text(data.get("name") or "", 100)
+    role = sanitize_text(data.get("role") or "analyst", 32).lower()
+    if role not in {"owner", "admin", "analyst", "viewer", "api_client"}:
+        role = "analyst"
+    org_id = sanitize_text(data.get("org_id") or "", 120)
     referral_raw = data.get("referral_code") or data.get("ref") or ""
     referral_raw = referral_raw.strip()[:64] if isinstance(referral_raw, str) else ""
 
@@ -568,8 +664,8 @@ def auth_register():
 
         user_id = str(uuid.uuid4())
         conn.execute(
-            "INSERT INTO users (id, email, name, password, provider, created_at) VALUES (?,?,?,?,?,?)",
-            (user_id, email, name or email.split("@")[0], hash_password(password), "email",
+            "INSERT INTO users (id, email, name, role, org_id, password, provider, created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (user_id, email, name or email.split("@")[0], role, org_id, hash_password(password), "email",
              datetime.now(timezone.utc).isoformat()),
         )
         from dashboard_points import apply_referral_on_register, ensure_user_points_row
@@ -578,9 +674,10 @@ def auth_register():
         apply_referral_on_register(conn, user_id, referral_raw)
 
     token = create_token(user_id, email)
+    _audit_log(user_id, "auth.register", target=email, metadata={"role": role, "org_id": org_id})
     return jsonify({
         "token": token,
-        "user": {"id": user_id, "email": email, "name": name or email.split("@")[0], "provider": "email"},
+        "user": {"id": user_id, "email": email, "name": name or email.split("@")[0], "provider": "email", "role": role, "org_id": org_id},
     }), 201
 
 
@@ -610,12 +707,13 @@ def auth_login():
     auth_limiter.record(ip)
 
     with _db() as conn:
-        row = conn.execute("SELECT id, email, name, password, provider, avatar_url FROM users WHERE email = ?",
+        row = conn.execute("SELECT id, email, name, role, org_id, password, provider, avatar_url FROM users WHERE email = ?",
                            (email,)).fetchone()
 
     if not row:
         # Burn CPU to prevent timing-based user enumeration
         bcrypt.hashpw(b"dummy_timing_pad", bcrypt.gensalt(rounds=12))
+        _audit_log("", "auth.login", status="failed", target=email, metadata={"reason": "email_not_found"})
         return jsonify({"error": "Invalid credentials"}), 401
 
     user = dict(row)
@@ -623,9 +721,11 @@ def auth_login():
     if not user.get("password"):
         # Don't reveal auth method — same generic error
         bcrypt.hashpw(b"dummy_timing_pad", bcrypt.gensalt(rounds=12))
+        _audit_log(user.get("id") or "", "auth.login", status="failed", target=email, metadata={"reason": "provider_mismatch"})
         return jsonify({"error": "Invalid credentials"}), 401
 
     if not check_password(password, user["password"]):
+        _audit_log(user.get("id") or "", "auth.login", status="failed", target=email, metadata={"reason": "bad_password"})
         return jsonify({"error": "Invalid credentials"}), 401
 
     auth_limiter.clear(ip)
@@ -634,10 +734,11 @@ def auth_login():
 
         ensure_user_points_row(conn, user["id"])
     token = create_token(user["id"], user["email"])
+    _audit_log(user["id"], "auth.login", target=email, metadata={"role": user.get("role", "analyst")})
     return jsonify({
         "token": token,
         "user": {"id": user["id"], "email": user["email"], "name": user["name"], "provider": user["provider"],
-                 "avatar_url": user.get("avatar_url", "")},
+                 "avatar_url": user.get("avatar_url", ""), "role": user.get("role", "analyst"), "org_id": user.get("org_id", "")},
     })
 
 
@@ -687,7 +788,7 @@ def auth_google():
     referral_raw = referral_raw.strip()[:64] if isinstance(referral_raw, str) else ""
 
     with _db() as conn:
-        existing = conn.execute("SELECT id, email, name, provider, avatar_url FROM users WHERE email = ?",
+        existing = conn.execute("SELECT id, email, name, role, org_id, provider, avatar_url FROM users WHERE email = ?",
                                 (email,)).fetchone()
         from dashboard_points import apply_referral_on_register, ensure_user_points_row
 
@@ -698,25 +799,27 @@ def auth_google():
         else:
             user_id = str(uuid.uuid4())
             conn.execute(
-                "INSERT INTO users (id, email, name, password, provider, avatar_url, created_at) VALUES (?,?,?,?,?,?,?)",
-                (user_id, email, name, None, "google", avatar, datetime.now(timezone.utc).isoformat()),
+                "INSERT INTO users (id, email, name, role, org_id, password, provider, avatar_url, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                (user_id, email, name, "analyst", "", None, "google", avatar, datetime.now(timezone.utc).isoformat()),
             )
             ensure_user_points_row(conn, user_id)
             apply_referral_on_register(conn, user_id, referral_raw)
-            user = {"id": user_id, "email": email, "name": name, "provider": "google", "avatar_url": avatar}
+            user = {"id": user_id, "email": email, "name": name, "role": "analyst", "org_id": "", "provider": "google", "avatar_url": avatar}
 
     auth_limiter.clear(ip)
     token = create_token(user["id"], email)
+    _audit_log(user["id"], "auth.google", target=email, metadata={"role": user.get("role", "analyst")})
     return jsonify({
         "token": token,
         "user": {"id": user["id"], "email": email, "name": user.get("name", name),
-                 "provider": "google", "avatar_url": user.get("avatar_url", avatar)},
+                 "provider": "google", "avatar_url": user.get("avatar_url", avatar), "role": user.get("role", "analyst"), "org_id": user.get("org_id", "")},
     })
 
 
 @app.route("/api/auth/me", methods=["GET"])
 @require_auth
 def auth_me():
+    _audit_log(g.user["id"], "auth.me")
     return jsonify({"user": g.user})
 
 
@@ -794,6 +897,7 @@ def api_scan():
     if err:
         return err
     try:
+        _audit_log(g.user["id"], "scan.start", target=url, metadata={"scope": scope, "goal": goal or ""})
         result = run_web_scan(url, scope=scope, goal=goal, auth_context=auth_context)
         scan_id = str(uuid.uuid4())
         save_scan(scan_id, result, scope, user_id=g.user["id"])
@@ -819,9 +923,14 @@ def api_scan():
             "risk_summary": result.get("risk_summary"),
             "safe_to_run": result.get("safe_to_run"),
             "remediation_plan": result.get("remediation_plan"),
+            "proof_bundle": result.get("proof_bundle"),
+            "report_provenance": result.get("report_provenance"),
+            "scan_fingerprint": result.get("scan_fingerprint"),
         }
+        _audit_log(g.user["id"], "scan.complete", target=url, metadata={"scope": scope, "scan_id": scan_id, "findings": len(result.get("findings") or [])})
         return jsonify(payload)
     except Exception as e:
+        _audit_log(g.user["id"], "scan.complete", status="failed", target=url, metadata={"scope": scope, "error": str(e)})
         return jsonify({"error": str(e)}), 500
 
 
@@ -850,6 +959,7 @@ def api_scan_stream():
     def generate():
         accumulated = None
         try:
+            _audit_log(user_id, "scan.start", target=url, metadata={"scope": scope, "streaming": True, "goal": goal or ""})
             yield _ndjson({"event": "scan_start", "id": scan_id, "url": url, "scope": scope})
             for event in run_web_scan_streaming(url, scope=scope, goal=goal, auth_context=auth_context):
                 if event.get("event") == "done":
@@ -870,6 +980,12 @@ def api_scan_stream():
             if accumulated:
                 try:
                     save_scan(scan_id, accumulated, scope, user_id=user_id)
+                    _audit_log(
+                        user_id,
+                        "scan.complete",
+                        target=url,
+                        metadata={"scope": scope, "scan_id": scan_id, "streaming": True, "findings": len(accumulated.get("findings") or [])},
+                    )
                 except Exception:
                     pass
 
@@ -934,6 +1050,13 @@ def poc_simulate():
 
     if result.success:
         _reward_poc(g.user["id"])
+    _audit_log(
+        g.user["id"],
+        "poc.simulate",
+        target=sanitize_text(str(data.get("url") or ""), 500),
+        status="ok" if result.success else "failed",
+        metadata={"success": bool(result.success), "status_code": result.status_code, "poc_type": result.poc_type or data.get("type")},
+    )
     return jsonify({
         "success": result.success,
         "status_code": result.status_code,
@@ -943,6 +1066,72 @@ def poc_simulate():
         "poc_type": result.poc_type or None,
         "verbose": verbose,
     })
+
+
+@app.route("/api/proof/replay", methods=["POST"])
+@require_auth
+def proof_replay():
+    if not DIVERG_ENABLE_STRICT_PROOF_API:
+        return jsonify({"error": "Proof replay API disabled"}), 403
+    if not request.is_json:
+        return jsonify({"error": "Content-Type must be application/json"}), 400
+    payload = request.get_json(silent=True) or {}
+    finding = payload.get("finding")
+    if not isinstance(finding, dict):
+        return jsonify({"error": "finding must be an object"}), 400
+    try:
+        from orchestrator import replay_verify_finding
+
+        timeout_sec = _safe_int(payload.get("timeout_sec"), 10, 2, 30)
+        result = replay_verify_finding(finding, timeout_sec=timeout_sec)
+        _audit_log(
+            g.user["id"],
+            "proof.replay",
+            target=sanitize_text(str(finding.get("url") or ""), 500),
+            metadata={"ok": bool(result.get("ok")), "status": result.get("status", "")},
+        )
+        return jsonify({"replay": result})
+    except Exception as exc:
+        _audit_log(g.user["id"], "proof.replay", status="failed", metadata={"error": str(exc)})
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/findings/false-positive", methods=["POST"])
+@require_role("owner", "admin", "analyst")
+def mark_false_positive():
+    if not request.is_json:
+        return jsonify({"error": "Content-Type must be application/json"}), 400
+    data = request.get_json(silent=True) or {}
+    finding = data.get("finding")
+    if not isinstance(finding, dict):
+        return jsonify({"error": "finding must be an object"}), 400
+    memory = _read_fp_memory()
+    rules = memory.get("rules") if isinstance(memory.get("rules"), list) else []
+    src = str(finding.get("source") or finding.get("_source_skill") or "").strip().lower()
+    rule = {
+        "active": True,
+        "title_contains": str(finding.get("title") or "").strip().lower()[:120],
+        "category_contains": str(finding.get("category") or "").strip().lower()[:120],
+        "source_equals": src,
+    }
+    existing = any(
+        isinstance(r, dict)
+        and str(r.get("title_contains") or "") == rule["title_contains"]
+        and str(r.get("category_contains") or "") == rule["category_contains"]
+        and str(r.get("source_equals") or "") == rule["source_equals"]
+        for r in rules
+    )
+    if not existing and rule["title_contains"]:
+        rules.append(rule)
+    memory["rules"] = rules[:500]
+    _write_fp_memory(memory)
+    _audit_log(
+        g.user["id"],
+        "finding.mark_false_positive",
+        target=sanitize_text(str(finding.get("url") or ""), 500),
+        metadata={"title": rule["title_contains"], "source": rule["source_equals"], "existing": existing},
+    )
+    return jsonify({"ok": True, "rules_total": len(memory["rules"]), "added": not existing})
 
 
 # ── Investigation tools (full skill / chain data for console) ─────────────────
@@ -1686,6 +1875,7 @@ def history_bulk_delete():
         rows = conn.execute("SELECT id FROM scans WHERE user_id = ?", (user["id"],)).fetchall()
         deleted_ids = [r["id"] for r in rows]
         conn.execute("DELETE FROM scans WHERE user_id = ?", (user["id"],))
+    _audit_log(user["id"], "history.bulk_delete", metadata={"deleted_count": len(deleted_ids)})
     return jsonify({"deleted_count": len(deleted_ids), "deleted_ids": deleted_ids[:500]})
 
 
@@ -1697,6 +1887,27 @@ def _safe_report_json(raw: str | None) -> dict:
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
+
+
+def _read_fp_memory() -> dict:
+    try:
+        if not FP_MEMORY_PATH.exists():
+            return {"version": "v1", "description": "Persistent suppressions for known false-positive patterns.", "rules": []}
+        raw = FP_MEMORY_PATH.read_text(encoding="utf-8")
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            rules = parsed.get("rules")
+            if not isinstance(rules, list):
+                parsed["rules"] = []
+            return parsed
+    except Exception:
+        pass
+    return {"version": "v1", "description": "Persistent suppressions for known false-positive patterns.", "rules": []}
+
+
+def _write_fp_memory(payload: dict) -> None:
+    FP_MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    FP_MEMORY_PATH.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
 
 
 @app.route("/api/analytics/summary", methods=["GET"])
@@ -1718,6 +1929,9 @@ def analytics_summary():
     severity = {"critical": 0, "high": 0, "medium": 0, "low": 0}
     verdict_breakdown: dict[str, int] = defaultdict(int)
     categories: dict[str, int] = defaultdict(int)
+    filtered_total = 0
+    proof_bundle_total = 0
+    replay_candidate_total = 0
     total_risk = 0.0
     risk_n = 0
 
@@ -1757,6 +1971,10 @@ def analytics_summary():
 
         rep = _safe_report_json(s.get("report_json"))
         findings = rep.get("findings") if isinstance(rep.get("findings"), list) else []
+        filtered_total += int(rep.get("filtered_out_total") or 0)
+        proof_blob = rep.get("proof_bundle") if isinstance(rep.get("proof_bundle"), dict) else {}
+        proof_bundle_total += int(proof_blob.get("total_bundles") or 0)
+        replay_candidate_total += int(proof_blob.get("replay_candidates") or 0)
         for f in findings:
             if not isinstance(f, dict):
                 continue
@@ -1771,6 +1989,60 @@ def analytics_summary():
         "verdict_breakdown": dict(verdict_breakdown),
         "activity_30d": [{"date": d, "count": c} for d, c in day_counts.items()],
         "top_categories": [{"category": k, "count": v} for k, v in top_categories],
+        "strict_findings_total": sum(severity.values()),
+        "filtered_signals_total": filtered_total,
+        "proof_bundle_total": proof_bundle_total,
+        "proof_replay_candidates": replay_candidate_total,
+    })
+
+
+@app.route("/api/kpi/program", methods=["GET"])
+@require_role("owner", "admin", "analyst")
+def program_kpi():
+    user_id = g.user["id"]
+    limit = _safe_int(request.args.get("limit"), 60, 10, 365)
+    with _db() as conn:
+        rows = conn.execute(
+            """SELECT report_json, created_at
+               FROM scans WHERE user_id = ?
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            (user_id, limit),
+        ).fetchall()
+    scans = [dict(r) for r in rows]
+    strict_total = 0
+    filtered_total = 0
+    verified_total = 0
+    replay_candidates = 0
+    replay_confirmed = 0
+    diag_errors = 0
+    for scan in scans:
+        report = _safe_report_json(scan.get("report_json"))
+        findings = report.get("findings") if isinstance(report.get("findings"), list) else []
+        strict_total += len(findings)
+        filtered_total += int(report.get("filtered_out_total") or 0)
+        verified_total += sum(1 for f in findings if isinstance(f, dict) and f.get("verified"))
+        proof = report.get("proof_bundle") if isinstance(report.get("proof_bundle"), dict) else {}
+        replay_candidates += int(proof.get("replay_candidates") or 0)
+        diagnostics = report.get("scan_diagnostics") if isinstance(report.get("scan_diagnostics"), list) else []
+        diag_errors += sum(1 for d in diagnostics if isinstance(d, dict) and str(d.get("level") or "").lower() == "error")
+        for b in (proof.get("bundles") or []):
+            if isinstance(b, dict) and b.get("verified"):
+                replay_confirmed += 1
+    precision = round((verified_total / strict_total), 3) if strict_total else 0.0
+    replay_rate = round((replay_confirmed / replay_candidates), 3) if replay_candidates else 0.0
+    return jsonify({
+        "strategy": {"option": "C", "enterprise_weight": 70, "offensive_weight": 30},
+        "window_scans": len(scans),
+        "strict_findings": strict_total,
+        "filtered_signals": filtered_total,
+        "verified_findings": verified_total,
+        "strict_precision": precision,
+        "replay_candidates": replay_candidates,
+        "replay_confirmed": replay_confirmed,
+        "replay_confirmation_rate": replay_rate,
+        "diagnostic_errors": diag_errors,
+        "recommended_review": "weekly",
     })
 
 
@@ -1860,6 +2132,7 @@ def history_get(scan_id):
     else:
         data.pop("report_json", None)
     data.pop("user_id", None)
+    _audit_log(g.user["id"], "history.get", target=scan_id)
     return jsonify(data)
 
 
@@ -1874,6 +2147,7 @@ def history_delete(scan_id):
         return jsonify({"error": "Invalid scan ID"}), 400
     with _db() as conn:
         conn.execute("DELETE FROM scans WHERE id = ? AND user_id = ?", (scan_id, user["id"]))
+    _audit_log(user["id"], "history.delete", target=scan_id)
     return jsonify({"deleted": scan_id})
 
 
@@ -1887,7 +2161,32 @@ def history_patch(scan_id):
     with _db() as conn:
         conn.execute("UPDATE scans SET label = ? WHERE id = ? AND user_id = ?",
                      (label, scan_id, g.user["id"]))
+    _audit_log(g.user["id"], "history.patch", target=scan_id, metadata={"label": label})
     return jsonify({"id": scan_id, "label": label})
+
+
+@app.route("/api/audit/logs", methods=["GET"])
+@require_role("owner", "admin")
+def audit_logs_list():
+    limit = _safe_int(request.args.get("limit"), 100, 1, 500)
+    offset = _safe_int(request.args.get("offset"), 0, 0, 1000000)
+    org_scope = str(g.user.get("org_id") or "").strip()
+    q = """
+        SELECT id, user_id, role, org_id, action, target, status, metadata, ip, created_at
+        FROM audit_log
+        WHERE (? = '' OR org_id = ? OR user_id = ?)
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+    """
+    with _db() as conn:
+        rows = conn.execute(q, (org_scope, org_scope, g.user["id"], limit, offset)).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["metadata"] = _safe_report_json(item.get("metadata"))
+        items.append(item)
+    _audit_log(g.user["id"], "audit.logs.list")
+    return jsonify({"total": len(items), "limit": limit, "offset": offset, "items": items})
 
 
 # ── Stats endpoint ────────────────────────────────────────────────────────────
@@ -1948,9 +2247,11 @@ def health():
         "status": "ok",
         "service": "diverg-console",
         "version": "2.3",
-        "db_path": str(DB_PATH),
+        "db_path": str(DB_PATH) if not IS_PRODUCTION else "",
         "db_exists": DB_PATH.exists(),
-        "users": user_count,
+        "users": user_count if not IS_PRODUCTION else None,
+        "program_strategy": {"option": "C", "enterprise_weight": 70, "offensive_weight": 30},
+        "audit_retention_days": DIVERG_AUDIT_LOG_RETENTION_DAYS,
     })
 
 
@@ -1972,6 +2273,9 @@ def main():
     print(f"  Diverg Console  →  http://{args.host}:{args.port}/dashboard/")
     print(f"  Login           →  http://{args.host}:{args.port}/login")
     print(f"  API             →  http://{args.host}:{args.port}/api/health")
+    if not DIVERG_JWT_SECRET:
+        print("  Warning         →  DIVERG_JWT_SECRET not set; JWT secret rotates at process start.")
+    _cleanup_old_audit_logs()
     try:
         from waitress import serve
         try:

@@ -17,7 +17,9 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import platform
 import re
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -66,6 +68,14 @@ def skill_scan_type_for_scope(scope: str) -> str:
 
 SKILL_TIMEOUT_SECONDS = 20
 MAX_DIRECT_WORKERS = 6
+
+# Program strategy (Option C in roadmap): 70% enterprise trust, 30% offensive depth.
+PROGRAM_STRATEGY = {
+    "option": "C",
+    "label": "Hybrid Balanced Track",
+    "enterprise_weight": 70,
+    "offensive_weight": 30,
+}
 
 
 def skill_timeout_seconds_for_scope(scope: str) -> int:
@@ -420,6 +430,14 @@ _STRICT_EXPLOIT_CATEGORY_RE = re.compile(
     re.IGNORECASE,
 )
 _NON_VULN_FINDING_TYPES = {"positive", "hardening", "informational"}
+_PROOF_CLASS_CONTRACTS: dict[str, list[str]] = {
+    "sqli": ["payload", "sql", "error"],
+    "xss": ["payload", "reflected"],
+    "idor": ["id", "response", "user"],
+    "ssrf": ["url", "request"],
+    "traversal": ["../", "response"],
+    "cmdi": ["payload", "delay"],
+}
 
 
 def _has_minimum_proof(f: dict) -> bool:
@@ -435,6 +453,137 @@ def _has_minimum_proof(f: dict) -> bool:
     if _STRICT_EXPLOIT_CATEGORY_RE.search(category):
         return bool(_STRICT_PROOF_SIGNAL_RE.search(evidence))
     return True
+
+
+def _infer_proof_class(f: dict) -> str:
+    title = str(f.get("title") or "").lower()
+    category = str(f.get("category") or "").lower()
+    hay = f"{title} {category}"
+    if "sql" in hay:
+        return "sqli"
+    if "xss" in hay or "cross-site scripting" in hay:
+        return "xss"
+    if "idor" in hay or "insecure direct object" in hay or "authorization" in hay:
+        return "idor"
+    if "ssrf" in hay:
+        return "ssrf"
+    if "traversal" in hay or "path traversal" in hay:
+        return "traversal"
+    if "command injection" in hay or "cmdi" in hay:
+        return "cmdi"
+    return ""
+
+
+def _meets_proof_contract(f: dict) -> bool:
+    proof_class = _infer_proof_class(f)
+    if not proof_class:
+        return True
+    req_tokens = _PROOF_CLASS_CONTRACTS.get(proof_class) or []
+    if not req_tokens:
+        return True
+    evidence = str(f.get("evidence") or "").lower()
+    proof = str(f.get("proof") or "").lower()
+    blob = f"{evidence}\n{proof}"
+    return all(tok in blob for tok in req_tokens)
+
+
+def _apply_false_positive_memory(findings: list[dict], fp_rules: list[dict] | None) -> tuple[list[dict], int]:
+    """Drop findings that match false-positive memory suppressions."""
+    if not fp_rules:
+        return findings, 0
+    kept: list[dict] = []
+    dropped = 0
+    for finding in findings:
+        title = str(finding.get("title") or "").lower()
+        category = str(finding.get("category") or "").lower()
+        url = str(finding.get("url") or "").lower()
+        evidence = str(finding.get("evidence") or "").lower()
+        source = str(finding.get("source") or finding.get("_source_skill") or "").lower()
+        matched = False
+        for rule in fp_rules:
+            if not isinstance(rule, dict):
+                continue
+            if not bool(rule.get("active", True)):
+                continue
+            t = str(rule.get("title_contains") or "").strip().lower()
+            c = str(rule.get("category_contains") or "").strip().lower()
+            u = str(rule.get("url_contains") or "").strip().lower()
+            e = str(rule.get("evidence_contains") or "").strip().lower()
+            s = str(rule.get("source_equals") or "").strip().lower()
+            if t and t not in title:
+                continue
+            if c and c not in category:
+                continue
+            if u and u not in url:
+                continue
+            if e and e not in evidence:
+                continue
+            if s and s != source:
+                continue
+            matched = True
+            break
+        if matched:
+            dropped += 1
+            continue
+        kept.append(finding)
+    return kept, dropped
+
+
+def _replay_confirms_finding(f: dict, replay_out: dict) -> bool:
+    if not replay_out.get("ok"):
+        return False
+    status = str(replay_out.get("status") or "")
+    if status not in {"replayed", "replayed_http_error"}:
+        return False
+    if int(replay_out.get("signal_match_count") or 0) >= 1:
+        return True
+    http_status = int(replay_out.get("http_status") or 0)
+    evidence = str(f.get("evidence") or "").lower()
+    return http_status >= 400 and any(tok in evidence for tok in ("error", "forbidden", "unauthorized", "sql"))
+
+
+def enforce_replay_gate(findings: list[dict], replay_fn=None) -> tuple[list[dict], dict[str, int]]:
+    """Require replay confirmation for High/Critical vulnerabilities."""
+    if replay_fn is None:
+        replay_fn = replay_verify_finding
+    out: list[dict] = []
+    stats = {"replay_checked": 0, "replay_confirmed": 0, "replay_downgraded": 0}
+    try:
+        max_checks = int(os.environ.get("DIVERG_REPLAY_GATE_MAX", "20") or "20")
+    except ValueError:
+        max_checks = 20
+    checks = 0
+    for finding in findings:
+        sev = str(finding.get("severity") or "").lower()
+        ftype = str(finding.get("finding_type") or "vulnerability").lower()
+        if sev not in {"high", "critical"} or ftype != "vulnerability":
+            out.append(finding)
+            continue
+        if checks >= max_checks:
+            downgraded = dict(finding)
+            downgraded["finding_confidence"] = "possible"
+            downgraded["confidence"] = "low"
+            downgraded["verified"] = False
+            downgraded["evidence"] = "[Needs manual verification] Replay gate limit reached for this run. " + str(finding.get("evidence") or "")
+            out.append(downgraded)
+            stats["replay_downgraded"] += 1
+            continue
+        checks += 1
+        stats["replay_checked"] += 1
+        replay = replay_fn(finding, timeout_sec=6)
+        gated = dict(finding)
+        gated["replay_verification"] = replay
+        if _replay_confirms_finding(gated, replay):
+            gated["verified"] = True
+            stats["replay_confirmed"] += 1
+        else:
+            gated["finding_confidence"] = "possible"
+            gated["confidence"] = "low"
+            gated["verified"] = False
+            gated["evidence"] = "[Needs manual verification] Replay gate did not confirm this high/critical finding. " + str(finding.get("evidence") or "")
+            stats["replay_downgraded"] += 1
+        out.append(gated)
+    return out, stats
 
 
 def _strict_filter_reason(f: dict) -> str | None:
@@ -462,8 +611,12 @@ def _strict_filter_reason(f: dict) -> str | None:
         return "low_confidence"
     if not _has_minimum_proof(f):
         return "insufficient_proof"
+    if not _meets_proof_contract(f):
+        return "proof_contract_failed"
     if not (verified or conf == "high" or fc == "confirmed"):
         return "not_verified_or_high_confidence"
+    if severity in {"high", "critical"} and not verified:
+        return "high_critical_requires_replay_verified"
     return None
 
 
@@ -472,16 +625,19 @@ def _is_strict_positive_finding(f: dict) -> bool:
     return _strict_filter_reason(f) is None
 
 
-def filter_strict_positive_findings(findings: list[dict]) -> tuple[list[dict], int, dict[str, int]]:
+def filter_strict_positive_findings(findings: list[dict], fp_suppressions: list[dict] | None = None) -> tuple[list[dict], int, dict[str, int]]:
     """Keep only strict positives; return (kept, dropped_count, dropped_breakdown)."""
+    prefiltered, fp_dropped = _apply_false_positive_memory(findings, fp_suppressions)
     kept: list[dict] = []
     breakdown: dict[str, int] = {}
-    for finding in findings:
+    for finding in prefiltered:
         reason = _strict_filter_reason(finding)
         if reason is None:
             kept.append(finding)
             continue
         breakdown[reason] = breakdown.get(reason, 0) + 1
+    if fp_dropped:
+        breakdown["fp_memory_match"] = fp_dropped
     dropped = max(0, len(findings) - len(kept))
     breakdown = dict(sorted(breakdown.items(), key=lambda item: (-item[1], item[0])))
     return kept, dropped, breakdown
@@ -590,11 +746,14 @@ def compute_risk_score(findings: list[dict], attack_paths_list: list[dict]) -> d
 
 
 def _build_scan_fingerprint(target_url: str, skills: list[str], timestamp: str) -> dict:
-    """Deterministic metadata block so two scans can be compared."""
-    seed_material = f"{target_url}|{','.join(sorted(skills))}|{timestamp[:16]}"
-    fp_hash = hashlib.sha256(seed_material.encode()).hexdigest()[:16]
+    """Metadata block for reproducibility and run-level identity."""
+    deterministic_material = f"{target_url}|{','.join(sorted(skills))}"
+    run_material = f"{deterministic_material}|{timestamp[:16]}"
+    deterministic_hash = hashlib.sha256(deterministic_material.encode()).hexdigest()[:16]
+    run_hash = hashlib.sha256(run_material.encode()).hexdigest()[:16]
     return {
-        "hash": fp_hash,
+        "hash": run_hash,
+        "deterministic_hash": deterministic_hash,
         "target": target_url,
         "skills": sorted(skills),
         "timestamp": timestamp,
@@ -603,6 +762,123 @@ def _build_scan_fingerprint(target_url: str, skills: list[str], timestamp: str) 
         "content_verified_findings": True,
         "second_pass_verification": True,
     }
+
+
+def _safe_git_commit() -> str:
+    """Return current git SHA or empty string."""
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(Path(__file__).parent),
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        )
+        return out.decode("utf-8", errors="ignore").strip()
+    except Exception:
+        return ""
+
+
+def _build_report_provenance(scope: str, skills: list[str]) -> dict:
+    """Attach reproducibility metadata for enterprise auditability."""
+    return {
+        "scanner": "diverg",
+        "scanner_version": "2.4",
+        "git_sha": _safe_git_commit(),
+        "python_version": sys.version.split(" ")[0],
+        "platform": platform.platform(),
+        "scope": scope,
+        "skills_count": len(skills),
+        "skills_sorted": sorted(skills),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "program_strategy": PROGRAM_STRATEGY,
+    }
+
+
+def build_proof_bundle(findings: list[dict]) -> dict:
+    """Create standardized proof bundle for high-confidence findings."""
+    bundles: list[dict] = []
+    replay_candidates = 0
+    for idx, finding in enumerate(findings):
+        title = str(finding.get("title") or "").strip()
+        evidence = str(finding.get("evidence") or "").strip()
+        proof = str(finding.get("proof") or evidence[:320]).strip()
+        conf = str(finding.get("confidence") or "").strip().lower()
+        verified = bool(finding.get("verified"))
+        url = str(finding.get("url") or "").strip()
+        sev = str(finding.get("severity") or "Info")
+        if not (verified or conf == "high"):
+            continue
+        if not proof:
+            continue
+        can_replay = bool(url and url.startswith(("http://", "https://")))
+        if can_replay:
+            replay_candidates += 1
+        bundles.append({
+            "finding_index": idx,
+            "title": title,
+            "severity": sev,
+            "confidence": conf,
+            "verified": verified,
+            "url": url,
+            "proof_excerpt": proof[:400],
+            "verification_steps": finding.get("verification_steps") or [],
+            "source": finding.get("source") or finding.get("_source_skill") or "analysis",
+            "replay_candidate": can_replay,
+        })
+    return {
+        "version": "v1",
+        "total_bundles": len(bundles),
+        "replay_candidates": replay_candidates,
+        "bundles": bundles[:300],
+    }
+
+
+def replay_verify_finding(finding: dict, timeout_sec: int = 10) -> dict:
+    """Best-effort replay verification for analyst workflows."""
+    import urllib.request
+    import urllib.error
+
+    url = str(finding.get("url") or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return {"ok": False, "status": "not_replayable", "reason": "finding has no replayable URL"}
+
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Diverg-ReplayVerifier/1.0"},
+        method="GET",
+    )
+    t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=max(2, int(timeout_sec))) as resp:
+            body = resp.read(4096).decode("utf-8", errors="ignore")
+            elapsed = round(time.monotonic() - t0, 3)
+            ev = str(finding.get("evidence") or "").lower()
+            signal_tokens = [tok for tok in ("error", "sql", "stack", "trace", "token", "header", "unauthorized") if tok in ev]
+            matched = [tok for tok in signal_tokens if tok in body.lower()]
+            return {
+                "ok": True,
+                "status": "replayed",
+                "http_status": int(getattr(resp, "status", 200)),
+                "elapsed_sec": elapsed,
+                "matched_signals": matched,
+                "signal_match_count": len(matched),
+            }
+    except urllib.error.HTTPError as he:
+        return {
+            "ok": True,
+            "status": "replayed_http_error",
+            "http_status": int(getattr(he, "code", 0) or 0),
+            "elapsed_sec": round(time.monotonic() - t0, 3),
+            "matched_signals": [],
+            "signal_match_count": 0,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "status": "replay_failed",
+            "reason": str(exc),
+            "elapsed_sec": round(time.monotonic() - t0, 3),
+        }
 
 
 def build_remediation_plan(findings: list[dict], attack_paths_list: list[dict]) -> dict:
@@ -1036,6 +1312,7 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
 
     deduped = dedupe_findings(all_findings)
     deduped = _second_pass_verify(deduped)
+    deduped, replay_stats = enforce_replay_gate(deduped)
     enriched = enrich_findings_with_exploits(deduped)
     try:
         from rag import build_index, enrich_findings_with_citations
@@ -1047,9 +1324,11 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
     except Exception:
         pass
     finalized = finalize_api_findings(enriched)
-    strict_only, dropped, breakdown = filter_strict_positive_findings(finalized)
+    fp_suppressions = (results.get("_fp_suppressions") or {}).get("rules") if isinstance(results.get("_fp_suppressions"), dict) else None
+    strict_only, dropped, breakdown = filter_strict_positive_findings(finalized, fp_suppressions=fp_suppressions)
     aggregate_findings._last_heuristic_dropped = dropped
     aggregate_findings._last_strict_filter_breakdown = breakdown
+    aggregate_findings._last_replay_gate_stats = replay_stats
     return strict_only
 
 
@@ -1094,6 +1373,7 @@ def aggregate_scan_diagnostics(results: dict[str, dict]) -> list[dict]:
         deduped.append(diag)
     dropped = int(getattr(aggregate_findings, "_last_heuristic_dropped", 0) or 0)
     breakdown = getattr(aggregate_findings, "_last_strict_filter_breakdown", {}) or {}
+    replay_stats = getattr(aggregate_findings, "_last_replay_gate_stats", {}) or {}
     if dropped > 0:
         breakdown_text = ", ".join(f"{k}: {v}" for k, v in breakdown.items()) if breakdown else "no reason breakdown"
         deduped.append({
@@ -1101,6 +1381,18 @@ def aggregate_scan_diagnostics(results: dict[str, dict]) -> list[dict]:
             "level": "info",
             "message": f"Filtered out {dropped} non-strict findings; strict positives only. ({breakdown_text})",
             "meta": {"filtered_out_total": dropped, "filtered_out_breakdown": breakdown},
+        })
+    if replay_stats:
+        deduped.append({
+            "skill": "orchestrator",
+            "level": "info",
+            "message": (
+                "Replay gate checked "
+                f"{int(replay_stats.get('replay_checked', 0))} high/critical findings; "
+                f"confirmed {int(replay_stats.get('replay_confirmed', 0))}, "
+                f"downgraded {int(replay_stats.get('replay_downgraded', 0))}."
+            ),
+            "meta": replay_stats,
         })
     return deduped
 
@@ -1964,6 +2256,12 @@ def run_web_scan(
             chain_validation_abuse_reason = "auto_crypto"
 
     results: dict[str, dict] = {}
+    fp_path = CONTENT_DIR / "false_positive_memory.json"
+    try:
+        if fp_path.exists():
+            results["_fp_suppressions"] = json.loads(fp_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
     auth_context = _normalize_auth_context(auth_context)
     skill_to = skill_timeout_seconds_for_scope(scope)
     t_scan0 = time.monotonic()
@@ -2097,6 +2395,8 @@ def run_web_scan(
     evidence_summary["filtered_out_total"] = filtered_out_total
     evidence_summary["filtered_out_breakdown"] = filtered_out_breakdown
     phase4 = run_phase4_synthesis(target_url, results, findings)
+    proof_bundle = build_proof_bundle(findings)
+    provenance = _build_report_provenance(scope, list(results.keys()))
 
     summary_block = {
         "total_findings": len(findings),
@@ -2129,6 +2429,8 @@ def run_web_scan(
         "filtered_out_total": filtered_out_total,
         "filtered_out_breakdown": filtered_out_breakdown,
         "scan_fingerprint": scan_fp,
+        "proof_bundle": proof_bundle,
+        "report_provenance": provenance,
         **phase4,
     }
 
@@ -2219,6 +2521,12 @@ def run_web_scan_streaming(
             chain_validation_abuse_reason = "auto_crypto"
 
     results: dict[str, dict] = {}
+    fp_path = CONTENT_DIR / "false_positive_memory.json"
+    try:
+        if fp_path.exists():
+            results["_fp_suppressions"] = json.loads(fp_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
     eq = _queue.Queue()
     auth_context = _normalize_auth_context(auth_context)
     skill_to = skill_timeout_seconds_for_scope(scope)
@@ -2386,6 +2694,8 @@ def run_web_scan_streaming(
     evidence_summary["filtered_out_total"] = filtered_out_total
     evidence_summary["filtered_out_breakdown"] = filtered_out_breakdown
     phase4 = run_phase4_synthesis(target_url, results, findings)
+    proof_bundle = build_proof_bundle(findings)
+    provenance = _build_report_provenance(scope, list(results.keys()))
     summary_block = {
         "total_findings": len(findings),
         "critical": sum(1 for f in findings if f.get("severity") == "Critical"),
@@ -2417,6 +2727,8 @@ def run_web_scan_streaming(
         "evidence_summary": evidence_summary,
         "filtered_out_total": filtered_out_total,
         "filtered_out_breakdown": filtered_out_breakdown,
+        "proof_bundle": proof_bundle,
+        "report_provenance": provenance,
         **phase4,
     }
     yield {"event": "done", "report": report}

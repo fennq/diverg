@@ -404,6 +404,10 @@
         <div class="stat-card"><div class="stat-value" style="color:var(--red);" id="analyticsCritical">0</div><div class="stat-label">Critical</div></div>
         <div class="stat-card"><div class="stat-value" style="color:var(--orange);" id="analyticsHigh">0</div><div class="stat-label">High</div></div>
         <div class="stat-card"><div class="stat-value" style="color:var(--accent);" id="analyticsScore">0</div><div class="stat-label">Avg Score</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:var(--green);" id="analyticsStrictFindings">0</div><div class="stat-label">Strict Findings</div></div>
+        <div class="stat-card"><div class="stat-value" id="analyticsFilteredSignals">0</div><div class="stat-label">Filtered Signals</div></div>
+        <div class="stat-card"><div class="stat-value" id="analyticsProofBundles">0</div><div class="stat-label">Proof Bundles</div></div>
+        <div class="stat-card"><div class="stat-value" id="analyticsProofReplayCandidates">0</div><div class="stat-label">Replay Candidates</div></div>
       </div>
       <div class="card"><div class="card-header"><span class="card-title">Severity Distribution</span></div><div class="card-body">
         <div class="bar-row"><span class="bar-label">Critical</span><div class="bar-track"><div class="bar-fill critical" id="barCritical2" style="width:0%"></div></div><span class="bar-value" id="valCritical2">0</span></div>
@@ -418,7 +422,7 @@
       <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">History</h1></div>
         <div class="toggle-pills" id="historyTabs"><div class="toggle-pill active" data-time="24h">24H</div><div class="toggle-pill" data-time="7d">7D</div><div class="toggle-pill" data-time="30d">30D</div><div class="toggle-pill" data-time="all">All</div></div>
       </div>
-      <div class="data-table"><table><thead><tr><th class="col-num">#</th><th>Target</th><th>Scope</th><th>Findings</th><th>Score</th><th>Date</th></tr></thead><tbody id="historyBody"><tr><td colspan="6"><div class="empty"><div class="empty-title">No history</div><div class="empty-desc">Completed scans appear here</div></div></td></tr></tbody></table></div>
+      <div class="data-table"><table><thead><tr><th class="col-num">#</th><th>Target</th><th>Scope</th><th>Findings</th><th>Score</th><th>Date</th><th>Export</th></tr></thead><tbody id="historyBody"><tr><td colspan="7"><div class="empty"><div class="empty-title">No history</div><div class="empty-desc">Completed scans appear here</div></div></td></tr></tbody></table></div>
     </div>
 
     <!-- ══════════ REWARDS ══════════ -->

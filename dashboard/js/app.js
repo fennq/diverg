@@ -412,6 +412,10 @@ function renderScanAnalytics(report, findings) {
   const verifiedCount = evidence.verified_count || findings.filter((f) => f.verified).length;
   const filteredTotal = Number(report.filtered_out_total ?? evidence.filtered_out_total ?? 0);
   const filteredBreakdown = report.filtered_out_breakdown || evidence.filtered_out_breakdown || {};
+  const proofBundle = (report.proof_bundle && typeof report.proof_bundle === 'object') ? report.proof_bundle : {};
+  const proofCount = Number(proofBundle.total_bundles || 0);
+  const replayCandidates = Number(proofBundle.replay_candidates || 0);
+  const provenance = (report.report_provenance && typeof report.report_provenance === 'object') ? report.report_provenance : {};
   const score = typeof report.risk_score === 'number' ? report.risk_score : 0;
   const verdict = report.risk_verdict || report.risk_summary || 'Unknown';
   const runtime = Number(metrics.elapsed_sec || metrics.duration_sec || metrics.runtime_sec || 0);
@@ -486,6 +490,9 @@ function renderScanAnalytics(report, findings) {
     `<div class="analytics-item"><span>Crypto classified</span><span class="analytics-pill">${siteClass.is_crypto ? 'yes' : 'no'}</span></div>`,
     `<div class="analytics-item"><span>Crypto confidence</span><span class="analytics-pill">${siteClass.confidence ?? 0}</span></div>`,
     `<div class="analytics-item"><span>Auth supplied</span><span class="analytics-pill">${report.auth_supplied ? 'yes' : 'no'}</span></div>`,
+    `<div class="analytics-item"><span>Proof bundles</span><span class="analytics-pill">${proofCount}</span></div>`,
+    `<div class="analytics-item"><span>Replay candidates</span><span class="analytics-pill">${replayCandidates}</span></div>`,
+    `<div class="analytics-item"><span>Program strategy</span><span class="analytics-pill">${escHtml((provenance.program_strategy && provenance.program_strategy.option) || 'C')}</span></div>`,
   ], 'No classification data');
   document.getElementById('scanGuidance').innerHTML = renderSimpleList(
     suggestions.map((g) => `<div class="analytics-item analytics-item-stack"><strong>${escHtml(g.action || 'Next step')}</strong><span>${escHtml(g.reason || '')}</span></div>`),
@@ -974,7 +981,7 @@ function renderHistory() {
   if (!scans.length) return;
 
   const makeRows = (list) => list.map((s, i) =>
-    `<tr><td class="col-num">${i + 1}</td><td class="col-primary col-mono">${s.url}</td><td><span class="badge badge-info">${s.scope}</span></td><td>${s.findings}</td><td>${s.score}/100</td><td class="col-mono">${s.date}</td></tr>`
+    `<tr><td class="col-num">${i + 1}</td><td class="col-primary col-mono">${s.url}</td><td><span class="badge badge-info">${s.scope}</span></td><td>${s.findings}</td><td>${s.score}/100</td><td class="col-mono">${s.date}</td><td><button class="btn btn-ghost" onclick="exportScanById('${String(s.id || '').replace(/'/g, '&#39;')}')">Export</button></td></tr>`
   ).join('');
 
   const hb = document.getElementById('historyBody');
@@ -988,6 +995,42 @@ function renderHistory() {
     rf.innerHTML = findings.map(f =>
       `<tr><td class="col-primary" style="font-size:0.75rem;">${f.title}</td><td><span class="badge badge-${(f.severity || 'low').toLowerCase()}">${f.severity}</span></td><td class="col-mono" style="font-size:0.625rem;color:var(--text-dim);">${f.date || ''}</td></tr>`
     ).join('');
+  }
+}
+
+async function exportScanById(scanId) {
+  const id = String(scanId || '').trim();
+  if (!id) {
+    alert('Scan export failed: missing scan id');
+    return;
+  }
+  const apiUrl = getApiUrl();
+  const token = getSessionToken();
+  try {
+    const res = await fetch(`${apiUrl}/api/history/${encodeURIComponent(id)}`, {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || ('HTTP ' + res.status));
+    }
+    const payload = await res.json();
+    const targetRaw = String(payload.target_url || 'scan');
+    const targetSafe = targetRaw.replace(/^https?:\/\//i, '').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80) || 'scan';
+    const whenRaw = String(payload.scanned_at || payload.created_at || '').replace(/[:.]/g, '-');
+    const whenSafe = whenRaw.slice(0, 32) || new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = `diverg_scan_${targetSafe}_${whenSafe}_${id}.json`;
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const href = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(href);
+  } catch (err) {
+    alert('Scan export failed: ' + err.message);
   }
 }
 
@@ -1066,6 +1109,10 @@ function updateStats() {
   set('analyticsCritical', totalCrit);
   set('analyticsHigh', totalHigh);
   set('analyticsScore', avg);
+  set('analyticsStrictFindings', Number(serverSummary?.strict_findings_total || findings.length || 0));
+  set('analyticsFilteredSignals', Number(serverSummary?.filtered_signals_total || 0));
+  set('analyticsProofBundles', Number(serverSummary?.proof_bundle_total || 0));
+  set('analyticsProofReplayCandidates', Number(serverSummary?.proof_replay_candidates || 0));
   set('metricWeekly', weekCount);
   set('metricMonthly', monthCount);
 
