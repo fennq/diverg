@@ -64,12 +64,18 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 try:
-    from flask import Flask, request, jsonify, send_from_directory, g
+    from flask import (
+        Flask,
+        Response,
+        g,
+        jsonify,
+        request,
+        send_from_directory,
+        stream_with_context,
+    )
 except ImportError:
     print("Install Flask: pip install flask")
     sys.exit(1)
-
-from flask import Response, stream_with_context
 
 try:
     import bcrypt
@@ -764,7 +770,7 @@ def auth_google():
 
     try:
         import urllib.request
-        verify_url = f"https://www.googleapis.com/oauth2/v3/userinfo"
+        verify_url = "https://www.googleapis.com/oauth2/v3/userinfo"
         req = urllib.request.Request(verify_url, headers={"Authorization": f"Bearer {credential}"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             info = json.loads(resp.read().decode())

@@ -144,6 +144,8 @@ def _compute_scan_metrics(results: dict[str, dict], summary: dict, duration_sec:
         "findings_info": summary.get("info", 0),
         "findings_total": summary.get("total_findings", 0),
     }
+
+
 OPENCLAW_AGENT_RETRIES = 2
 OPENCLAW_AGENT_TIMEOUTS = {
     "surface_mapper": 120,
@@ -1247,7 +1249,9 @@ def _second_pass_verify(findings: list[dict]) -> list[dict]:
             else:
                 downgraded = dict(f)
                 downgraded["finding_confidence"] = "possible"
-                downgraded["evidence"] = f"[Needs manual verification] Second-pass re-check did not reproduce finding. " + evidence
+                downgraded["evidence"] = (
+                    "[Needs manual verification] Second-pass re-check did not reproduce finding. " + evidence
+                )
                 out.append(downgraded)
         except Exception:
             out.append(f)
@@ -1951,7 +1955,7 @@ def print_summary(findings: list[dict], target: str) -> None:
     actionable.sort(key=lambda f: severity_order.get(f.get("severity", "Info"), 99))
 
     if actionable:
-        print(f"  Top actionable findings:")
+        print("  Top actionable findings:")
         print(f"  {'-'*56}")
         for i, f in enumerate(actionable[:15], 1):
             print(f"  {i:2}. [{f['severity']:>8}] {f.get('title', 'Untitled')}")
