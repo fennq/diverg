@@ -56,12 +56,48 @@
         return;
       }
       const cr = data.crime_report || {};
+      const ev = cr.evidence_quality || {};
+      const confidenceCounts = ev.confidence_counts || {};
+      const findings = Array.isArray(cr.findings_with_evidence) ? cr.findings_with_evidence : [];
+      const strictCount = findings.length;
+      const verifiedCount = Number(ev.verified_count || 0);
+      const highConfidence = Number(confidenceCounts.high || 0);
+      const riskScore = data.risk_score != null ? Number(data.risk_score) : null;
+      const riskVerdict = data.risk_verdict || cr.verdict || '';
+
       const lines = [];
-      if (cr.verdict) lines.push('Verdict: ' + String(cr.verdict));
-      if (cr.summary) lines.push(String(cr.summary).slice(0, 800));
+      if (riskScore != null && riskVerdict) {
+        lines.push(`Score: ${riskScore}/100 · ${String(riskVerdict)}`);
+      } else if (cr.verdict) {
+        lines.push('Verdict: ' + String(cr.verdict));
+      }
+      if (cr.summary) lines.push(String(cr.summary).slice(0, 900));
+      if (data.risk_summary) lines.push(String(data.risk_summary).slice(0, 900));
+      lines.push(
+        `Strict findings: ${strictCount} · Verified: ${verifiedCount} · High confidence: ${highConfidence}` +
+          (ev.quality ? ` · Evidence quality: ${String(ev.quality)}` : '')
+      );
       if (data._truncated_findings != null) lines.push('(Truncated response — open dashboard for full JSON.)');
+
+      if (findings.length) {
+        lines.push('Top findings:');
+        findings.slice(0, 6).forEach((f, idx) => {
+          const sev = String(f.severity || 'Info');
+          const title = String(f.title || 'Finding');
+          const conf = String(f.confidence || '');
+          const ver = f.verified ? 'verified' : 'unverified';
+          const proof = String(f.proof || '').replace(/\s+/g, ' ').slice(0, 140);
+          lines.push(
+            `${idx + 1}. [${sev}] ${title}` +
+              (conf ? ` · confidence:${conf}` : '') +
+              ` · ${ver}` +
+              (proof ? `\n   proof: ${proof}` : '')
+          );
+        });
+      }
+
       const pre = document.createElement('pre');
-      pre.style.cssText = 'font-size:10px;white-space:pre-wrap;word-break:break-word;margin:8px 0 0;text-align:left';
+      pre.style.cssText = 'font-size:10px;white-space:pre-wrap;word-break:break-word;margin:8px 0 0;text-align:left;line-height:1.45';
       pre.textContent = lines.join('\n\n') || JSON.stringify(data, null, 2).slice(0, 4000);
       out.innerHTML = '';
       out.appendChild(pre);

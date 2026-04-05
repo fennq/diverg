@@ -532,6 +532,19 @@
     solState.textContent = '';
     solState.className = 'popup-sol-status';
     const parts = [];
+    const score = data.risk_score != null ? Number(data.risk_score) : null;
+    const verdict = data.risk_verdict ? String(data.risk_verdict) : '';
+    if (score != null || verdict) {
+      const scoreText = score != null ? `${String(score)}/100` : '—';
+      const verdictText = verdict || 'Unknown';
+      parts.push(
+        `<div class="sol-card-mini highlight">` +
+          `<div class="sol-k-mini">Assessment</div>` +
+          `<div class="sol-v-mini">${escapeHtml(scoreText)} · ${escapeHtml(verdictText)}</div>` +
+          (data.risk_summary ? `<div class="sol-v-mini" style="font-size:11px;margin-top:6px">${escapeHtml(String(data.risk_summary).slice(0, 260))}</div>` : '') +
+        `</div>`
+      );
+    }
     parts.push(`<div class="sol-card-mini"><div class="sol-k-mini">Mint</div><div class="sol-v-mini mono">${escapeHtml(data.mint)}</div></div>`);
     const tm = data.token_metadata;
     if (tm && (tm.symbol || tm.name)) {
@@ -568,6 +581,41 @@
         bs.bundle_archetype_hints.forEach((hint) => {
           parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(hint)}</p>`);
         });
+      }
+    }
+    const cr = data.crime_report;
+    if (cr && typeof cr === 'object') {
+      const eq = cr.evidence_quality || {};
+      const cc = eq.confidence_counts || {};
+      const strictN = Array.isArray(cr.findings_with_evidence) ? cr.findings_with_evidence.length : 0;
+      const verifiedN = Number(eq.verified_count || 0);
+      const highN = Number(cc.high || 0);
+      const quality = eq.quality ? String(eq.quality) : '';
+      if (strictN || verifiedN || highN || quality) {
+        parts.push(
+          `<div class="sol-card-mini">` +
+            `<div class="sol-k-mini">Evidence</div>` +
+            `<div class="sol-v-mini">Strict: ${escapeHtml(String(strictN))} · Verified: ${escapeHtml(String(verifiedN))} · High confidence: ${escapeHtml(String(highN))}${quality ? ` · Quality: ${escapeHtml(quality)}` : ''}</div>` +
+          `</div>`
+        );
+      }
+      if (Array.isArray(cr.findings_with_evidence) && cr.findings_with_evidence.length) {
+        parts.push('<div class="sol-h3-mini">Top verified signals</div><ul class="sol-list-mini">');
+        cr.findings_with_evidence.slice(0, 5).forEach((f) => {
+          const sev = f && f.severity ? String(f.severity) : 'Info';
+          const conf = f && f.confidence ? String(f.confidence) : '';
+          const v = f && f.verified ? 'verified' : 'unverified';
+          const title = f && f.title ? String(f.title) : 'Finding';
+          const proof = f && f.proof ? String(f.proof).replace(/\s+/g, ' ').slice(0, 80) : '';
+          parts.push(
+            `<li><strong>[${escapeHtml(sev)}]</strong> ${escapeHtml(title)}` +
+              (conf ? ` · ${escapeHtml(conf)} confidence` : '') +
+              ` · ${escapeHtml(v)}` +
+              (proof ? `<br><span style="opacity:.8">proof: ${escapeHtml(proof)}</span>` : '') +
+            `</li>`
+          );
+        });
+        parts.push('</ul>');
       }
     }
     const p = data.params || {};
