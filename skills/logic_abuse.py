@@ -53,6 +53,7 @@ SUCCESS_INDICATOR = re.compile(
 )
 # Response suggests list/array (for limit abuse)
 LIST_INDICATOR = re.compile(r"\[\s*\{|\"items\"\s*:\s*\[|\"data\"\s*:\s*\[|\"results\"\s*:\s*\[", re.I)
+_HEURISTIC_FINDING_RE = re.compile(r"\[(LIKELY|POSSIBLE|VERIFY)\]", re.IGNORECASE)
 
 
 @dataclass
@@ -256,6 +257,20 @@ def _probe_bounds(
     return None
 
 
+def _split_heuristic_findings(findings: list[Finding]) -> tuple[list[Finding], list[str]]:
+    """Move heuristic-only findings to diagnostics for strict mode."""
+    kept: list[Finding] = []
+    notes: list[str] = []
+    for finding in findings:
+        title = str(finding.title or "")
+        evidence = str(finding.evidence or "")
+        if _HEURISTIC_FINDING_RE.search(title) or evidence.startswith("[Needs manual verification]"):
+            notes.append(f"Heuristic logic-abuse signal filtered: {title} ({finding.url})")
+            continue
+        kept.append(finding)
+    return kept, notes
+
+
 def run(
     target_url: str,
     scan_type: str = "full",
@@ -309,6 +324,8 @@ def run(
                     report.findings.append(f)
                     break
 
+    report.findings, heuristic_notes = _split_heuristic_findings(report.findings)
+    report.errors.extend(heuristic_notes[:12])
     return json.dumps(asdict(report), indent=2)
 
 

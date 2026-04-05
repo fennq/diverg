@@ -75,6 +75,7 @@ PAYMENT_DATA = re.compile(
     r"\b(last4|card_number|balance|wallet|amount|transaction|payment_method)\b",
     re.I,
 )
+_HEURISTIC_FINDING_RE = re.compile(r"\[(LIKELY|POSSIBLE|VERIFY)\]", re.IGNORECASE)
 
 
 @dataclass
@@ -402,6 +403,20 @@ def _probe_form_checkout(base_url: str, run_start: float, session: requests.Sess
     return None
 
 
+def _split_heuristic_findings(findings: list[Finding]) -> tuple[list[Finding], list[str]]:
+    """Move heuristic-only findings to diagnostics for strict mode UX."""
+    kept: list[Finding] = []
+    notes: list[str] = []
+    for finding in findings:
+        title = str(finding.title or "")
+        evidence = str(finding.evidence or "")
+        if _HEURISTIC_FINDING_RE.search(title) or evidence.startswith("[Needs manual verification]"):
+            notes.append(f"Heuristic payment signal filtered: {title} ({finding.url})")
+            continue
+        kept.append(finding)
+    return kept, notes
+
+
 def run(
     target_url: str,
     scan_type: str = "full",
@@ -441,6 +456,8 @@ def run(
         if finding:
             report.findings.append(finding)
 
+    report.findings, heuristic_notes = _split_heuristic_findings(report.findings)
+    report.errors.extend(heuristic_notes[:12])
     return json.dumps(asdict(report), indent=2)
 
 

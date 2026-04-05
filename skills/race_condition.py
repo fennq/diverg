@@ -49,6 +49,7 @@ TRANSACTION_PATTERN = re.compile(
     r"(?:transaction_?id|order_?id|confirmation_?id|reference|receipt_?id)['\"]?\s*[:=]\s*['\"]?([a-zA-Z0-9_\-]{8,})['\"]?",
     re.I,
 )
+_HEURISTIC_FINDING_RE = re.compile(r"\[(LIKELY|POSSIBLE|VERIFY)\]", re.IGNORECASE)
 
 
 @dataclass
@@ -228,6 +229,20 @@ def _discover_action_urls(base_url: str, run_start: float) -> list[str]:
     return urls[:10]  # cap
 
 
+def _split_heuristic_findings(findings: list[Finding]) -> tuple[list[Finding], list[str]]:
+    """Move heuristic-only findings to diagnostics."""
+    kept: list[Finding] = []
+    notes: list[str] = []
+    for finding in findings:
+        title = str(finding.title or "")
+        evidence = str(finding.evidence or "")
+        if _HEURISTIC_FINDING_RE.search(title) or evidence.startswith("[Needs manual verification]"):
+            notes.append(f"Heuristic race-condition signal filtered: {title} ({finding.url})")
+            continue
+        kept.append(finding)
+    return kept, notes
+
+
 def run(
     target_url: str,
     scan_type: str = "full",
@@ -266,6 +281,8 @@ def run(
                 report.findings.append(finding)
                 break
 
+    report.findings, heuristic_notes = _split_heuristic_findings(report.findings)
+    report.errors.extend(heuristic_notes[:12])
     return json.dumps(asdict(report), indent=2)
 
 

@@ -410,6 +410,8 @@ function renderScanAnalytics(report, findings) {
   const siteClass = report.site_classification || {};
   const confidenceCounts = evidence.confidence_counts || {};
   const verifiedCount = evidence.verified_count || findings.filter((f) => f.verified).length;
+  const filteredTotal = Number(report.filtered_out_total ?? evidence.filtered_out_total ?? 0);
+  const filteredBreakdown = report.filtered_out_breakdown || evidence.filtered_out_breakdown || {};
   const score = typeof report.risk_score === 'number' ? report.risk_score : 0;
   const verdict = report.risk_verdict || report.risk_summary || 'Unknown';
   const runtime = Number(metrics.elapsed_sec || metrics.duration_sec || metrics.runtime_sec || 0);
@@ -428,7 +430,7 @@ function renderScanAnalytics(report, findings) {
 
   document.getElementById('scanSummaryScore').textContent = String(score);
   document.getElementById('scanSummaryVerdict').textContent = `Security score: higher is better · ${verdict}`;
-  document.getElementById('scanSummaryFindings').textContent = String(findings.length);
+  document.getElementById('scanSummaryStrict').textContent = String(findings.length);
   document.getElementById('scanSummarySeverities').textContent = `${summary.critical || 0} critical / ${summary.high || 0} high`;
   document.getElementById('scanSummaryVerified').textContent = String(verifiedCount);
   document.getElementById('scanSummaryConfidence').textContent = `${confidenceCounts.high || 0} high confidence`;
@@ -436,9 +438,12 @@ function renderScanAnalytics(report, findings) {
   document.getElementById('scanSummaryRoles').textContent = `${Object.values(roleCounts).reduce((a, b) => a + Number(b || 0), 0)} role signals`;
   document.getElementById('scanSummarySkills').textContent = String(skillsRun.length);
   document.getElementById('scanSummaryDuration').textContent = `${runtime.toFixed(1)}s runtime`;
+  document.getElementById('scanSummaryFiltered').textContent = String(filteredTotal);
+  document.getElementById('scanSummaryFilteredNote').textContent = `Diagnostics: ${diagnostics.length} · Safe: ${report.safe_to_run ? 'yes' : 'no'}`;
   document.getElementById('scanSummaryDiagnostics').textContent = String(diagnostics.length);
-  document.getElementById('scanSummarySafe').textContent = `Safe: ${report.safe_to_run ? 'yes' : 'no'}`;
 
+  document.getElementById('scanEvidenceStrict').textContent = String(findings.length);
+  document.getElementById('scanEvidenceFiltered').textContent = String(filteredTotal);
   document.getElementById('scanEvidenceVerified').textContent = String(verifiedCount);
   document.getElementById('scanEvidenceHigh').textContent = String(confidenceCounts.high || 0);
   document.getElementById('scanEvidenceMedium').textContent = String(confidenceCounts.medium || 0);
@@ -448,6 +453,14 @@ function renderScanAnalytics(report, findings) {
     .slice(0, 8)
     .map(([k, v]) => `<div class="analytics-item"><span>${escHtml(k)}</span><span class="analytics-pill">${v}</span></div>`);
   document.getElementById('scanEvidenceSources').innerHTML = renderSimpleList(sourceRows, 'No evidence source data');
+
+  const filteredRows = Object.entries(filteredBreakdown)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .map(([k, v]) => `<div class="analytics-item"><span>${escHtml(k.replaceAll('_', ' '))}</span><span class="analytics-pill">${v}</span></div>`);
+  document.getElementById('scanFilteredBreakdown').innerHTML = renderSimpleList(
+    filteredRows,
+    filteredTotal ? 'Filtered without detailed reason map' : 'No filtered signals'
+  );
 
   const byCategory = {};
   findings.forEach((f) => {

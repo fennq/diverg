@@ -175,16 +175,10 @@ def run(
                 key = (url, r.status_code)
                 if key not in seen_batch:
                     seen_batch.add(key)
+                    # Presence-only batch endpoint checks are heuristic and are tracked in diagnostics,
+                    # not as user-facing findings.
                     if r.status_code in (200, 201):
-                        findings.append(Finding(
-                            title="Batch-like endpoint responds to GET — verify validation vs single-path",
-                            severity="Low",
-                            url=url,
-                            category="Chain / Batch Validation",
-                            evidence=f"GET {url} returned {r.status_code}. Compare with single-create path (see diverg-batch-validation-routes.md routes 1–10).",
-                            impact="If batch path skips ownership/validation that single path has, account drain possible.",
-                            remediation="Ensure batch handler calls same ValidateBasic/ownership checks as single-operation handler.",
-                        ))
+                        errors.append(f"Heuristic batch endpoint signal observed at {url} (status {r.status_code})")
         except Exception as e:
             errors.append(str(e))
 
@@ -195,15 +189,8 @@ def run(
             text = r.text[:150000]
             for param in ACCOUNT_PARAM_NAMES:
                 if re.search(rf"\b{re.escape(param)}\s*[:=]|\"{param}\"|\'{param}\'", text, re.I):
-                    findings.append(Finding(
-                        title=f"Request parameter '{param}' found — ensure not trusted without signer/session check",
-                        severity="Info",
-                        url=base,
-                        category="Chain / Batch Validation",
-                        evidence=f"Parameter '{param}' appears in page/JS. (Batch path may trust subaccount_id without signer check.)",
-                        impact="If server uses client-supplied account/subaccount without verifying ownership, IDOR or account drain.",
-                        remediation="Validate account_id/subaccount_id against authenticated signer or session in every path (single and batch).",
-                    ))
+                    # Parameter-presence checks are heuristic and should not appear as findings.
+                    errors.append(f"Heuristic account parameter signal observed: {param}")
                     break
     except Exception as e:
         errors.append(str(e))

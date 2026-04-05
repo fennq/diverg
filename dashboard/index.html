@@ -274,11 +274,11 @@
         </div>
         <div class="stats-grid scan-summary-grid">
           <div class="stat-card"><div class="stat-value" id="scanSummaryScore">0</div><div class="stat-label">Security Score</div><div class="stat-meta" id="scanSummaryVerdict">Higher is better</div></div>
-          <div class="stat-card"><div class="stat-value" id="scanSummaryFindings">0</div><div class="stat-label">Findings</div><div class="stat-meta" id="scanSummarySeverities">0 critical / 0 high</div></div>
+          <div class="stat-card"><div class="stat-value" id="scanSummaryStrict">0</div><div class="stat-label">Strict Findings</div><div class="stat-meta" id="scanSummarySeverities">0 critical / 0 high</div></div>
           <div class="stat-card"><div class="stat-value" id="scanSummaryVerified">0</div><div class="stat-label">Verified</div><div class="stat-meta" id="scanSummaryConfidence">0 high confidence</div></div>
           <div class="stat-card"><div class="stat-value" id="scanSummaryPaths">0</div><div class="stat-label">Attack Paths</div><div class="stat-meta" id="scanSummaryRoles">0 role signals</div></div>
           <div class="stat-card"><div class="stat-value" id="scanSummarySkills">0</div><div class="stat-label">Skills Run</div><div class="stat-meta" id="scanSummaryDuration">0s runtime</div></div>
-          <div class="stat-card"><div class="stat-value" id="scanSummaryDiagnostics">0</div><div class="stat-label">Diagnostics</div><div class="stat-meta" id="scanSummarySafe">Safe: unknown</div></div>
+          <div class="stat-card"><div class="stat-value" id="scanSummaryFiltered">0</div><div class="stat-label">Filtered Signals</div><div class="stat-meta" id="scanSummaryFilteredNote">Strict mode active</div></div>
         </div>
         <div class="toggle-pills" id="scanResultsTabs" style="margin-bottom:14px;">
           <div class="toggle-pill active" data-scan-tab="overview">Overview</div>
@@ -292,12 +292,16 @@
               <div class="card-header"><span class="card-title">Evidence Analytics</span></div>
               <div class="card-body">
                 <div class="mini-stat-grid">
+                  <div class="mini-stat"><span class="mini-stat-label">Strict Findings</span><span class="mini-stat-value" id="scanEvidenceStrict">0</span></div>
+                  <div class="mini-stat"><span class="mini-stat-label">Filtered Signals</span><span class="mini-stat-value" id="scanEvidenceFiltered">0</span></div>
                   <div class="mini-stat"><span class="mini-stat-label">Verified</span><span class="mini-stat-value" id="scanEvidenceVerified">0</span></div>
                   <div class="mini-stat"><span class="mini-stat-label">High Confidence</span><span class="mini-stat-value" id="scanEvidenceHigh">0</span></div>
                   <div class="mini-stat"><span class="mini-stat-label">Medium Confidence</span><span class="mini-stat-value" id="scanEvidenceMedium">0</span></div>
                   <div class="mini-stat"><span class="mini-stat-label">Low Confidence</span><span class="mini-stat-value" id="scanEvidenceLow">0</span></div>
                 </div>
                 <div class="analytics-list" id="scanEvidenceSources"></div>
+                <div class="analytics-subtitle" style="margin-top:10px;">Why filtered</div>
+                <div class="analytics-list" id="scanFilteredBreakdown"></div>
               </div>
             </div>
             <div class="card">
@@ -314,6 +318,7 @@
                   <div class="mini-stat"><span class="mini-stat-label">Pages</span><span class="mini-stat-value" id="scanMetricPages">0</span></div>
                   <div class="mini-stat"><span class="mini-stat-label">Endpoints</span><span class="mini-stat-value" id="scanMetricEndpoints">0</span></div>
                   <div class="mini-stat"><span class="mini-stat-label">Skills</span><span class="mini-stat-value" id="scanMetricSkills">0</span></div>
+                  <div class="mini-stat"><span class="mini-stat-label">Diagnostics</span><span class="mini-stat-value" id="scanSummaryDiagnostics">0</span></div>
                 </div>
                 <div class="analytics-list" id="scanSkillsRun"></div>
               </div>

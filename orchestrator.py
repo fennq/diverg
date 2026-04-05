@@ -226,6 +226,8 @@ def normalize_finding(raw: dict, source_skill: str, context_key: str = "findings
         if ctx:
             out["evidence"] += f"; Context: {ctx}"
         out["category"] = "Transport and Browser Security"
+        if status:
+            out["status"] = status
         if ctx:
             out["impact"] = ctx
         out["remediation"] = rec or out["remediation"]
@@ -244,6 +246,8 @@ def normalize_finding(raw: dict, source_skill: str, context_key: str = "findings
         out["severity"] = str(raw.get("severity", "Info"))
         out["evidence"] = detail or check
         out["category"] = "Transport and Browser Security"
+        if status:
+            out["status"] = status
         if raw.get("finding_confidence"):
             out["finding_confidence"] = str(raw["finding_confidence"]).strip()
         return out
@@ -266,6 +270,8 @@ def normalize_finding(raw: dict, source_skill: str, context_key: str = "findings
         out["context"] = str(raw["context"]).strip()
     if raw.get("finding_type"):
         out["finding_type"] = str(raw["finding_type"]).strip()
+    if raw.get("status"):
+        out["status"] = str(raw["status"]).strip()
     return out
 
 
@@ -402,6 +408,83 @@ def finalize_api_findings(findings: list[dict]) -> list[dict]:
         f["verified"] = verified
         out.append(f)
     return out
+
+
+_HEURISTIC_TITLE_RE = re.compile(r"\[(LIKELY|POSSIBLE|VERIFY)\]|^possible\b|^potential\b", re.IGNORECASE)
+_STRICT_PROOF_SIGNAL_RE = re.compile(
+    r"(payload|request|response|returned|status|delay|parameter|id=|token|header|body|stack|trace|error)",
+    re.IGNORECASE,
+)
+_STRICT_EXPLOIT_CATEGORY_RE = re.compile(
+    r"(injection|xss|sqli|ssrf|traversal|command|authentication|authorization|idor|logic|payment|financial)",
+    re.IGNORECASE,
+)
+_NON_VULN_FINDING_TYPES = {"positive", "hardening", "informational"}
+
+
+def _has_minimum_proof(f: dict) -> bool:
+    """Ensure a finding has concrete proof text."""
+    evidence = str(f.get("evidence") or "").strip()
+    if not evidence or evidence == "See source output.":
+        return False
+    if f.get("verification_steps"):
+        return True
+    if len(evidence) < 20:
+        return False
+    category = str(f.get("category") or "")
+    if _STRICT_EXPLOIT_CATEGORY_RE.search(category):
+        return bool(_STRICT_PROOF_SIGNAL_RE.search(evidence))
+    return True
+
+
+def _strict_filter_reason(f: dict) -> str | None:
+    """Return a reason code when a finding should be filtered in strict mode."""
+    title = str(f.get("title") or "").strip()
+    evidence = str(f.get("evidence") or "").strip()
+    severity = str(f.get("severity") or "").strip().lower()
+    finding_type = str(f.get("finding_type") or "").strip().lower()
+    status = str(f.get("status") or "").strip().lower()
+    fc = str(f.get("finding_confidence") or "").strip().lower()
+    conf = str(f.get("confidence") or "").strip().lower()
+    verified = bool(f.get("verified"))
+
+    if _HEURISTIC_TITLE_RE.search(title):
+        return "heuristic_marker"
+    if evidence.startswith("[Needs manual verification]"):
+        return "manual_verification_only"
+    if finding_type in _NON_VULN_FINDING_TYPES:
+        return "non_vulnerability_type"
+    if status == "pass":
+        return "pass_status"
+    if severity in {"info", "low"} and not verified:
+        return "low_severity_unverified"
+    if fc in {"likely", "possible", "informational"}:
+        return "low_confidence"
+    if not _has_minimum_proof(f):
+        return "insufficient_proof"
+    if not (verified or conf == "high" or fc == "confirmed"):
+        return "not_verified_or_high_confidence"
+    return None
+
+
+def _is_strict_positive_finding(f: dict) -> bool:
+    """Return True only for high-confidence, evidence-backed findings."""
+    return _strict_filter_reason(f) is None
+
+
+def filter_strict_positive_findings(findings: list[dict]) -> tuple[list[dict], int, dict[str, int]]:
+    """Keep only strict positives; return (kept, dropped_count, dropped_breakdown)."""
+    kept: list[dict] = []
+    breakdown: dict[str, int] = {}
+    for finding in findings:
+        reason = _strict_filter_reason(finding)
+        if reason is None:
+            kept.append(finding)
+            continue
+        breakdown[reason] = breakdown.get(reason, 0) + 1
+    dropped = max(0, len(findings) - len(kept))
+    breakdown = dict(sorted(breakdown.items(), key=lambda item: (-item[1], item[0])))
+    return kept, dropped, breakdown
 
 
 def build_evidence_summary(findings: list[dict]) -> dict:
@@ -963,7 +1046,11 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
         enrich_findings_with_citations(enriched)
     except Exception:
         pass
-    return finalize_api_findings(enriched)
+    finalized = finalize_api_findings(enriched)
+    strict_only, dropped, breakdown = filter_strict_positive_findings(finalized)
+    aggregate_findings._last_heuristic_dropped = dropped
+    aggregate_findings._last_strict_filter_breakdown = breakdown
+    return strict_only
 
 
 def aggregate_scan_diagnostics(results: dict[str, dict]) -> list[dict]:
@@ -1005,6 +1092,16 @@ def aggregate_scan_diagnostics(results: dict[str, dict]) -> list[dict]:
             continue
         seen.add(key)
         deduped.append(diag)
+    dropped = int(getattr(aggregate_findings, "_last_heuristic_dropped", 0) or 0)
+    breakdown = getattr(aggregate_findings, "_last_strict_filter_breakdown", {}) or {}
+    if dropped > 0:
+        breakdown_text = ", ".join(f"{k}: {v}" for k, v in breakdown.items()) if breakdown else "no reason breakdown"
+        deduped.append({
+            "skill": "orchestrator",
+            "level": "info",
+            "message": f"Filtered out {dropped} non-strict findings; strict positives only. ({breakdown_text})",
+            "meta": {"filtered_out_total": dropped, "filtered_out_breakdown": breakdown},
+        })
     return deduped
 
 
@@ -1991,9 +2088,14 @@ def run_web_scan(
 
     findings = aggregate_findings(results)
     scan_diagnostics = aggregate_scan_diagnostics(results)
+    filtered_out_breakdown = dict(getattr(aggregate_findings, "_last_strict_filter_breakdown", {}) or {})
+    filtered_out_total = int(getattr(aggregate_findings, "_last_heuristic_dropped", 0) or 0)
     company_surfaces = aggregate_company_surfaces(results)
     timestamp = datetime.now(timezone.utc).isoformat()
     evidence_summary = build_evidence_summary(findings)
+    evidence_summary["strict_findings"] = len(findings)
+    evidence_summary["filtered_out_total"] = filtered_out_total
+    evidence_summary["filtered_out_breakdown"] = filtered_out_breakdown
     phase4 = run_phase4_synthesis(target_url, results, findings)
 
     summary_block = {
@@ -2024,6 +2126,8 @@ def run_web_scan(
         },
         "summary": summary_block,
         "evidence_summary": evidence_summary,
+        "filtered_out_total": filtered_out_total,
+        "filtered_out_breakdown": filtered_out_breakdown,
         "scan_fingerprint": scan_fp,
         **phase4,
     }
@@ -2273,9 +2377,14 @@ def run_web_scan_streaming(
 
     findings = aggregate_findings(results)
     scan_diagnostics = aggregate_scan_diagnostics(results)
+    filtered_out_breakdown = dict(getattr(aggregate_findings, "_last_strict_filter_breakdown", {}) or {})
+    filtered_out_total = int(getattr(aggregate_findings, "_last_heuristic_dropped", 0) or 0)
     company_surfaces = aggregate_company_surfaces(results)
     timestamp = datetime.now(timezone.utc).isoformat()
     evidence_summary = build_evidence_summary(findings)
+    evidence_summary["strict_findings"] = len(findings)
+    evidence_summary["filtered_out_total"] = filtered_out_total
+    evidence_summary["filtered_out_breakdown"] = filtered_out_breakdown
     phase4 = run_phase4_synthesis(target_url, results, findings)
     summary_block = {
         "total_findings": len(findings),
@@ -2306,6 +2415,8 @@ def run_web_scan_streaming(
         },
         "summary": summary_block,
         "evidence_summary": evidence_summary,
+        "filtered_out_total": filtered_out_total,
+        "filtered_out_breakdown": filtered_out_breakdown,
         **phase4,
     }
     yield {"event": "done", "report": report}
