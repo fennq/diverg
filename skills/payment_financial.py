@@ -21,7 +21,7 @@ from urllib.parse import urljoin, urlparse, parse_qs, urlencode, urlunparse
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
-from stealth import get_session, randomize_order
+from stealth import get_session, randomize_order, set_scan_seed
 
 SESSION = get_session()
 TIMEOUT = 8
@@ -210,20 +210,22 @@ def _probe_amount_tampering(url: str, run_start: float, session: requests.Sessio
             if r.status_code not in (200, 201, 302):
                 continue
             body = (r.text or "").lower()
-            if SUCCESS_MONEY.search(body) and value in ("0", "0.01", "-1", "100", "FREE100", "free"):
+            if SUCCESS_MONEY.search(body) and value in ("0", "0.01", "-1", "free", "FREE100"):
                 return Finding(
-                    title="Critical: Server accepted zero or manipulated payment parameter [CONFIRMED]",
-                    severity="Critical",
+                    title="Server accepted zero or manipulated payment parameter [LIKELY]",
+                    severity="High",
                     url=test_url,
                     category="Payment / Financial Impact",
-                    evidence=f"Request with {param}={value} returned {r.status_code} and success-like response. Users could pay nothing or get 100% discount.",
-                    impact="Attackers can complete checkout for free, apply unlimited discount, or manipulate plan/price. Direct financial loss to the business and unfair advantage.",
+                    evidence=f"[Needs manual verification] Request with {param}={value} returned {r.status_code} and success-like response.",
+                    impact="Attackers may be able to complete checkout for free or manipulate plan/price. Verify that the transaction actually completed.",
                     remediation="Never trust client-supplied amount, total, price, discount, or plan_id. Validate and enforce all monetary values server-side.",
                 )
         except requests.RequestException:
             continue
 
-        # POST JSON body
+        # POST JSON body — only flag for abnormal monetary values
+        if value not in ("0", "0.01", "-1", "free", "FREE100"):
+            continue
         try:
             body_json = {param: value if value not in ("0", "0.01") else (0 if value == "0" else 0.01)}
             r = sess.post(url, json=body_json, timeout=TIMEOUT, allow_redirects=False)
@@ -232,12 +234,12 @@ def _probe_amount_tampering(url: str, run_start: float, session: requests.Sessio
             body = (r.text or "").lower()
             if SUCCESS_MONEY.search(body):
                 return Finding(
-                    title="Critical: Server accepted tampered payment in POST body [CONFIRMED]",
-                    severity="Critical",
+                    title="Server accepted tampered payment in POST body [LIKELY]",
+                    severity="High",
                     url=url,
                     category="Payment / Financial Impact",
-                    evidence=f"POST with {param}={value} returned {r.status_code} and success-like response. Client-controlled payment data was accepted.",
-                    impact="Same as above: free checkout or full discount via tampered request body.",
+                    evidence=f"[Needs manual verification] POST with {param}={value} returned {r.status_code} and success-like response.",
+                    impact="Client-controlled payment data may be accepted, enabling free checkout.",
                     remediation="Validate all payment-related fields server-side. Do not trust any amount, total, or discount from the client.",
                 )
         except requests.RequestException:
@@ -406,6 +408,7 @@ def run(
     cookies: str | None = None,
     bearer_token: str | None = None,
 ) -> str:
+    set_scan_seed(target_url)
     report = PaymentFinancialReport(target_url=target_url)
     run_start = time.time()
     url = target_url if target_url.startswith("http") else f"https://{target_url}"

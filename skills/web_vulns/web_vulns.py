@@ -546,30 +546,17 @@ def test_sqli(url: str) -> list[Finding]:
                 try:
                     resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                     for pat in SQLI_ERROR_PATTERNS:
-                        if pat.search(resp.text):
+                        if pat.search(resp.text) and not pat.search(baseline_text):
                             findings.append(Finding(
                                 title=f"SQL Injection (UNION-based) via '{pn}'",
                                 severity="Critical",
                                 url=test_url,
                                 category="OWASP-A03 Injection (SQLi)",
-                                evidence=f"Payload: {payload}\nDB error in response indicates UNION injection point",
+                                evidence=f"Payload: {payload}\nDB error in response indicates UNION injection point (not in baseline)",
                                 impact="An attacker could extract arbitrary data from the database via UNION queries.",
                                 remediation="Use parameterized queries / prepared statements. Never concatenate user input into SQL.",
                                 cvss="9.8 (Critical)",
-                            ))
-                            return findings
-                    if baseline and abs(len(resp.text) - baseline_len) > 200:
-                        col_match = re.search(r"UNION.*?SELECT\s+((?:NULL,?\s*)+)", payload, re.IGNORECASE)
-                        if col_match:
-                            findings.append(Finding(
-                                title=f"Possible SQL Injection (UNION-based) via '{pn}'",
-                                severity="High",
-                                url=test_url,
-                                category="OWASP-A03 Injection (SQLi)",
-                                evidence=f"Payload: {payload}\nResponse length changed significantly ({baseline_len} -> {len(resp.text)})",
-                                impact="An attacker may be able to extract data via UNION-based SQLi.",
-                                remediation="Use parameterized queries / prepared statements.",
-                                cvss="9.8 (Critical)",
+                                finding_confidence="likely",
                             ))
                             return findings
                 except requests.RequestException:
@@ -678,16 +665,17 @@ def test_sqli(url: str) -> list[Finding]:
                 try:
                     resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                     for pat in SQLI_ERROR_PATTERNS:
-                        if pat.search(resp.text):
+                        if pat.search(resp.text) and not pat.search(baseline_text):
                             findings.append(Finding(
                                 title=f"SQL Injection (WAF bypass) via '{pn}'",
                                 severity="Critical",
                                 url=test_url,
                                 category="OWASP-A03 Injection (SQLi)",
-                                evidence=f"Payload: {payload}\nDB error leaked despite WAF — filter bypass successful",
+                                evidence=f"Payload: {payload}\nDB error leaked despite WAF (not in baseline)",
                                 impact="WAF/filter bypass allows full SQL injection exploitation.",
                                 remediation="Use parameterized queries. WAFs are not a substitute for secure coding practices.",
                                 cvss="9.8 (Critical)",
+                                finding_confidence="likely",
                             ))
                             return findings
                 except requests.RequestException:
@@ -701,16 +689,17 @@ def test_sqli(url: str) -> list[Finding]:
                 try:
                     resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                     for pat in SQLI_ERROR_PATTERNS:
-                        if pat.search(resp.text):
+                        if pat.search(resp.text) and not pat.search(baseline_text):
                             findings.append(Finding(
                                 title=f"SQL Injection (stacked queries) via '{pn}'",
                                 severity="Critical",
                                 url=test_url,
                                 category="OWASP-A03 Injection (SQLi)",
-                                evidence=f"Payload: {payload}\nDB error on stacked query indicates multiple-statement execution",
+                                evidence=f"Payload: {payload}\nDB error on stacked query indicates multiple-statement execution (not in baseline)",
                                 impact="Stacked query injection can allow arbitrary SQL execution including data modification.",
                                 remediation="Use parameterized queries. Disable multi-statement execution if possible.",
                                 cvss="9.8 (Critical)",
+                                finding_confidence="likely",
                             ))
                             return findings
                 except requests.RequestException:
@@ -744,14 +733,15 @@ def test_csrf(url: str) -> list[Finding]:
 
             if not has_csrf_token:
                 findings.append(Finding(
-                    title="POST form missing CSRF token",
-                    severity="Medium",
+                    title="POST form without visible CSRF token field",
+                    severity="Info",
                     url=url,
                     category="OWASP-A01 Broken Access Control (CSRF)",
-                    evidence=f"Form action: {abs_action}\nInput fields: {', '.join(input_names)}\nNo CSRF token field detected",
-                    impact="An attacker could forge cross-site requests to perform actions on behalf of authenticated users.",
-                    remediation="Add a unique, unpredictable CSRF token to every state-changing form and validate it server-side.",
+                    evidence=f"[Needs manual verification] Form action: {abs_action}\nInput fields: {', '.join(input_names)}\nNo CSRF token hidden field detected (server may use SameSite cookies, custom headers, or other mitigations)",
+                    impact="If no alternative CSRF protection exists, an attacker could forge cross-site requests.",
+                    remediation="Verify that SameSite cookies, custom headers, or framework-level CSRF protection is in place.",
                     cvss="4.3 (Medium)",
+                    finding_confidence="possible",
                 ))
     except requests.RequestException:
         pass
@@ -776,12 +766,19 @@ TRAVERSAL_PAYLOADS = [
 ]
 
 
+_PASSWD_STRUCTURE = re.compile(r"^[a-z_][\w-]*:.*:\d+:\d+:", re.MULTILINE)
+_WININI_STRUCTURE = re.compile(r"^\[(extensions|fonts|mci extensions)\]", re.MULTILINE | re.IGNORECASE)
+
+
 def test_traversal(url: str) -> list[Finding]:
     findings: list[Finding] = []
     parsed = urlparse(url)
     params = parse_qs(parsed.query)
     if not params:
         return findings
+
+    baseline = _get_baseline(url)
+    baseline_text = baseline.text if baseline else ""
 
     file_params = [p for p in params if any(kw in p.lower() for kw in
                    ("file", "path", "page", "doc", "template", "include", "dir", "folder", "load"))]
@@ -796,19 +793,33 @@ def test_traversal(url: str) -> list[Finding]:
 
             try:
                 resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
-                body_lower = resp.text.lower()
-                if any(ind.lower() in body_lower for ind in indicators):
-                    findings.append(Finding(
-                        title=f"Directory Traversal via parameter '{param_name}'",
-                        severity="High",
-                        url=test_url,
-                        category="OWASP-A01 Broken Access Control (Path Traversal)",
-                        evidence=f"Payload: {payload}\nOS file content detected in response",
-                        impact="An attacker could read arbitrary files from the server filesystem.",
-                        remediation="Validate and sanitize file path parameters. Use allowlists and chroot jails.",
-                        cvss="7.5 (High)",
-                    ))
-                    return findings
+                body = resp.text
+                body_lower = body.lower()
+                if not any(ind.lower() in body_lower for ind in indicators):
+                    continue
+                is_unix = "root:" in body_lower or "/bin/" in body_lower
+                is_win = "[extensions]" in body_lower or "[fonts]" in body_lower
+                struct_match = False
+                if is_unix:
+                    struct_match = bool(_PASSWD_STRUCTURE.search(body)) and body_lower.count(":") >= 10
+                elif is_win:
+                    struct_match = bool(_WININI_STRUCTURE.search(body))
+                if not struct_match:
+                    continue
+                if _PASSWD_STRUCTURE.search(baseline_text) or _WININI_STRUCTURE.search(baseline_text):
+                    continue
+                findings.append(Finding(
+                    title=f"Directory Traversal via parameter '{param_name}'",
+                    severity="High",
+                    url=test_url,
+                    category="OWASP-A01 Broken Access Control (Path Traversal)",
+                    evidence=f"Payload: {payload}\nOS file structure confirmed in response (not present in baseline)",
+                    impact="An attacker could read arbitrary files from the server filesystem.",
+                    remediation="Validate and sanitize file path parameters. Use allowlists and chroot jails.",
+                    cvss="7.5 (High)",
+                    finding_confidence="confirmed",
+                ))
+                return findings
             except requests.RequestException:
                 continue
     return findings
@@ -838,17 +849,14 @@ SSRF_TARGETS = [
 ]
 
 SSRF_INDICATORS = [
-    re.compile(r"ami-[0-9a-f]+", re.IGNORECASE),
-    re.compile(r"instance-id", re.IGNORECASE),
-    re.compile(r"local-ipv4", re.IGNORECASE),
-    re.compile(r"meta-data", re.IGNORECASE),
-    re.compile(r"security-credentials", re.IGNORECASE),
-    re.compile(r"AccessKeyId", re.IGNORECASE),
-    re.compile(r"SecretAccessKey", re.IGNORECASE),
-    re.compile(r"iam/", re.IGNORECASE),
-    re.compile(r"hostname", re.IGNORECASE),
-    re.compile(r"SSH-\d", re.IGNORECASE),
-    re.compile(r"redis_version", re.IGNORECASE),
+    re.compile(r"ami-[0-9a-f]{8,}", re.IGNORECASE),
+    re.compile(r"instance-id\s*[:=]", re.IGNORECASE),
+    re.compile(r"local-ipv4\s*[:=]", re.IGNORECASE),
+    re.compile(r"security-credentials/", re.IGNORECASE),
+    re.compile(r"AccessKeyId\s*[:=]", re.IGNORECASE),
+    re.compile(r"SecretAccessKey\s*[:=]", re.IGNORECASE),
+    re.compile(r"SSH-\d\.\d", re.IGNORECASE),
+    re.compile(r"redis_version:\d", re.IGNORECASE),
     re.compile(r"mysql_native_password", re.IGNORECASE),
 ]
 
@@ -881,7 +889,7 @@ def test_ssrf(url: str) -> list[Finding]:
                     resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
 
                     for indicator in SSRF_INDICATORS:
-                        if indicator.search(resp.text):
+                        if indicator.search(resp.text) and (not baseline or not indicator.search(baseline.text)):
                             findings.append(Finding(
                                 title=f"Server-Side Request Forgery via '{pn}'",
                                 severity="Critical" if "metadata" in label.lower() or "credential" in label.lower() else "High",
@@ -891,20 +899,7 @@ def test_ssrf(url: str) -> list[Finding]:
                                 impact="An attacker could access internal services, cloud metadata, or pivot into the internal network.",
                                 remediation="Validate and allowlist URLs server-side. Block requests to internal/private IPs. Disable unnecessary URL fetching.",
                                 cvss="9.1 (Critical)",
-                            ))
-                            return findings
-
-                    if baseline and resp.status_code == 200:
-                        if len(resp.text) > 0 and abs(len(resp.text) - len(baseline.text)) > 200:
-                            findings.append(Finding(
-                                title=f"Possible SSRF via '{pn}'",
-                                severity="Medium",
-                                url=test_url,
-                                category="OWASP-A10 Server-Side Request Forgery (SSRF)",
-                                evidence=f"Payload: {ssrf_url} ({label})\nResponse length changed significantly ({len(baseline.text)} -> {len(resp.text)})",
-                                impact="The server may be fetching attacker-controlled URLs. Further investigation needed.",
-                                remediation="Validate and allowlist URLs server-side. Block requests to internal/private IPs.",
-                                cvss="6.5 (Medium)",
+                                finding_confidence="confirmed",
                             ))
                             return findings
                 except requests.RequestException:
@@ -956,11 +951,16 @@ def test_ssti(url: str) -> list[Finding]:
     if not params:
         return findings
 
+    baseline = _get_baseline(url)
+    baseline_text = baseline.text if baseline else ""
+
     for param_name in params:
         if _budget_expired(_t0):
             return findings
         for payload, expected in randomize_order(SSTI_PAYLOADS):
             if not expected:
+                continue
+            if expected in baseline_text:
                 continue
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
@@ -973,10 +973,11 @@ def test_ssti(url: str) -> list[Finding]:
                             severity="Critical",
                             url=test_url,
                             category="OWASP-A03 Injection (SSTI)",
-                            evidence=f"Payload: {payload}\nExpected: {expected}\nServer evaluated the template expression (found '{expected}' in response)",
+                            evidence=f"Payload: {payload}\nExpected computed output: {expected}\nServer evaluated the template expression (not present in baseline response)",
                             impact="An attacker could achieve remote code execution by injecting template directives.",
                             remediation="Never pass user input directly into template engines. Use sandboxed rendering and logic-less templates.",
                             cvss="9.8 (Critical)",
+                            finding_confidence="confirmed",
                         ))
                         return findings
                 except requests.RequestException:
@@ -1014,8 +1015,8 @@ CMDI_OUTPUT_PAYLOADS = [
     ("| cat /etc/passwd", [re.compile(r"root:.*:0:0:")]),
     ("; whoami", [re.compile(r"^(root|www-data|apache|nginx|nobody|daemon)\s*$", re.MULTILINE)]),
     ("| whoami", [re.compile(r"^(root|www-data|apache|nginx|nobody|daemon)\s*$", re.MULTILINE)]),
-    ("; uname -a", [re.compile(r"Linux|Darwin|FreeBSD")]),
-    ("| uname -a", [re.compile(r"Linux|Darwin|FreeBSD")]),
+    ("; uname -a", [re.compile(r"(Linux|Darwin|FreeBSD)\s+\S+\s+\d+\.\d+")]),
+    ("| uname -a", [re.compile(r"(Linux|Darwin|FreeBSD)\s+\S+\s+\d+\.\d+")]),
     ("; echo CMDI_MARKER_7x7", [re.compile(r"CMDI_MARKER_7x7")]),
     ("| echo CMDI_MARKER_7x7", [re.compile(r"CMDI_MARKER_7x7")]),
     ("&& echo CMDI_MARKER_7x7", [re.compile(r"CMDI_MARKER_7x7")]),
@@ -1041,7 +1042,9 @@ def test_cmdi(url: str) -> list[Finding]:
     if not cmd_params:
         cmd_params = list(params.keys())
 
-    # Output-based detection
+    baseline = _get_baseline(url)
+    baseline_text = baseline.text if baseline else ""
+
     for param_name in cmd_params:
         if _budget_expired(_t0):
             return findings
@@ -1050,48 +1053,58 @@ def test_cmdi(url: str) -> list[Finding]:
                 try:
                     resp = _req().get(test_url, timeout=TIMEOUT, allow_redirects=False)
                     for pat in patterns:
-                        if pat.search(resp.text):
+                        if pat.search(resp.text) and not pat.search(baseline_text):
                             findings.append(Finding(
                                 title=f"OS Command Injection via '{pn}'",
                                 severity="Critical",
                                 url=test_url,
                                 category="OWASP-A03 Injection (OS Command)",
-                                evidence=f"Payload: {payload}\nCommand output detected: {pat.pattern[:60]}",
+                                evidence=f"Payload: {payload}\nCommand output detected: {pat.pattern[:60]}\nOutput not present in baseline response",
                                 impact="An attacker could execute arbitrary OS commands on the server, leading to full system compromise.",
                                 remediation="Never pass user input to shell commands. Use language-native APIs instead of os.system/exec/popen.",
                                 cvss="9.8 (Critical)",
+                                finding_confidence="confirmed",
                             ))
                             return findings
                 except requests.RequestException:
                     continue
 
-    # Time-based blind detection
     for param_name in cmd_params:
         if _budget_expired(_t0):
             return findings
         for payload, delay in randomize_order(CMDI_TIME_PAYLOADS):
             for pn, test_url in _inject_into_params(url, payload, [param_name]):
                 try:
+                    start_bl = time.time()
+                    _req().get(url, timeout=TIMEOUT, allow_redirects=False)
+                    baseline_time = time.time() - start_bl
+
                     start = time.time()
-                    _req().get(test_url, timeout=TIMEOUT + delay, allow_redirects=False)
+                    _req().get(test_url, timeout=TIMEOUT + delay + 2, allow_redirects=False)
                     elapsed = time.time() - start
 
-                    if elapsed >= delay * 0.8:
-                        start2 = time.time()
-                        _req().get(url, timeout=TIMEOUT, allow_redirects=False)
-                        baseline_time = time.time() - start2
-                        if elapsed > baseline_time + (delay * 0.6):
-                            findings.append(Finding(
-                                title=f"Blind OS Command Injection (time-based) via '{pn}'",
-                                severity="Critical",
-                                url=test_url,
-                                category="OWASP-A03 Injection (OS Command)",
-                                evidence=f"Payload: {payload}\nResponse delayed {elapsed:.1f}s (baseline: {baseline_time:.1f}s, expected delay: {delay}s)",
-                                impact="An attacker could execute arbitrary OS commands blindly via time-based inference.",
-                                remediation="Never pass user input to shell commands. Use language-native APIs.",
-                                cvss="9.8 (Critical)",
-                            ))
-                            return findings
+                    if elapsed < delay * 0.8 or elapsed < baseline_time + (delay * 0.7):
+                        continue
+
+                    start2 = time.time()
+                    _req().get(test_url, timeout=TIMEOUT + delay + 2, allow_redirects=False)
+                    elapsed2 = time.time() - start2
+
+                    if elapsed2 < delay * 0.8:
+                        continue
+
+                    findings.append(Finding(
+                        title=f"Blind OS Command Injection (time-based) via '{pn}' [LIKELY]",
+                        severity="High",
+                        url=test_url,
+                        category="OWASP-A03 Injection (OS Command)",
+                        evidence=f"[Needs manual verification] Payload: {payload}\nDelay observed twice ({elapsed:.1f}s, {elapsed2:.1f}s vs baseline {baseline_time:.1f}s)",
+                        impact="An attacker could execute arbitrary OS commands blindly via time-based inference.",
+                        remediation="Never pass user input to shell commands. Use language-native APIs.",
+                        cvss="9.8 (Critical)",
+                        finding_confidence="likely",
+                    ))
+                    return findings
                 except requests.RequestException:
                     continue
     return findings
@@ -1150,16 +1163,17 @@ def test_open_redirect(url: str) -> list[Finding]:
                         location = resp.headers.get("Location", "")
                         loc_parsed = urlparse(location)
                         if loc_parsed.netloc and loc_parsed.netloc != parsed.netloc:
-                            if "evil.com" in loc_parsed.netloc or loc_parsed.netloc != parsed.netloc:
+                            if "evil.com" in loc_parsed.netloc:
                                 findings.append(Finding(
                                     title=f"Open Redirect via '{pn}'",
                                     severity="Medium",
                                     url=test_url,
                                     category="OWASP-A01 Broken Access Control (Open Redirect)",
-                                    evidence=f"Payload: {payload}\nRedirects to: {location}\nHTTP {resp.status_code} with external Location header",
+                                    evidence=f"Payload: {payload}\nRedirects to: {location}\nHTTP {resp.status_code} with attacker-controlled Location header",
                                     impact="An attacker could redirect users to malicious sites for phishing or malware delivery.",
                                     remediation="Validate redirect targets against an allowlist of trusted domains. Use relative paths only.",
                                     cvss="4.7 (Medium)",
+                                    finding_confidence="confirmed",
                                 ))
                                 return findings
 
@@ -1181,6 +1195,7 @@ def test_open_redirect(url: str) -> list[Finding]:
                                     impact="An attacker could redirect users to malicious sites via meta refresh.",
                                     remediation="Validate redirect targets. Do not reflect user input in meta refresh tags.",
                                     cvss="4.7 (Medium)",
+                                    finding_confidence="confirmed",
                                 ))
                                 return findings
                 except requests.RequestException:
@@ -1193,10 +1208,8 @@ def test_open_redirect(url: str) -> list[Finding]:
 # ---------------------------------------------------------------------------
 
 NOSQLI_ERROR_PATTERNS = [
-    re.compile(r"SyntaxError|Unexpected token|JSON\.parse|Invalid.*JSON", re.IGNORECASE),
-    re.compile(r"MongoError|MongoDB|BSON|ObjectId|Cast to.*failed", re.IGNORECASE),
-    re.compile(r"mongodb|mongoose|NoSQL", re.IGNORECASE),
-    re.compile(r"\$where|\$gt|\$ne|\$regex|\$eq", re.IGNORECASE),
+    re.compile(r"MongoError|MongoServerError|BSON.*error|Cast to ObjectId failed", re.IGNORECASE),
+    re.compile(r"E11000 duplicate key|MongoNetworkError", re.IGNORECASE),
 ]
 
 # URL/query param payloads (often passed as JSON to backend)
@@ -1235,16 +1248,17 @@ def test_nosqli(url: str) -> list[Finding]:
                     if resp.status_code != 200:
                         continue
                     for pat in NOSQLI_ERROR_PATTERNS:
-                        if pat.search(resp.text) and (not baseline_text or not pat.search(baseline_text)):
+                        if pat.search(resp.text) and not pat.search(baseline_text):
                             findings.append(Finding(
-                                title=f"NoSQL Injection (error-based) via '{pn}'",
+                                title=f"NoSQL Injection (error-based) via '{pn}' [LIKELY]",
                                 severity="High",
                                 url=test_url,
                                 category="OWASP-A03 Injection (NoSQLi)",
-                                evidence=f"Payload: {payload}\nResponse matched pattern: {pat.pattern[:60]}",
+                                evidence=f"Payload: {payload}\nResponse matched pattern: {pat.pattern[:60]}\nPattern not present in baseline response",
                                 impact="Backend may be parsing input as NoSQL operators; can lead to auth bypass or data exposure.",
                                 remediation="Validate and sanitize input; do not pass user input directly into NoSQL queries or operators.",
                                 cvss="8.6 (High)",
+                                finding_confidence="likely",
                             ))
                             return findings
                 except requests.RequestException:
@@ -1290,7 +1304,6 @@ SENSITIVE_PATHS = [
     ("package.json", [re.compile(r'"name"|"version"|"dependencies"')]),
     ("Gemfile", [re.compile(r"gem ['\"]|source ['\"]")]),
     ("requirements.txt", [re.compile(r"==|>=|~=")]),
-    (".dockerenv", [re.compile(r".")]),
     ("Dockerfile", [re.compile(r"FROM |RUN |CMD |EXPOSE ", re.IGNORECASE)]),
     ("docker-compose.yml", [re.compile(r"services:|version:", re.IGNORECASE)]),
     ("application.properties", [re.compile(r"spring\.|server\.|datasource\.", re.IGNORECASE)]),

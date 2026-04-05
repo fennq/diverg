@@ -21,7 +21,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from stealth import get_session, randomize_order
+from stealth import get_session, randomize_order, set_scan_seed
 
 SESSION = get_session()
 TIMEOUT = 8
@@ -202,6 +202,7 @@ def run(target_url: str, scan_type: str = "full", context: dict | None = None) -
     Probe workflow/order-of-operations bugs: skip step, zero amount, confirm without pay.
     context: optional dict with "endpoints" (list of URLs) from prior discovery.
     """
+    set_scan_seed(target_url)
     run_start = time.time()
     report = WorkflowProbeReport(target_url=target_url)
 

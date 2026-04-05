@@ -23,7 +23,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
-from stealth import get_session, randomize_order
+from stealth import get_session, randomize_order, set_scan_seed
 
 SESSION = get_session()
 TIMEOUT = 8
@@ -129,14 +129,14 @@ def _analyze_burst(
     # Multiple successes from one logical action
     if success_like >= 2:
         return Finding(
-            title="Possible race condition: multiple success responses to concurrent requests [CONFIRMED]",
-            severity="Critical",
+            title="Possible race condition: multiple success responses to concurrent requests [LIKELY]",
+            severity="High",
             url=url,
             category="Business Logic / Concurrency",
             evidence=(
-                f"Sent {CONCURRENT_REQUESTS} concurrent identical requests. "
-                f"{success_like} responses contained success-like content (e.g. success, completed, credited). "
-                "Server may have processed the same action multiple times (e.g. double redeem, double credit)."
+                f"[Needs manual verification] Sent {CONCURRENT_REQUESTS} concurrent identical requests. "
+                f"{success_like} responses contained success-like content. "
+                "Verify that duplicate state changes actually occurred (e.g. double credit, double order)."
             ),
             impact=(
                 "Attackers can send concurrent requests to redeem coupons, apply credits, or complete "
@@ -151,8 +151,8 @@ def _analyze_burst(
     # Same transaction/reference id in multiple responses = duplicate processing
     if len(transaction_ids) >= 2 and len(set(transaction_ids)) < len(transaction_ids):
         return Finding(
-            title="Possible race condition: duplicate transaction/order IDs in concurrent responses [CONFIRMED]",
-            severity="Critical",
+            title="Possible race condition: duplicate transaction/order IDs in concurrent responses [LIKELY]",
+            severity="High",
             url=url,
             category="Business Logic / Concurrency",
             evidence=(
@@ -166,8 +166,8 @@ def _analyze_burst(
     # Many 200s for an action-like endpoint is suspicious even without success text
     if status_200 >= 3 and _path_looks_like_action(url):
         return Finding(
-            title="Possible race condition: multiple 200 responses to concurrent requests [VERIFY]",
-            severity="High",
+            title="Possible race condition: multiple 200 responses to concurrent requests [POSSIBLE]",
+            severity="Medium",
             url=url,
             category="Business Logic / Concurrency",
             evidence=(
@@ -237,6 +237,7 @@ def run(
     Run race-condition probing. If endpoints_from_api is provided (e.g. from API discovery),
     filter to those that look like actions; otherwise discover from base URL.
     """
+    set_scan_seed(target_url)
     report = RaceConditionReport(target_url=target_url)
     run_start = time.time()
     url = target_url if target_url.startswith("http") else f"https://{target_url}"

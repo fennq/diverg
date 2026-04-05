@@ -20,7 +20,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
-from stealth import get_session, randomize_order
+from stealth import get_session, randomize_order, set_scan_seed
 
 SESSION = get_session()
 TIMEOUT = 6
@@ -31,7 +31,7 @@ ERROR_DISCLOSURE = [
     re.compile(r"(?:at\s+)?[\w\.]+\.(?:py|js|java|php|rb|go)\s*(?::\d+)?", re.I),
     re.compile(r"(?:path|file|directory):\s*[\w\/\.\-\\]+", re.I),
     re.compile(r"(?:stack\s+trace|traceback|exception|error)\s*:", re.I),
-    re.compile(r"(?:internal|localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)", re.I),
+    re.compile(r"(?:localhost:\d+|127\.0\.0\.1:\d+|192\.168\.\d+\.\d+:\d+|10\.\d+\.\d+\.\d+:\d+)", re.I),
     re.compile(r"(?:vendor|node_modules|app/|var/www|C:\\|/home/)[\w\/\.\-]*", re.I),
     re.compile(r"(?:postgresql|mysql|mongodb|redis|sqlite)\s*(?:connection|error|query)?", re.I),
 ]
@@ -57,7 +57,6 @@ CLIENT_SIDE_PATTERNS = [
     re.compile(r"localStorage\.setItem\s*\(\s*['\"]?(?:token|auth|user|email|apiKey|wallet|privateKey)['\"]?", re.I),
     re.compile(r"sessionStorage\.(?:setItem|getItem)\s*\(\s*['\"]?(?:token|auth|user|wallet)['\"]?", re.I),
     re.compile(r"window\.__INITIAL_STATE__\s*=\s*\{[^}]*\"(?:user|token|email|auth|wallet|balance)\"\s*:", re.I),
-    re.compile(r"__NEXT_DATA__|__NUXT__|__DATA__|window\.__PRELOADED", re.I),
 ]
 
 
@@ -221,6 +220,7 @@ def _check_client_side_exposure(base_url: str, run_start: float) -> list[Finding
 
 
 def run(target_url: str, scan_type: str = "full") -> str:
+    set_scan_seed(target_url)
     report = DataLeakRisksReport(target_url=target_url)
     run_start = time.time()
     url = target_url if target_url.startswith("http") else f"https://{target_url}"

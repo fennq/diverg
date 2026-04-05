@@ -19,7 +19,7 @@ from urllib.parse import urljoin, urlparse, parse_qs, urlencode, urlunparse
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
-from stealth import get_session, randomize_order
+from stealth import get_session, randomize_order, set_scan_seed
 
 SESSION = get_session()
 
@@ -414,6 +414,7 @@ def scan_business_logic(base_url: str, run_start: float) -> list[Finding]:
 
 
 def run(target_url: str, scan_type: str = "full") -> str:
+    set_scan_seed(target_url)
     report = HighValueReport(target_url=target_url)
     run_start = time.time()
     url = target_url if target_url.startswith("http") else f"https://{target_url}"

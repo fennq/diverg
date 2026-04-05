@@ -16,7 +16,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from stealth import get_session, randomize_order
+from stealth import get_session, randomize_order, set_scan_seed
 SESSION = get_session()
 
 
@@ -822,16 +822,38 @@ def _path_bypass_variants(path: str) -> list[str]:
     return variants
 
 
+def _body_is_different(body_a: str, body_b: str, threshold: float = 0.15) -> bool:
+    """Return True only when the two bodies differ substantially (>threshold ratio)."""
+    if not body_a and not body_b:
+        return False
+    len_a, len_b = len(body_a), len(body_b)
+    if len_a == 0 or len_b == 0:
+        return bool(len_a + len_b > 100)
+    ratio = abs(len_a - len_b) / max(len_a, len_b)
+    if ratio > threshold:
+        return True
+    import hashlib
+    return hashlib.md5(body_a.encode(errors="replace")).digest() != hashlib.md5(body_b.encode(errors="replace")).digest()
+
+
 def test_auth_bypass(endpoints: list[Endpoint]) -> list[Finding]:
     findings: list[Finding] = []
     protected = [ep for ep in endpoints if ep.auth_required]
+
+    try:
+        base_parsed = urlparse(protected[0].url if protected else "")
+        home_url = f"{base_parsed.scheme}://{base_parsed.netloc}/"
+        home_resp = _S().get(home_url, timeout=8, allow_redirects=True)
+        home_body = home_resp.text
+    except Exception:
+        home_body = ""
 
     for ep in protected:
         # Header-based bypass
         for bypass_headers in randomize_order(AUTH_BYPASS_HEADERS):
             try:
                 resp = _S().get(ep.url, headers=bypass_headers, timeout=8, allow_redirects=False)
-                if resp.status_code == 200:
+                if resp.status_code == 200 and _body_is_different(resp.text, home_body):
                     header_name = list(bypass_headers.keys())[0]
                     findings.append(Finding(
                         title=f"Authentication bypass via {header_name}",
@@ -841,7 +863,8 @@ def test_auth_bypass(endpoints: list[Endpoint]) -> list[Finding]:
                         evidence=(
                             f"Bypass header: {header_name}: {bypass_headers[header_name]}\n"
                             f"Original status: {ep.status_code}\n"
-                            f"Bypassed status: {resp.status_code}"
+                            f"Bypassed status: {resp.status_code}\n"
+                            f"Response body differs from home page ({len(resp.text)} vs {len(home_body)} bytes)"
                         ),
                         impact="Attackers can bypass authentication and access protected resources.",
                         remediation=f"Do not trust {header_name} for access control decisions. Implement proper authentication.",
@@ -857,7 +880,7 @@ def test_auth_bypass(endpoints: list[Endpoint]) -> list[Finding]:
             variant_url = base + variant_path
             try:
                 resp = _S().get(variant_url, timeout=8, allow_redirects=False)
-                if resp.status_code == 200:
+                if resp.status_code == 200 and _body_is_different(resp.text, home_body):
                     findings.append(Finding(
                         title=f"Authentication bypass via path manipulation",
                         severity="Critical",
@@ -865,7 +888,8 @@ def test_auth_bypass(endpoints: list[Endpoint]) -> list[Finding]:
                         category="OWASP-A01 Broken Access Control",
                         evidence=(
                             f"Original: {ep.url} → {ep.status_code}\n"
-                            f"Bypass: {variant_url} → {resp.status_code}"
+                            f"Bypass: {variant_url} → {resp.status_code}\n"
+                            f"Response body differs from home page"
                         ),
                         impact="Path normalization differences allow bypassing access controls.",
                         remediation="Normalize URL paths before applying access control. Use framework-level route matching.",
@@ -879,7 +903,7 @@ def test_auth_bypass(endpoints: list[Endpoint]) -> list[Finding]:
             for method in randomize_order(["POST", "PUT", "PATCH", "DELETE", "TRACE", "OPTIONS", "HEAD"]):
                 try:
                     resp = _S().request(method, ep.url, timeout=8, allow_redirects=False)
-                    if resp.status_code == 200:
+                    if resp.status_code == 200 and _body_is_different(resp.text, home_body):
                         findings.append(Finding(
                             title=f"Authentication bypass via HTTP verb tampering ({method})",
                             severity="High",
@@ -887,7 +911,8 @@ def test_auth_bypass(endpoints: list[Endpoint]) -> list[Finding]:
                             category="OWASP-A01 Broken Access Control",
                             evidence=(
                                 f"GET {ep.url} → {ep.status_code}\n"
-                                f"{method} {ep.url} → {resp.status_code}"
+                                f"{method} {ep.url} → {resp.status_code}\n"
+                                f"Response body differs from home page"
                             ),
                             impact="Access controls only apply to specific HTTP methods, allowing bypass with alternate verbs.",
                             remediation="Apply authentication/authorization checks regardless of HTTP method.",
@@ -902,7 +927,7 @@ def test_auth_bypass(endpoints: list[Endpoint]) -> list[Finding]:
                 test_url = ep.url.rstrip("/") + f"/{test_id}"
                 try:
                     resp = _S().get(test_url, timeout=8, allow_redirects=False)
-                    if resp.status_code == 200:
+                    if resp.status_code == 200 and _body_is_different(resp.text, home_body):
                         try:
                             data = resp.json()
                             if isinstance(data, dict) and len(data) > 0:
@@ -911,7 +936,7 @@ def test_auth_bypass(endpoints: list[Endpoint]) -> list[Finding]:
                                     severity="High",
                                     url=test_url,
                                     category="OWASP-A01 Broken Access Control (IDOR)",
-                                    evidence=f"GET {test_url} returned 200 with JSON data ({len(data)} keys)",
+                                    evidence=f"GET {test_url} returned 200 with JSON data ({len(data)} keys), body differs from home page",
                                     impact="Attackers may enumerate and access other users' resources by changing IDs.",
                                     remediation="Enforce authorization checks on every resource access. Use UUIDs instead of sequential IDs.",
                                 ))
@@ -972,18 +997,54 @@ SENSITIVE_PATHS: dict[str, str] = {
 }
 
 
+_API_SENS_CONTENT_MARKERS: dict[str, re.Pattern] = {
+    "/.env": re.compile(r"^\w+=.+", re.MULTILINE),
+    "/.env.local": re.compile(r"^\w+=.+", re.MULTILINE),
+    "/.env.production": re.compile(r"^\w+=.+", re.MULTILINE),
+    "/.git/config": re.compile(r"\[core\]|\[remote", re.IGNORECASE),
+    "/.git/HEAD": re.compile(r"ref:\s+refs/"),
+    "/.git/index": re.compile(r"DIRC"),
+    "/.svn/entries": re.compile(r"^\d+$", re.MULTILINE),
+    "/swagger.json": re.compile(r'"swagger"\s*:\s*"2|"openapi"\s*:', re.IGNORECASE),
+    "/swagger.yaml": re.compile(r"swagger:\s|openapi:", re.IGNORECASE),
+    "/openapi.json": re.compile(r'"openapi"\s*:', re.IGNORECASE),
+    "/openapi.yaml": re.compile(r"openapi:", re.IGNORECASE),
+    "/server-status": re.compile(r"Apache Server Status|Scoreboard", re.IGNORECASE),
+    "/server-info": re.compile(r"Apache Server Information|Module Name", re.IGNORECASE),
+    "/phpinfo.php": re.compile(r"phpinfo\(\)|PHP Version", re.IGNORECASE),
+    "/info.php": re.compile(r"phpinfo\(\)|PHP Version", re.IGNORECASE),
+    "/actuator/env": re.compile(r'"activeProfiles"|"propertySources"', re.IGNORECASE),
+    "/actuator/heapdump": re.compile(r"^\x1f\x8b|^JAVA PROFILE"),
+    "/graphql": re.compile(r'"__schema"|"queryType"', re.IGNORECASE),
+    "/debug/vars": re.compile(r'"cmdline"|"memstats"', re.IGNORECASE),
+    "/debug/pprof": re.compile(r"Types of profiles available|heap|goroutine"),
+    "/elmah.axd": re.compile(r"Error Log|ELMAH", re.IGNORECASE),
+    "/_cat/indices": re.compile(r"(green|yellow|red)\s+open\s+\w+"),
+    "/_cluster/health": re.compile(r'"cluster_name"|"status"'),
+    "/web.config": re.compile(r"<configuration|connectionString", re.IGNORECASE),
+}
+
+
 def check_info_disclosure(endpoints: list[Endpoint]) -> list[Finding]:
     findings: list[Finding] = []
 
     for ep in endpoints:
         for sens_path, description in SENSITIVE_PATHS.items():
             if ep.url.endswith(sens_path) and ep.status_code == 200:
+                marker = _API_SENS_CONTENT_MARKERS.get(sens_path)
+                if marker:
+                    try:
+                        resp = _S().get(ep.url, timeout=8, allow_redirects=False)
+                        if not marker.search(resp.text[:4000]):
+                            continue
+                    except requests.RequestException:
+                        continue
                 findings.append(Finding(
                     title=f"Sensitive resource exposed: {sens_path}",
                     severity="High",
                     url=ep.url,
                     category="OWASP-A05 Security Misconfiguration",
-                    evidence=f"GET {ep.url} returned HTTP {ep.status_code}\nContent-Type: {ep.content_type}",
+                    evidence=f"GET {ep.url} returned HTTP {ep.status_code}\nContent-Type: {ep.content_type}\nContent verified with format-specific marker",
                     impact=description,
                     remediation=f"Block access to {sens_path} in your web server configuration.",
                 ))
@@ -1759,6 +1820,7 @@ def run(
     wordlist: str = "medium",
     client_surface_json: str | None = None,
 ) -> str:
+    set_scan_seed(target_url)
     report = APIReport(target_url=target_url)
     run_start = time.time()
     extra_seeds = _urls_from_client_surface(client_surface_json, target_url)

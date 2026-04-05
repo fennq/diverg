@@ -25,7 +25,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
-from stealth import get_session, randomize_order
+from stealth import get_session, randomize_order, set_scan_seed
 
 SESSION = get_session()
 TIMEOUT = 8
@@ -442,6 +442,7 @@ def _check_source_map(js_content: str, js_url: str, run_start: float) -> tuple[i
 
 
 def run(target_url: str, scan_type: str = "full") -> str:
+    set_scan_seed(target_url)
     report = ClientSurfaceReport(target_url=target_url)
     run_start = time.time()
     parsed = urlparse(target_url)

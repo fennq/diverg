@@ -25,7 +25,7 @@ from urllib.parse import urljoin, urlparse, urlencode, parse_qs, urlunparse
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
-from stealth import get_session, randomize_order
+from stealth import get_session, randomize_order, set_scan_seed
 
 SESSION = get_session()
 TIMEOUT = 6
@@ -262,6 +262,7 @@ def run(
     extracted_endpoints: list[str] | None = None,
     client_surface_json: str | None = None,
 ) -> str:
+    set_scan_seed(target_url)
     report = LogicAbuseReport(target_url=target_url)
     run_start = time.time()
     session = SESSION
