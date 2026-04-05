@@ -599,6 +599,8 @@ body {
   font-size: 0.625rem; font-weight: 600; color: var(--green);
   vertical-align: super; margin-left: 6px;
 }
+.metric-delta.down { color: var(--red); }
+.metric-delta.up { color: var(--green); }
 
 .metric-sub {
   font-size: 0.5625rem; color: var(--text-dim); margin-top: 4px;

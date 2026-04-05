@@ -894,6 +894,66 @@ function addToHistory(url, scope, findingsCount, score, critCount, highCount) {
   renderHistory();
 }
 
+function parseDateSafe(value) {
+  if (!value) return null;
+  try {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  } catch (_) {
+    return null;
+  }
+}
+
+function percentDelta(current, previous) {
+  if (!previous) {
+    return current ? 100 : 0;
+  }
+  return Math.round(((current - previous) / previous) * 100);
+}
+
+function formatDeltaLabel(current, previous, mode = 'percent') {
+  if (mode === 'count') {
+    const diff = current - previous;
+    return { text: `${diff >= 0 ? '+' : ''}${diff}`, up: diff >= 0 };
+  }
+  const diff = percentDelta(current, previous);
+  return { text: `${diff >= 0 ? '+' : ''}${diff}%`, up: diff >= 0 };
+}
+
+function setDelta(elId, current, previous, mode = 'percent') {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  const out = formatDeltaLabel(current, previous, mode);
+  el.textContent = out.text;
+  if (el.classList.contains('stat-delta')) {
+    el.classList.remove('up', 'down');
+    el.classList.add(out.up ? 'up' : 'down');
+  } else {
+    el.classList.toggle('down', !out.up);
+    el.classList.toggle('up', out.up);
+  }
+}
+
+function renderActivityChart(activity) {
+  const line = document.getElementById('activityChartLine');
+  const fill = document.getElementById('activityChartFill');
+  if (!line || !fill || !Array.isArray(activity) || !activity.length) return;
+  const width = 500;
+  const height = 160;
+  const baseY = 140;
+  const max = Math.max(...activity.map((x) => Number(x.count || 0)), 1);
+  const step = activity.length > 1 ? width / (activity.length - 1) : width;
+  const points = activity.map((item, idx) => {
+    const x = Math.round(idx * step);
+    const y = Math.round(baseY - ((Number(item.count || 0) / max) * 90));
+    return [x, y];
+  });
+  const linePath = points.map(([x, y], idx) => `${idx === 0 ? 'M' : 'L'}${x} ${y}`).join(' ');
+  const fillPath = `${linePath} L${width} ${height} L0 ${height} Z`;
+  line.setAttribute('d', linePath);
+  fill.setAttribute('d', fillPath);
+}
+
 function renderHistory() {
   const scans = serverScans.length
     ? serverScans
@@ -931,6 +991,50 @@ function updateStats() {
     ? Math.round(serverSummary.avg_risk_score)
     : (n ? Math.round(scans.reduce((a, s) => a + (s.score || 0), 0) / n) : 0);
 
+  const now = new Date();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const scanDates = scans.map((s) => ({ ...s, parsedDate: parseDateSafe(s.date) })).filter((s) => s.parsedDate);
+  const countInRange = (startMs, endMs, reducer = null) => scanDates.reduce((acc, s) => {
+    const t = s.parsedDate.getTime();
+    if (t >= startMs && t < endMs) {
+      return acc + (reducer ? reducer(s) : 1);
+    }
+    return acc;
+  }, 0);
+  const uniqueTargetsInRange = (startMs, endMs) => new Set(
+    scanDates.filter((s) => {
+      const t = s.parsedDate.getTime();
+      return t >= startMs && t < endMs;
+    }).map((s) => s.url)
+  ).size;
+
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterdayStart = todayStart - dayMs;
+  const weekStart = now.getTime() - (7 * dayMs);
+  const prevWeekStart = now.getTime() - (14 * dayMs);
+  const monthStart = now.getTime() - (30 * dayMs);
+  const prevMonthStart = now.getTime() - (60 * dayMs);
+
+  const scansToday = countInRange(todayStart, now.getTime());
+  const scansYesterday = countInRange(yesterdayStart, todayStart);
+  const findingsToday = countInRange(todayStart, now.getTime(), (s) => Number(s.findings || 0));
+  const findingsYesterday = countInRange(yesterdayStart, todayStart, (s) => Number(s.findings || 0));
+  const criticalThisWeek = countInRange(weekStart, now.getTime(), (s) => Number(s.critical || 0));
+  const criticalPrevWeek = countInRange(prevWeekStart, weekStart, (s) => Number(s.critical || 0));
+  const targetsToday = uniqueTargetsInRange(todayStart, now.getTime());
+  const targetsYesterday = uniqueTargetsInRange(yesterdayStart, todayStart);
+  const weekCount = countInRange(weekStart, now.getTime());
+  const prevWeekCount = countInRange(prevWeekStart, weekStart);
+  const monthCount = countInRange(monthStart, now.getTime());
+  const prevMonthCount = countInRange(prevMonthStart, monthStart);
+  const currentScoreAvg = scanDates.length
+    ? Math.round(scanDates.reduce((acc, s) => acc + Number(s.score || 0), 0) / scanDates.length)
+    : 0;
+  const prevScoreAvgRaw = scanDates.filter((s) => s.parsedDate.getTime() >= prevWeekStart && s.parsedDate.getTime() < weekStart);
+  const prevScoreAvg = prevScoreAvgRaw.length
+    ? Math.round(prevScoreAvgRaw.reduce((acc, s) => acc + Number(s.score || 0), 0) / prevScoreAvgRaw.length)
+    : currentScoreAvg;
+
   const totalCrit = serverSummary?.severity?.critical ?? scans.reduce((a, s) => a + (s.critical || 0), 0);
   const totalHigh = serverSummary?.severity?.high ?? scans.reduce((a, s) => a + (s.high || 0), 0);
   const totalMed = serverSummary?.severity?.medium ?? findings.filter(f => (f.severity || '').toLowerCase() === 'medium').length;
@@ -942,13 +1046,25 @@ function updateStats() {
   set('statCritical', totalCrit);
   set('statTargets', targets);
   set('statScore', n ? avg + '/100' : '—');
-  set('bannerScans', n);
+  set('bannerScans', scansToday);
   set('bannerFindings', totalFindings);
   set('bannerTargets', targets);
   set('analyticsScans', n);
   set('analyticsCritical', totalCrit);
   set('analyticsHigh', totalHigh);
   set('analyticsScore', avg);
+  set('metricWeekly', weekCount);
+  set('metricMonthly', monthCount);
+
+  setDelta('bannerScansDelta', scansToday, scansYesterday, 'percent');
+  setDelta('bannerFindingsDelta', findingsToday, findingsYesterday, 'count');
+  setDelta('bannerTargetsDelta', targetsToday, targetsYesterday, 'count');
+  setDelta('statScansDelta', weekCount, prevWeekCount, 'percent');
+  setDelta('statCritDelta', criticalThisWeek, criticalPrevWeek, 'count');
+  setDelta('statTargDelta', targetsToday, targetsYesterday, 'count');
+  setDelta('statScoreDelta', avg, prevScoreAvg, 'percent');
+  setDelta('metricWeeklyDelta', weekCount, prevWeekCount, 'percent');
+  setDelta('metricMonthlyDelta', monthCount, prevMonthCount, 'percent');
 
   const maxBar = Math.max(totalCrit, totalHigh, totalMed, totalLow, 1);
   const pct = v => Math.round((v / maxBar) * 100) + '%';
@@ -966,6 +1082,23 @@ function updateStats() {
   setBar('barHigh2', 'valHigh2', totalHigh);
   setBar('barMedium2', 'valMedium2', totalMed);
   setBar('barLow2', 'valLow2', totalLow);
+
+  const activity = Array.isArray(serverSummary?.activity_30d) && serverSummary.activity_30d.length
+    ? serverSummary.activity_30d
+    : (() => {
+        const buckets = {};
+        for (let i = 29; i >= 0; i--) {
+          const d = new Date(now.getTime() - (i * dayMs));
+          const key = d.toISOString().slice(0, 10);
+          buckets[key] = 0;
+        }
+        scanDates.forEach((s) => {
+          const key = s.parsedDate.toISOString().slice(0, 10);
+          if (key in buckets) buckets[key] += 1;
+        });
+        return Object.entries(buckets).map(([date, count]) => ({ date, count }));
+      })();
+  renderActivityChart(activity);
 }
 
 function updateAnalytics() { updateStats(); renderFindingsPage(); }

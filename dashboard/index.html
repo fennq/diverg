@@ -176,13 +176,13 @@
               <div class="metric-block">
                 <div class="metric-label">Weekly</div>
                 <span class="metric-value" id="metricWeekly">0</span>
-                <span class="metric-delta">+19.6%</span>
+                <span class="metric-delta" id="metricWeeklyDelta">+0%</span>
                 <div class="metric-sub">Compared to last week</div>
               </div>
               <div class="metric-block">
                 <div class="metric-label">Monthly</div>
                 <span class="metric-value" id="metricMonthly">0</span>
-                <span class="metric-delta">+1.9%</span>
+                <span class="metric-delta" id="metricMonthlyDelta">+0%</span>
                 <div class="metric-sub">Compared to last month</div>
               </div>
             </div>
@@ -194,8 +194,8 @@
                     <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.02"/>
                   </linearGradient>
                 </defs>
-                <path d="M0 140 Q50 120, 80 130 T160 100 T240 110 T320 60 T400 80 T500 40 L500 160 L0 160 Z" fill="url(#chartGrad)"/>
-                <path d="M0 140 Q50 120, 80 130 T160 100 T240 110 T320 60 T400 80 T500 40" fill="none" stroke="var(--accent)" stroke-width="2"/>
+                <path id="activityChartFill" d="M0 140 L500 140 L500 160 L0 160 Z" fill="url(#chartGrad)"/>
+                <path id="activityChartLine" d="M0 140 L500 140" fill="none" stroke="var(--accent)" stroke-width="2"/>
               </svg>
             </div>
           </div>
