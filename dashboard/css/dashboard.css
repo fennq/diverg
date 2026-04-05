@@ -688,6 +688,24 @@ body {
 .evidence-row pre { background: rgba(0,0,0,0.2); padding: 8px 12px; border-radius: 4px; }
 
 .scan-summary-grid { margin-bottom: 14px; }
+.assessment-card { margin-bottom: 14px; }
+.assessment-headline {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.assessment-subtitle {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.assessment-score-help {
+  margin-top: 8px;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  font-family: var(--mono);
+}
 .scan-tab-panel { display: none; }
 .scan-tab-panel.active { display: block; }
 .analytics-grid-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }

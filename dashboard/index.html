@@ -251,8 +251,29 @@
       </div>
       <div class="progress-box" id="scanProgress"><div class="terminal" id="scanTerminal"></div></div>
       <div id="scanResults" style="display:none;">
+        <div class="card assessment-card" id="scanAssessmentCard">
+          <div class="card-header">
+            <span class="card-title">Overall Assessment</span>
+            <span id="scanAssessmentBadge" class="badge badge-info">Pending</span>
+          </div>
+          <div class="card-body">
+            <div class="assessment-headline" id="scanAssessmentHeadline">Scan not yet reviewed</div>
+            <div class="assessment-subtitle" id="scanAssessmentSubtitle">Run a scan to get a clear view of whether the site looks good or risky.</div>
+            <div class="assessment-score-help" id="scanAssessmentScoreHelp">Higher score is better.</div>
+            <div class="analytics-grid-two" style="margin-top:14px;margin-bottom:0;">
+              <div>
+                <div class="analytics-subtitle">What drives this assessment</div>
+                <div class="analytics-list" id="scanAssessmentReasons"></div>
+              </div>
+              <div>
+                <div class="analytics-subtitle">What to do first</div>
+                <div class="analytics-list" id="scanAssessmentActions"></div>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="stats-grid scan-summary-grid">
-          <div class="stat-card"><div class="stat-value" id="scanSummaryScore">0</div><div class="stat-label">Risk Score</div><div class="stat-meta" id="scanSummaryVerdict">Pending</div></div>
+          <div class="stat-card"><div class="stat-value" id="scanSummaryScore">0</div><div class="stat-label">Security Score</div><div class="stat-meta" id="scanSummaryVerdict">Higher is better</div></div>
           <div class="stat-card"><div class="stat-value" id="scanSummaryFindings">0</div><div class="stat-label">Findings</div><div class="stat-meta" id="scanSummarySeverities">0 critical / 0 high</div></div>
           <div class="stat-card"><div class="stat-value" id="scanSummaryVerified">0</div><div class="stat-label">Verified</div><div class="stat-meta" id="scanSummaryConfidence">0 high confidence</div></div>
           <div class="stat-card"><div class="stat-value" id="scanSummaryPaths">0</div><div class="stat-label">Attack Paths</div><div class="stat-meta" id="scanSummaryRoles">0 role signals</div></div>

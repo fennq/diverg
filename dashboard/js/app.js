@@ -310,6 +310,76 @@ function renderSimpleList(items, emptyText = 'No data') {
   return items.join('');
 }
 
+function buildAssessmentModel(report, findings, diagnostics) {
+  const verdict = report.risk_verdict || 'Unknown';
+  const score = typeof report.risk_score === 'number' ? report.risk_score : 0;
+  const critical = findings.filter((f) => f.severity === 'critical');
+  const high = findings.filter((f) => f.severity === 'high');
+  const verified = findings.filter((f) => f.verified);
+  const attackPaths = Array.isArray(report.attack_paths) ? report.attack_paths : [];
+  const guidance = Array.isArray(report.suggested_next_tests) ? report.suggested_next_tests : [];
+
+  const model = {
+    badgeClass: 'badge-info',
+    badgeText: 'Unknown',
+    headline: 'Mixed signal',
+    subtitle: 'The scan completed, but the overall posture needs manual review.',
+    scoreHelp: `Security score ${score}/100. Higher is better.`,
+    reasons: [],
+    actions: [],
+  };
+
+  if (verdict === 'Safe') {
+    model.badgeClass = 'badge-low';
+    model.badgeText = 'Looks Good';
+    model.headline = 'This site currently looks relatively healthy.';
+    model.subtitle = 'No major high-confidence exploit path is standing out from this scan.';
+  } else if (verdict === 'Caution') {
+    model.badgeClass = 'badge-medium';
+    model.badgeText = 'Needs Attention';
+    model.headline = 'This site is not obviously broken, but it needs attention.';
+    model.subtitle = 'The scan found issues that could matter depending on the site’s purpose, data sensitivity, or auth flows.';
+  } else if (verdict === 'Risky') {
+    model.badgeClass = 'badge-critical';
+    model.badgeText = 'Risky';
+    model.headline = 'This site currently looks high risk.';
+    model.subtitle = 'The scan found stronger indicators of exploitable or business-impacting security issues.';
+  }
+
+  if (critical.length) {
+    model.reasons.push(`<div class="analytics-item analytics-item-stack"><strong>${critical.length} critical finding${critical.length > 1 ? 's' : ''}</strong><span>Critical issues strongly push the site into a risky state.</span></div>`);
+  }
+  if (high.length) {
+    model.reasons.push(`<div class="analytics-item analytics-item-stack"><strong>${high.length} high-severity finding${high.length > 1 ? 's' : ''}</strong><span>High-severity findings mean the site needs attention even if the score is still decent.</span></div>`);
+  }
+  if (attackPaths.length) {
+    const topScore = attackPaths.reduce((max, p) => Math.max(max, Number(p.exploitability_score || 0)), 0);
+    model.reasons.push(`<div class="analytics-item analytics-item-stack"><strong>${attackPaths.length} attack path${attackPaths.length > 1 ? 's' : ''}</strong><span>The scanner found correlated issue chains with a top exploitability score of ${topScore}.</span></div>`);
+  }
+  if (verified.length) {
+    model.reasons.push(`<div class="analytics-item analytics-item-stack"><strong>${verified.length} verified finding${verified.length > 1 ? 's' : ''}</strong><span>Verified findings have direct evidence rather than just weak heuristics.</span></div>`);
+  }
+  if (diagnostics.length) {
+    model.reasons.push(`<div class="analytics-item analytics-item-stack"><strong>${diagnostics.length} scanner diagnostic${diagnostics.length > 1 ? 's' : ''}</strong><span>Some checks were blocked, errored, or incomplete, so absence of findings is not perfect proof of safety.</span></div>`);
+  }
+  if (!model.reasons.length) {
+    model.reasons.push('<div class="analytics-item analytics-item-stack"><strong>No major signal</strong><span>This scan did not surface strong evidence of exploitable issues.</span></div>');
+  }
+
+  const topFindings = [...critical, ...high].slice(0, 3);
+  topFindings.forEach((f) => {
+    model.actions.push(`<div class="analytics-item analytics-item-stack"><strong>Review: ${escHtml(f.title)}</strong><span>${escHtml(f.category || 'Security issue')}</span></div>`);
+  });
+  guidance.slice(0, 3).forEach((g) => {
+    model.actions.push(`<div class="analytics-item analytics-item-stack"><strong>${escHtml(g.action || 'Next step')}</strong><span>${escHtml(g.reason || '')}</span></div>`);
+  });
+  if (!model.actions.length) {
+    model.actions.push('<div class="analytics-item analytics-item-stack"><strong>No urgent action</strong><span>Monitor the site and re-scan after major changes.</span></div>');
+  }
+
+  return model;
+}
+
 function setupScanTabs() {
   const pills = document.querySelectorAll('#scanResultsTabs .toggle-pill');
   if (!pills.length) return;
@@ -345,9 +415,19 @@ function renderScanAnalytics(report, findings) {
   const runtime = Number(metrics.elapsed_sec || metrics.duration_sec || metrics.runtime_sec || 0);
   const pages = Number(metrics.pages_crawled || 0);
   const endpoints = Number(metrics.endpoints_found || 0);
+  const assessment = buildAssessmentModel(report, findings, diagnostics);
+
+  const badge = document.getElementById('scanAssessmentBadge');
+  badge.className = `badge ${assessment.badgeClass}`;
+  badge.textContent = assessment.badgeText;
+  document.getElementById('scanAssessmentHeadline').textContent = assessment.headline;
+  document.getElementById('scanAssessmentSubtitle').textContent = assessment.subtitle;
+  document.getElementById('scanAssessmentScoreHelp').textContent = assessment.scoreHelp;
+  document.getElementById('scanAssessmentReasons').innerHTML = renderSimpleList(assessment.reasons, 'No clear reasons');
+  document.getElementById('scanAssessmentActions').innerHTML = renderSimpleList(assessment.actions, 'No immediate actions');
 
   document.getElementById('scanSummaryScore').textContent = String(score);
-  document.getElementById('scanSummaryVerdict').textContent = verdict;
+  document.getElementById('scanSummaryVerdict').textContent = `Security score: higher is better · ${verdict}`;
   document.getElementById('scanSummaryFindings').textContent = String(findings.length);
   document.getElementById('scanSummarySeverities').textContent = `${summary.critical || 0} critical / ${summary.high || 0} high`;
   document.getElementById('scanSummaryVerified').textContent = String(verifiedCount);
