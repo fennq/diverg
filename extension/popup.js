@@ -47,6 +47,10 @@
     const findings = result.findings || [];
     const count = findings.length;
     const evidence = result.evidence_summary || {};
+    const filteredTotal = Number(result.filtered_out_total ?? evidence.filtered_out_total ?? 0);
+    const proofBundle = result.proof_bundle || {};
+    const proofCount = Number(proofBundle.total_bundles || 0);
+    const replayCandidates = Number(proofBundle.replay_candidates || 0);
     summaryCountEl.textContent = count === 0
       ? 'No issues found'
       : `${count} finding${count === 1 ? '' : 's'}${evidence.quality ? ` · evidence ${evidence.quality}` : ''}`;
@@ -78,6 +82,24 @@
       const rv = result.risk_verdict;
       chip.className = `severity-chip ${rv === 'Risky' ? 'critical' : rv === 'Caution' ? 'medium' : 'low'}`;
       chip.textContent = `Score ${result.risk_score}/100 · ${rv}`;
+      severityBarEl.appendChild(chip);
+    }
+
+    const strictChip = document.createElement('span');
+    strictChip.className = 'severity-chip info';
+    strictChip.textContent = `Strict: ${count}`;
+    severityBarEl.appendChild(strictChip);
+
+    if (filteredTotal > 0) {
+      const chip = document.createElement('span');
+      chip.className = 'severity-chip info';
+      chip.textContent = `Filtered: ${filteredTotal}`;
+      severityBarEl.appendChild(chip);
+    }
+    if (proofCount > 0) {
+      const chip = document.createElement('span');
+      chip.className = 'severity-chip info';
+      chip.textContent = `Proof: ${proofCount}${replayCandidates ? ` (${replayCandidates} replay)` : ''}`;
       severityBarEl.appendChild(chip);
     }
 

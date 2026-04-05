@@ -1280,25 +1280,52 @@ def _check_medium_finding_reproducible(f: dict, attempts: int = 2, timeout_sec: 
             expected = parts[1].strip().lower() if len(parts) > 1 else ""
         except Exception:
             return True
-        seen = 0
+        candidate_urls: list[str] = [url]
+        try:
+            first = _requests.get(url, timeout=timeout_sec, allow_redirects=True, verify=False)
+            final_url = str(getattr(first, "url", "") or "").strip()
+            if final_url.startswith(("http://", "https://")) and final_url not in candidate_urls:
+                candidate_urls.append(final_url)
+        except Exception:
+            pass
+        total_checks = 0
+        successful_checks = 0
         for _ in range(max(1, attempts)):
-            try:
-                resp = _requests.get(url, timeout=timeout_sec, allow_redirects=True, verify=False)
-                headers_l = {k.lower(): v for k, v in resp.headers.items()}
-                present = header_name.lower() in headers_l
-                if expected == "missing":
-                    ok = not present
-                elif expected == "present":
-                    ok = present
-                elif expected == "misconfigured":
-                    ok = present and not str(headers_l.get(header_name.lower()) or "").strip()
-                else:
-                    ok = present
-                if ok:
-                    seen += 1
-            except Exception:
-                continue
-        return seen >= max(1, attempts)
+            for check_url in candidate_urls:
+                total_checks += 1
+                try:
+                    resp = _requests.get(check_url, timeout=timeout_sec, allow_redirects=True, verify=False)
+                    headers_l = {k.lower(): v for k, v in resp.headers.items()}
+                    present = header_name.lower() in headers_l
+                    if expected == "missing":
+                        ok = not present
+                    elif expected == "present":
+                        ok = present
+                    elif expected == "misconfigured":
+                        value = str(headers_l.get(header_name.lower()) or "")
+                        if header_name.lower() == "strict-transport-security":
+                            v_l = value.lower()
+                            has_include_subdomains = "includesubdomains" in v_l
+                            max_age = None
+                            if "max-age=" in v_l:
+                                try:
+                                    max_age = int(v_l.split("max-age=", 1)[1].split(";", 1)[0].strip())
+                                except Exception:
+                                    max_age = None
+                            weak_max_age = max_age is not None and max_age < 31536000
+                            ok = present and (not has_include_subdomains or weak_max_age)
+                        else:
+                            ok = present and not value.strip()
+                    else:
+                        ok = present
+                    if ok:
+                        successful_checks += 1
+                except Exception:
+                    continue
+        if total_checks <= 0:
+            return True
+        # Require consistency across the final redirect target as well.
+        return successful_checks >= total_checks
 
     if "verbose error" in title_l or "internal path disclosure" in title_l:
         # Require repeated observation of error/path leakage markers.

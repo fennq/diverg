@@ -53,6 +53,10 @@
         var score = data.score;
         var verdict = data.verdict;
         var evidence = data.evidence_summary || {};
+        var filteredTotal = Number(data.filtered_out_total != null ? data.filtered_out_total : (evidence.filtered_out_total || 0));
+        var proofBundle = data.proof_bundle || {};
+        var proofTotal = Number(proofBundle.total_bundles || 0);
+        var replayCandidates = Number(proofBundle.replay_candidates || 0);
         var summaryText =
           data.summaryText != null && data.summaryText !== ''
             ? data.summaryText
@@ -66,6 +70,7 @@
           '<div class="scoreVerdict-summary">' + escapeHtml(summaryText) + '</div>' +
           '<div class="scoreVerdict-verdict">Verdict: ' + escapeHtml(verdict) + '</div>' +
           (evidence.quality ? '<div class="scoreVerdict-evidence">Evidence: ' + escapeHtml(evidence.quality) + ' · verified ' + escapeHtml(String(evidence.verified_count || 0)) + '/' + escapeHtml(String(evidence.total_findings || 0)) + '</div>' : '') +
+          '<div class="scoreVerdict-evidence">Strict: ' + escapeHtml(String((data.findings || []).length || 0)) + ' · Filtered: ' + escapeHtml(String(filteredTotal)) + (proofTotal ? (' · Proof: ' + escapeHtml(String(proofTotal)) + (replayCandidates ? (' (' + escapeHtml(String(replayCandidates)) + ' replay)') : '')) : '') + '</div>' +
           (evidence.finding_type_counts ? '<div class="scoreVerdict-types">' + (evidence.finding_type_counts.vulnerability ? '<span class="findingType findingType--vulnerability">' + evidence.finding_type_counts.vulnerability + ' real risk</span> ' : '') + (evidence.finding_type_counts.hardening ? '<span class="findingType findingType--hardening">' + evidence.finding_type_counts.hardening + ' hardening</span>' : '') + '</div>' : '') +
           '</div>' +
           '<div class="state-meta">' + escapeHtml(origin) + ' · ' + risks.length + ' findings' + durationStr + '</div>';

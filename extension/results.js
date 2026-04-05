@@ -254,10 +254,17 @@
     var s = report.summary;
     if (s) {
       var evidence = report.evidence_summary || {};
+      var filteredTotal = Number(report.filtered_out_total != null ? report.filtered_out_total : (evidence.filtered_out_total || 0));
+      var proofBundle = report.proof_bundle || {};
+      var proofTotal = Number(proofBundle.total_bundles || 0);
+      var replayCandidates = Number(proofBundle.replay_candidates || 0);
       summaryEl.textContent =
         'Total: ' + (s.total_findings || report.findings.length) +
         ' (Critical: ' + (s.critical || 0) + ', High: ' + (s.high || 0) + ', Medium: ' + (s.medium || 0) + ', Low: ' + (s.low || 0) + ', Info: ' + (s.info || 0) + ')' +
-        (evidence.quality ? ' · Evidence: ' + evidence.quality + ' · Verified: ' + (evidence.verified_count || 0) + '/' + (evidence.total_findings || report.findings.length) : '');
+        (evidence.quality ? ' · Evidence: ' + evidence.quality + ' · Verified: ' + (evidence.verified_count || 0) + '/' + (evidence.total_findings || report.findings.length) : '') +
+        ' · Strict: ' + (report.findings.length || 0) +
+        ' · Filtered: ' + filteredTotal +
+        (proofTotal ? (' · Proof: ' + proofTotal + (replayCandidates ? ' (' + replayCandidates + ' replay)' : '')) : '');
     } else {
       summaryEl.textContent = 'Findings: ' + report.findings.length;
     }
