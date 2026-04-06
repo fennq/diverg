@@ -523,23 +523,36 @@ def _scan_diff(previous_report: dict, current_report: dict) -> dict:
     }
 
 
+def _normalize_target_for_diff(target_url: str) -> str:
+    raw = str(target_url or "").strip().lower()
+    if not raw:
+        return ""
+    # Normalize only lightweight URL variance for matching:
+    # - trim trailing slash noise
+    # - collapse duplicated terminal slashes
+    raw = re.sub(r"/+$", "", raw)
+    return raw
+
+
 def _latest_previous_report_for_target(user_id: str, target_url: str) -> dict:
-    target_norm = str(target_url or "").strip().lower()
+    target_norm = _normalize_target_for_diff(target_url)
     if not user_id or not target_norm:
         return {}
     with _db() as conn:
-        row = conn.execute(
-            """SELECT report_json
+        rows = conn.execute(
+            """SELECT report_json, target_url
                FROM scans
                WHERE user_id = ?
-                 AND lower(target_url) = ?
                ORDER BY created_at DESC
-               LIMIT 1""",
-            (user_id, target_norm),
-        ).fetchone()
-    if not row:
+               LIMIT 40""",
+            (user_id,),
+        ).fetchall()
+    if not rows:
         return {}
-    return _safe_report_json(row["report_json"])
+    for row in rows:
+        if _normalize_target_for_diff(str(row["target_url"] or "")) == target_norm:
+            return _safe_report_json(row["report_json"])
+    return {}
 
 
 def _attach_scan_diff(result: dict, user_id: str) -> dict:

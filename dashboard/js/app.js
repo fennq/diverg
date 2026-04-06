@@ -631,6 +631,11 @@ function formatDiffBaselineTime(rawTs) {
   });
 }
 
+function sanitizeDiffRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter((x) => x && typeof x === 'object');
+}
+
 function renderScanDiff(report) {
   const diff = (report && report.scan_diff && typeof report.scan_diff === 'object') ? report.scan_diff : null;
   const hasBaseline = !!(diff && diff.has_baseline);
@@ -672,24 +677,29 @@ function renderScanDiff(report) {
     return `<div class="analytics-item analytics-item-stack"><strong>${escHtml(after.title || before.title || 'Untitled finding')}</strong><span>${escHtml((before.severity || 'info').toUpperCase())} → ${escHtml((after.severity || 'info').toUpperCase())}</span></div>`;
   };
 
+  const newRowsRaw = sanitizeDiffRows(diff?.new_findings);
+  const fixedRowsRaw = sanitizeDiffRows(diff?.fixed_findings);
+  const regressedRowsRaw = sanitizeDiffRows(diff?.regressed_findings).filter((x) => x.before || x.after);
+  const improvedRowsRaw = sanitizeDiffRows(diff?.improved_findings).filter((x) => x.before || x.after);
+
   const newList = document.getElementById('scanDiffNewList');
   if (newList) {
-    const rows = (diff?.new_findings || []).slice(0, 5).map(toFindingRow);
+    const rows = newRowsRaw.slice(0, 5).map(toFindingRow);
     newList.innerHTML = renderSimpleList(rows, hasBaseline ? 'No new findings in this run.' : 'Baseline run (no prior diff).');
   }
   const fixedList = document.getElementById('scanDiffFixedList');
   if (fixedList) {
-    const rows = (diff?.fixed_findings || []).slice(0, 5).map(toFindingRow);
+    const rows = fixedRowsRaw.slice(0, 5).map(toFindingRow);
     fixedList.innerHTML = renderSimpleList(rows, hasBaseline ? 'No fixed findings in this run.' : 'Baseline run (no prior diff).');
   }
   const regressedList = document.getElementById('scanDiffRegressedList');
   if (regressedList) {
-    const rows = (diff?.regressed_findings || []).slice(0, 5).map(toSeverityChangeRow);
+    const rows = regressedRowsRaw.slice(0, 5).map(toSeverityChangeRow);
     regressedList.innerHTML = renderSimpleList(rows, 'No severity regressions.');
   }
   const improvedList = document.getElementById('scanDiffImprovedList');
   if (improvedList) {
-    const rows = (diff?.improved_findings || []).slice(0, 5).map(toSeverityChangeRow);
+    const rows = improvedRowsRaw.slice(0, 5).map(toSeverityChangeRow);
     improvedList.innerHTML = renderSimpleList(rows, 'No severity improvements.');
   }
 }

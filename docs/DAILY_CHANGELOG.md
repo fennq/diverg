@@ -104,3 +104,5 @@ Copy this template for each new day:
 - **Operational Impact**
   - No auth or permissions model changes introduced with this pass.
   - No scan-engine skill selection changes were made; improvements are focused on result interpretation and usability.
+- **Closeout Artifact**
+  - Published end-of-cycle wrap-up with concrete before/after examples at `docs/TWO_WEEK_IMPROVEMENT_CLOSEOUT.md`.
