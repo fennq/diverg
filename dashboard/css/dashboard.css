@@ -710,6 +710,25 @@ body {
 }
 .scan-tab-panel { display: none; }
 .scan-tab-panel.active { display: block; }
+.telemetry-collapsible summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 16px 20px;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.telemetry-collapsible summary::-webkit-details-marker { display: none; }
+.telemetry-collapsible:not([open]) summary { border-bottom: none; }
+.telemetry-collapsible summary::after {
+  content: 'Show';
+  float: right;
+  color: var(--text-dim);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+.telemetry-collapsible[open] summary::after { content: 'Hide'; }
 .analytics-grid-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
 .analytics-grid-three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .mini-stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
@@ -1004,6 +1023,85 @@ body {
   font-size: 0.625rem;
   color: var(--text-dim);
   margin-top: 4px;
+}
+
+.evidence-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.625rem;
+  border: 1px solid var(--border-card);
+  color: var(--text-secondary);
+}
+
+.investigation-result {
+  border: 1px solid var(--border-card);
+  border-radius: var(--r-sm);
+  background: rgba(0,0,0,0.2);
+  padding: 12px;
+}
+
+.investigation-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.investigation-kv {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border-card);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.75rem;
+}
+
+.investigation-kv span:first-child { color: var(--text-dim); }
+.investigation-kv span:last-child { color: var(--text); font-family: var(--mono); }
+
+.investigation-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.investigation-list-item {
+  border: 1px solid var(--border-card);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.investigation-raw {
+  margin-top: 10px;
+  border: 1px solid var(--border-card);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+.investigation-raw summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.investigation-raw pre {
+  margin: 0;
+  border-top: 1px solid var(--border-card);
+  padding: 10px;
+  max-height: 260px;
+  overflow: auto;
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+  background: rgba(0,0,0,0.25);
 }
 
 /* ── Rewards — glass ─────────────────────────────────────────────── */

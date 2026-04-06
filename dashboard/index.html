@@ -116,7 +116,7 @@
           <div class="stat-value" id="statScans">0</div>
           <div class="stat-bottom">
             <span class="stat-label">Scans Run</span>
-            <span class="stat-delta up" id="statScansDelta">+12%</span>
+            <span class="stat-delta up" id="statScansDelta">+0%</span>
           </div>
         </div>
         <div class="stat-card">
@@ -127,7 +127,7 @@
           <div class="stat-value" id="statCritical">0</div>
           <div class="stat-bottom">
             <span class="stat-label">Critical Issues</span>
-            <span class="stat-delta up" id="statCritDelta">+3</span>
+            <span class="stat-delta up" id="statCritDelta">+0</span>
           </div>
         </div>
         <div class="stat-card">
@@ -138,7 +138,7 @@
           <div class="stat-value" id="statTargets">0</div>
           <div class="stat-bottom">
             <span class="stat-label">Targets</span>
-            <span class="stat-delta up" id="statTargDelta">+3</span>
+            <span class="stat-delta up" id="statTargDelta">+0</span>
           </div>
         </div>
         <div class="stat-card">
@@ -149,7 +149,7 @@
           <div class="stat-value" id="statScore">&mdash;</div>
           <div class="stat-bottom">
             <span class="stat-label">Sec Score</span>
-            <span class="stat-delta up" id="statScoreDelta">+22%</span>
+            <span class="stat-delta up" id="statScoreDelta">+0%</span>
           </div>
         </div>
       </div>
@@ -281,71 +281,97 @@
           <div class="stat-card"><div class="stat-value" id="scanSummaryFiltered">0</div><div class="stat-label">Filtered Signals</div><div class="stat-meta" id="scanSummaryFilteredNote">Strict mode active</div></div>
         </div>
         <div class="toggle-pills" id="scanResultsTabs" style="margin-bottom:14px;">
-          <div class="toggle-pill active" data-scan-tab="overview">Overview</div>
-          <div class="toggle-pill" data-scan-tab="findings">Findings</div>
+          <div class="toggle-pill active" data-scan-tab="findings">Findings</div>
+          <div class="toggle-pill" data-scan-tab="overview">Overview</div>
           <div class="toggle-pill" data-scan-tab="attack-paths">Attack Paths</div>
           <div class="toggle-pill" data-scan-tab="diagnostics">Diagnostics</div>
         </div>
-        <div class="scan-tab-panel active" id="scanTab-overview">
-          <div class="analytics-grid-two">
-            <div class="card">
-              <div class="card-header"><span class="card-title">Evidence Analytics</span></div>
-              <div class="card-body">
-                <div class="mini-stat-grid">
-                  <div class="mini-stat"><span class="mini-stat-label">Strict Findings</span><span class="mini-stat-value" id="scanEvidenceStrict">0</span></div>
-                  <div class="mini-stat"><span class="mini-stat-label">Filtered Signals</span><span class="mini-stat-value" id="scanEvidenceFiltered">0</span></div>
-                  <div class="mini-stat"><span class="mini-stat-label">Verified</span><span class="mini-stat-value" id="scanEvidenceVerified">0</span></div>
-                  <div class="mini-stat"><span class="mini-stat-label">High Confidence</span><span class="mini-stat-value" id="scanEvidenceHigh">0</span></div>
-                  <div class="mini-stat"><span class="mini-stat-label">Medium Confidence</span><span class="mini-stat-value" id="scanEvidenceMedium">0</span></div>
-                  <div class="mini-stat"><span class="mini-stat-label">Low Confidence</span><span class="mini-stat-value" id="scanEvidenceLow">0</span></div>
-                </div>
-                <div class="analytics-list" id="scanEvidenceSources"></div>
-                <div class="analytics-subtitle" style="margin-top:10px;">Why filtered</div>
-                <div class="analytics-list" id="scanFilteredBreakdown"></div>
-              </div>
-            </div>
-            <div class="card">
-              <div class="card-header"><span class="card-title">Category Analytics</span></div>
-              <div class="card-body"><div class="analytics-list" id="scanCategoryBreakdown"></div></div>
-            </div>
-          </div>
-          <div class="analytics-grid-two">
-            <div class="card">
-              <div class="card-header"><span class="card-title">Execution Analytics</span></div>
-              <div class="card-body">
-                <div class="mini-stat-grid">
-                  <div class="mini-stat"><span class="mini-stat-label">Duration</span><span class="mini-stat-value" id="scanMetricDuration">0s</span></div>
-                  <div class="mini-stat"><span class="mini-stat-label">Pages</span><span class="mini-stat-value" id="scanMetricPages">0</span></div>
-                  <div class="mini-stat"><span class="mini-stat-label">Endpoints</span><span class="mini-stat-value" id="scanMetricEndpoints">0</span></div>
-                  <div class="mini-stat"><span class="mini-stat-label">Skills</span><span class="mini-stat-value" id="scanMetricSkills">0</span></div>
-                  <div class="mini-stat"><span class="mini-stat-label">Diagnostics</span><span class="mini-stat-value" id="scanSummaryDiagnostics">0</span></div>
-                </div>
-                <div class="analytics-list" id="scanSkillsRun"></div>
-              </div>
-            </div>
-            <div class="card">
-              <div class="card-header"><span class="card-title">Classification & Guidance</span></div>
-              <div class="card-body">
-                <div class="analytics-list" id="scanClassification"></div>
-                <div class="analytics-list" id="scanGuidance"></div>
-              </div>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-header"><span class="card-title">Remediation Plan</span></div>
+        <div class="scan-tab-panel" id="scanTab-overview">
+          <details id="scanTelemetryDetails" class="card telemetry-collapsible">
+            <summary>Analyst Telemetry & Evidence Details</summary>
             <div class="card-body">
-              <div class="analytics-grid-three">
-                <div><div class="analytics-subtitle">Fix Now</div><div class="analytics-list" id="scanRemediationNow"></div></div>
-                <div><div class="analytics-subtitle">Fix Soon</div><div class="analytics-list" id="scanRemediationSoon"></div></div>
-                <div><div class="analytics-subtitle">Harden</div><div class="analytics-list" id="scanRemediationHarden"></div></div>
+              <div class="analytics-grid-two">
+                <div class="card">
+                  <div class="card-header"><span class="card-title">Evidence Analytics</span></div>
+                  <div class="card-body">
+                    <div class="mini-stat-grid">
+                      <div class="mini-stat"><span class="mini-stat-label">Strict Findings</span><span class="mini-stat-value" id="scanEvidenceStrict">0</span></div>
+                      <div class="mini-stat"><span class="mini-stat-label">Filtered Signals</span><span class="mini-stat-value" id="scanEvidenceFiltered">0</span></div>
+                      <div class="mini-stat"><span class="mini-stat-label">Verified</span><span class="mini-stat-value" id="scanEvidenceVerified">0</span></div>
+                      <div class="mini-stat"><span class="mini-stat-label">High Confidence</span><span class="mini-stat-value" id="scanEvidenceHigh">0</span></div>
+                      <div class="mini-stat"><span class="mini-stat-label">Medium Confidence</span><span class="mini-stat-value" id="scanEvidenceMedium">0</span></div>
+                      <div class="mini-stat"><span class="mini-stat-label">Low Confidence</span><span class="mini-stat-value" id="scanEvidenceLow">0</span></div>
+                    </div>
+                    <div class="analytics-list" id="scanEvidenceSources"></div>
+                    <div class="analytics-subtitle" style="margin-top:10px;">Why filtered</div>
+                    <div class="analytics-list" id="scanFilteredBreakdown"></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-header"><span class="card-title">Category Analytics</span></div>
+                  <div class="card-body"><div class="analytics-list" id="scanCategoryBreakdown"></div></div>
+                </div>
+              </div>
+              <div class="analytics-grid-two">
+                <div class="card">
+                  <div class="card-header"><span class="card-title">Execution Analytics</span></div>
+                  <div class="card-body">
+                    <div class="mini-stat-grid">
+                      <div class="mini-stat"><span class="mini-stat-label">Duration</span><span class="mini-stat-value" id="scanMetricDuration">0s</span></div>
+                      <div class="mini-stat"><span class="mini-stat-label">Pages</span><span class="mini-stat-value" id="scanMetricPages">0</span></div>
+                      <div class="mini-stat"><span class="mini-stat-label">Endpoints</span><span class="mini-stat-value" id="scanMetricEndpoints">0</span></div>
+                      <div class="mini-stat"><span class="mini-stat-label">Skills</span><span class="mini-stat-value" id="scanMetricSkills">0</span></div>
+                      <div class="mini-stat"><span class="mini-stat-label">Diagnostics</span><span class="mini-stat-value" id="scanSummaryDiagnostics">0</span></div>
+                    </div>
+                    <div class="analytics-list" id="scanSkillsRun"></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <div class="card-header"><span class="card-title">Classification & Guidance</span></div>
+                  <div class="card-body">
+                    <div class="analytics-list" id="scanClassification"></div>
+                    <div class="analytics-list" id="scanGuidance"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-header"><span class="card-title">Remediation Plan</span></div>
+                <div class="card-body">
+                  <div class="analytics-grid-three">
+                    <div><div class="analytics-subtitle">Fix Now</div><div class="analytics-list" id="scanRemediationNow"></div></div>
+                    <div><div class="analytics-subtitle">Fix Soon</div><div class="analytics-list" id="scanRemediationSoon"></div></div>
+                    <div><div class="analytics-subtitle">Harden</div><div class="analytics-list" id="scanRemediationHarden"></div></div>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          </details>
         </div>
-        <div class="scan-tab-panel" id="scanTab-findings">
+        <div class="scan-tab-panel active" id="scanTab-findings">
+          <div class="filter-bar">
+            <input type="text" class="input" id="scanFindingsSearch" placeholder="Search findings or categories...">
+            <select class="input" id="scanFindingsFilterSeverity" style="max-width:180px;">
+              <option value="all">All severities</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="info">Info</option>
+            </select>
+            <select class="input" id="scanFindingsFilterVerified" style="max-width:180px;">
+              <option value="all">All verification</option>
+              <option value="verified">Verified only</option>
+              <option value="unverified">Unverified only</option>
+            </select>
+            <select class="input" id="scanFindingsSort" style="max-width:180px;">
+              <option value="severity">Sort: Severity</option>
+              <option value="confidence">Sort: Confidence</option>
+              <option value="title">Sort: Title</option>
+            </select>
+          </div>
           <div class="card">
             <div class="card-header"><span class="card-title">Findings</span><span id="scanFindingsCount" style="font-family:var(--mono);font-size:0.75rem;color:var(--text-dim);"></span><button class="btn btn-ghost" onclick="clearScan()">Clear</button></div>
-            <div class="card-body flush"><div class="data-table" style="border:none;box-shadow:none;"><table><thead><tr><th class="col-num">#</th><th>Finding</th><th>Severity</th><th>Category</th><th>Confidence</th></tr></thead><tbody id="scanResultsBody"></tbody></table></div></div>
+            <div class="card-body flush"><div class="data-table" style="border:none;box-shadow:none;"><table><thead><tr><th class="col-num">#</th><th>Finding</th><th>Severity</th><th>Category</th><th>Confidence</th><th>Evidence</th></tr></thead><tbody id="scanResultsBody"></tbody></table></div></div>
           </div>
         </div>
         <div class="scan-tab-panel" id="scanTab-attack-paths">
@@ -381,18 +407,18 @@
     <div class="page" id="page-investigation">
       <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">Investigation</h1><p style="font-size:0.6875rem;color:var(--text-dim);margin-top:2px;">On-chain &amp; domain intelligence</p></div></div>
       <div class="tool-list">
-        <div class="tool-card"><div class="tool-header"><span class="tool-num">01</span><span class="tool-title">Wallet Lookup</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Balance, account shape, recent signatures</span></span></div><div class="tool-row"><input type="text" class="input input-mono" id="chainAddr" placeholder="0x... or Solana address"><button class="btn btn-primary" onclick="runChainLookup()">Lookup</button></div><div class="terminal" id="chainOut" style="display:none;margin-top:12px;"></div></div>
-        <div class="tool-card"><div class="tool-header"><span class="tool-num">02</span><span class="tool-title">Token Bundle</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Holder sampling, cluster analysis</span></span></div><div class="tool-row"><input type="text" class="input input-mono" id="tokenMint" placeholder="SPL mint address"><button class="btn btn-primary" onclick="runTokenBundle()">Analyze</button></div><div class="terminal" id="tokenOut" style="display:none;margin-top:12px;"></div></div>
-        <div class="tool-card"><div class="tool-header"><span class="tool-num">03</span><span class="tool-title">Domain OSINT</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">WHOIS, DNS, SSL cert info</span></span></div><div class="tool-row"><input type="text" class="input input-mono" id="osintDomain" placeholder="example.com"><button class="btn btn-primary" onclick="runOsint()">Investigate</button></div><div class="terminal" id="osintOut" style="display:none;margin-top:12px;"></div></div>
-        <div class="tool-card"><div class="tool-header"><span class="tool-num">04</span><span class="tool-title">PoC Simulator</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">IDOR and unauth access tests</span></span></div><div style="display:flex;gap:8px;margin-bottom:8px;"><select class="input" id="pocType" style="width:110px;"><option value="idor">IDOR</option><option value="unauth">Unauth</option></select><input type="text" class="input input-mono" id="pocUrl" placeholder="https://api.example.com/user/123" style="flex:1;"></div><button class="btn btn-primary" onclick="runPoc()">Simulate</button><div class="terminal" id="pocOut" style="display:none;margin-top:12px;"></div></div>
+        <div class="tool-card"><div class="tool-header"><span class="tool-num">01</span><span class="tool-title">Wallet Lookup</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Balance, account shape, recent signatures</span></span></div><div class="tool-row"><input type="text" class="input input-mono" id="chainAddr" placeholder="0x... or Solana address"><button class="btn btn-primary" onclick="runChainLookup()">Lookup</button></div><div class="investigation-result" id="chainResult" style="display:none;margin-top:12px;"></div><details class="investigation-raw" id="chainRawWrap" style="display:none;"><summary>Raw JSON</summary><pre id="chainRawJson"></pre></details></div>
+        <div class="tool-card"><div class="tool-header"><span class="tool-num">02</span><span class="tool-title">Token Bundle</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Holder sampling, cluster analysis</span></span></div><div class="tool-row"><input type="text" class="input input-mono" id="tokenMint" placeholder="SPL mint address"><button class="btn btn-primary" onclick="runTokenBundle()">Analyze</button></div><div class="investigation-result" id="tokenResult" style="display:none;margin-top:12px;"></div><details class="investigation-raw" id="tokenRawWrap" style="display:none;"><summary>Raw JSON</summary><pre id="tokenRawJson"></pre></details></div>
+        <div class="tool-card"><div class="tool-header"><span class="tool-num">03</span><span class="tool-title">Domain OSINT</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">WHOIS, DNS, SSL cert info</span></span></div><div class="tool-row"><input type="text" class="input input-mono" id="osintDomain" placeholder="example.com"><button class="btn btn-primary" onclick="runOsint()">Investigate</button></div><div class="investigation-result" id="osintResult" style="display:none;margin-top:12px;"></div><details class="investigation-raw" id="osintRawWrap" style="display:none;"><summary>Raw JSON</summary><pre id="osintRawJson"></pre></details></div>
+        <div class="tool-card"><div class="tool-header"><span class="tool-num">04</span><span class="tool-title">PoC Simulator</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">IDOR and unauth access tests</span></span></div><div style="display:flex;gap:8px;margin-bottom:8px;"><select class="input" id="pocType" style="width:110px;"><option value="idor">IDOR</option><option value="unauth">Unauth</option></select><input type="text" class="input input-mono" id="pocUrl" placeholder="https://api.example.com/user/123" style="flex:1;"></div><button class="btn btn-primary" onclick="runPoc()">Simulate</button><div class="investigation-result" id="pocResult" style="display:none;margin-top:12px;"></div><details class="investigation-raw" id="pocRawWrap" style="display:none;"><summary>Raw JSON</summary><pre id="pocRawJson"></pre></details></div>
       </div>
     </div>
 
     <!-- ══════════ FINDINGS ══════════ -->
     <div class="page" id="page-findings">
       <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">Findings</h1></div></div>
-      <div class="toggle-pills" id="findingsTabs" style="margin-bottom:14px;"><div class="toggle-pill active" data-filter="all">All</div><div class="toggle-pill" data-filter="critical">Critical</div><div class="toggle-pill" data-filter="high">High</div><div class="toggle-pill" data-filter="medium">Medium</div><div class="toggle-pill" data-filter="low">Low</div></div>
-      <div class="filter-bar"><input type="text" class="input" id="findingsSearch" placeholder="Search findings..."><select class="input" id="findingsSort" style="max-width:160px;"><option value="newest">Newest</option><option value="severity">Severity</option></select></div>
+      <div class="toggle-pills" id="findingsTabs" style="margin-bottom:14px;"><div class="toggle-pill active" data-filter="all">All</div><div class="toggle-pill" data-filter="critical">Critical</div><div class="toggle-pill" data-filter="high">High</div><div class="toggle-pill" data-filter="medium">Medium</div><div class="toggle-pill" data-filter="low">Low</div><div class="toggle-pill" data-filter="verified">Verified</div></div>
+      <div class="filter-bar"><input type="text" class="input" id="findingsSearch" placeholder="Search findings..."><select class="input" id="findingsSort" style="max-width:160px;"><option value="newest">Newest</option><option value="severity">Severity</option><option value="confidence">Confidence</option><option value="title">Title</option></select></div>
       <div class="data-table"><table><thead><tr><th class="col-num">#</th><th>Title</th><th>Severity</th><th>Category</th><th>Confidence</th><th>Target</th><th>Date</th></tr></thead><tbody id="findingsBody"><tr><td colspan="7"><div class="empty"><div class="empty-title">No findings</div><div class="empty-desc">Run a scan to discover vulnerabilities</div></div></td></tr></tbody></table></div>
     </div>
 
@@ -404,7 +430,7 @@
         <div class="stat-card"><div class="stat-value" style="color:var(--red);" id="analyticsCritical">0</div><div class="stat-label">Critical</div></div>
         <div class="stat-card"><div class="stat-value" style="color:var(--orange);" id="analyticsHigh">0</div><div class="stat-label">High</div></div>
         <div class="stat-card"><div class="stat-value" style="color:var(--accent);" id="analyticsScore">0</div><div class="stat-label">Avg Score</div></div>
-        <div class="stat-card"><div class="stat-value" style="color:var(--green);" id="analyticsStrictFindings">0</div><div class="stat-label">Strict Findings</div></div>
+        <div class="stat-card"><div class="stat-value" style="color:var(--green);" id="analyticsStrictFindings">0</div><div class="stat-label">Severity-Tagged Issues</div></div>
         <div class="stat-card"><div class="stat-value" id="analyticsFilteredSignals">0</div><div class="stat-label">Filtered Signals</div></div>
         <div class="stat-card"><div class="stat-value" id="analyticsProofBundles">0</div><div class="stat-label">Proof Bundles</div></div>
         <div class="stat-card"><div class="stat-value" id="analyticsProofReplayCandidates">0</div><div class="stat-label">Replay Candidates</div></div>

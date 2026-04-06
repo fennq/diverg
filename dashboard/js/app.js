@@ -42,6 +42,9 @@ let serverFindings = [];
 let serverSummary = null;
 let currentUser = null;
 let lastScanReport = null;
+let currentScanFindings = [];
+let currentHistoryWindow = 'all';
+let currentFindingsFilter = 'all';
 
 // ── Init ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -81,6 +84,38 @@ document.addEventListener('DOMContentLoaded', () => {
       pill.classList.add('active');
     });
   });
+
+  document.querySelectorAll('#findingsTabs .toggle-pill').forEach((pill) => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('#findingsTabs .toggle-pill').forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+      currentFindingsFilter = pill.dataset.filter || 'all';
+      renderFindingsPage();
+    });
+  });
+
+  const findingsSearch = document.getElementById('findingsSearch');
+  if (findingsSearch) findingsSearch.addEventListener('input', () => renderFindingsPage());
+  const findingsSort = document.getElementById('findingsSort');
+  if (findingsSort) findingsSort.addEventListener('change', () => renderFindingsPage());
+
+  document.querySelectorAll('#historyTabs .toggle-pill').forEach((pill) => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('#historyTabs .toggle-pill').forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+      currentHistoryWindow = pill.dataset.time || 'all';
+      renderHistory();
+    });
+  });
+
+  const scanSearch = document.getElementById('scanFindingsSearch');
+  const scanSeverity = document.getElementById('scanFindingsFilterSeverity');
+  const scanVerified = document.getElementById('scanFindingsFilterVerified');
+  const scanSort = document.getElementById('scanFindingsSort');
+  if (scanSearch) scanSearch.addEventListener('input', () => applyScanFindingFilters());
+  if (scanSeverity) scanSeverity.addEventListener('change', () => applyScanFindingFilters());
+  if (scanVerified) scanVerified.addEventListener('change', () => applyScanFindingFilters());
+  if (scanSort) scanSort.addEventListener('change', () => applyScanFindingFilters());
 
   document.addEventListener('click', e => {
     if (!e.target.closest('.user') && !e.target.closest('.user-menu'))
@@ -303,6 +338,107 @@ function escHtml(v) {
     .replace(/>/g, '&gt;');
 }
 
+function severityRank(sev) {
+  const map = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+  return map[String(sev || '').toLowerCase()] ?? 5;
+}
+
+function confidenceRank(conf) {
+  const map = { high: 0, medium: 1, low: 2 };
+  return map[String(conf || '').toLowerCase()] ?? 3;
+}
+
+function findingEvidence(f) {
+  return String((f && (f.evidence || f.proof)) || '').trim();
+}
+
+function normalizeFinding(f = {}) {
+  return {
+    title: f.title || 'Untitled finding',
+    severity: String(f.severity || 'low').toLowerCase(),
+    category: f.category || 'Other',
+    confidence: String(f.confidence || '').toLowerCase(),
+    verified: !!f.verified,
+    evidence: findingEvidence(f),
+  };
+}
+
+function normalizeFindings(list) {
+  return (Array.isArray(list) ? list : []).map((f) => normalizeFinding(f));
+}
+
+function filteredOutTotal(report) {
+  const evidence = report?.evidence_summary || {};
+  return Number(report?.filtered_out_total ?? evidence.filtered_out_total ?? 0);
+}
+
+function filteredOutBreakdown(report) {
+  const evidence = report?.evidence_summary || {};
+  return report?.filtered_out_breakdown || evidence.filtered_out_breakdown || {};
+}
+
+function runtimeSeconds(metrics = {}) {
+  return Number(metrics.elapsed_sec || metrics.duration_sec || metrics.runtime_sec || 0);
+}
+
+function verdictDisplay(report = {}) {
+  const verdict = String(report.risk_verdict || '').trim();
+  if (verdict) return verdict;
+  const summary = String(report.risk_summary || '').trim();
+  if (!summary) return 'Unknown';
+  const firstSentence = summary.split('.').map((x) => x.trim()).filter(Boolean)[0];
+  return firstSentence || summary.slice(0, 80);
+}
+
+function verdictBadge(verdict) {
+  const v = String(verdict || '').toLowerCase();
+  if (v.includes('safe') || v.includes('low')) return { cls: 'badge-low', text: 'Low Risk' };
+  if (v.includes('caution') || v.includes('moderate') || v.includes('elevated')) return { cls: 'badge-medium', text: 'Needs Attention' };
+  if (v.includes('risky') || v.includes('high')) return { cls: 'badge-critical', text: 'High Risk' };
+  return { cls: 'badge-info', text: 'Unknown' };
+}
+
+function scoreOutOf100(v) {
+  if (typeof v !== 'number' || Number.isNaN(v)) return 'n/a';
+  return String(Math.max(0, Math.min(100, Math.round(v))));
+}
+
+function setInvestigationRaw(kind, data) {
+  const wrap = document.getElementById(`${kind}RawWrap`);
+  const pre = document.getElementById(`${kind}RawJson`);
+  if (!wrap || !pre) return;
+  wrap.style.display = 'block';
+  pre.textContent = JSON.stringify(data || {}, null, 2);
+}
+
+function renderInvestigationCard(kind, cfg) {
+  const box = document.getElementById(`${kind}Result`);
+  if (!box) return;
+  box.style.display = 'block';
+  const badge = verdictBadge(cfg.verdict || cfg.status || '');
+  const kvRows = (cfg.metrics || []).map(([k, v]) => (
+    `<div class="investigation-kv"><span>${escHtml(k)}</span><span>${escHtml(v)}</span></div>`
+  )).join('');
+  const listRows = (cfg.topItems || []).map((txt) => (
+    `<div class="investigation-list-item">${escHtml(txt)}</div>`
+  )).join('');
+  box.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+      <div style="font-size:0.8125rem;font-weight:700;color:var(--text);">${escHtml(cfg.title || 'Result')}</div>
+      <span class="badge ${badge.cls}">${escHtml(badge.text)}</span>
+    </div>
+    <div style="margin-top:6px;color:var(--text-secondary);font-size:0.75rem;">${escHtml(cfg.subtitle || '')}</div>
+    <div class="investigation-grid">${kvRows || ''}</div>
+    <div class="investigation-list">${listRows || ''}</div>
+  `;
+}
+
+function getFindingsPageList() {
+  return serverFindings.length
+    ? serverFindings
+    : JSON.parse(localStorage.getItem('dv_findings') || '[]');
+}
+
 function renderSimpleList(items, emptyText = 'No data') {
   if (!Array.isArray(items) || !items.length) {
     return `<div class="analytics-empty">${emptyText}</div>`;
@@ -395,6 +531,72 @@ function setupScanTabs() {
   });
 }
 
+function setActiveScanTab(tab) {
+  const pills = document.querySelectorAll('#scanResultsTabs .toggle-pill');
+  pills.forEach((p) => p.classList.toggle('active', p.dataset.scanTab === tab));
+  document.querySelectorAll('.scan-tab-panel').forEach((panel) => {
+    panel.classList.toggle('active', panel.id === `scanTab-${tab}`);
+  });
+}
+
+function getScanFilteredFindings() {
+  const q = String(document.getElementById('scanFindingsSearch')?.value || '').trim().toLowerCase();
+  const sev = String(document.getElementById('scanFindingsFilterSeverity')?.value || 'all');
+  const verifiedMode = String(document.getElementById('scanFindingsFilterVerified')?.value || 'all');
+  const sortMode = String(document.getElementById('scanFindingsSort')?.value || 'severity');
+
+  let out = [...currentScanFindings];
+  if (sev !== 'all') out = out.filter((f) => f.severity === sev);
+  if (verifiedMode === 'verified') out = out.filter((f) => f.verified);
+  if (verifiedMode === 'unverified') out = out.filter((f) => !f.verified);
+  if (q) {
+    out = out.filter((f) =>
+      String(f.title || '').toLowerCase().includes(q) ||
+      String(f.category || '').toLowerCase().includes(q) ||
+      String(f.evidence || '').toLowerCase().includes(q)
+    );
+  }
+  out.sort((a, b) => {
+    if (sortMode === 'confidence') return confidenceRank(a.confidence) - confidenceRank(b.confidence) || severityRank(a.severity) - severityRank(b.severity);
+    if (sortMode === 'title') return String(a.title || '').localeCompare(String(b.title || ''));
+    return severityRank(a.severity) - severityRank(b.severity) || confidenceRank(a.confidence) - confidenceRank(b.confidence);
+  });
+  return out;
+}
+
+function renderScanFindingsTable() {
+  const body = document.getElementById('scanResultsBody');
+  const countEl = document.getElementById('scanFindingsCount');
+  if (!body || !countEl) return;
+  const findings = getScanFilteredFindings();
+  countEl.textContent = `${findings.length} issue${findings.length === 1 ? '' : 's'}`;
+  if (!findings.length) {
+    body.innerHTML = `<tr><td colspan="6"><div class="empty"><div class="empty-title">No matching findings</div><div class="empty-desc">Adjust filters or search terms.</div></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = findings.map((f, idx) => {
+    const verifiedBadge = f.verified ? '<span style="color:#22c55e;font-size:0.7rem;margin-left:4px;" title="Verified">&#x2713;</span>' : '';
+    const confLabel = f.confidence ? `<span class="conf-${f.confidence}" style="font-size:0.6875rem;">${escHtml(f.confidence)}</span>` : '';
+    const evTag = f.evidence
+      ? `<button class="btn btn-ghost" style="padding:4px 8px;font-size:0.625rem;" onclick="toggleEvidenceRow('scan-ev-${idx}')">View evidence</button>`
+      : `<span class="evidence-tag">No direct evidence</span>`;
+    const evidenceRow = f.evidence
+      ? `<tr class="evidence-row" id="scan-ev-${idx}" style="display:none;"><td></td><td colspan="5"><pre style="white-space:pre-wrap;font-size:0.75rem;color:var(--text-dim);margin:0;max-height:220px;overflow:auto;">${escHtml(f.evidence)}</pre></td></tr>`
+      : '';
+    return `<tr><td class="col-num">${idx + 1}</td><td class="col-primary">${escHtml(f.title)}${verifiedBadge}</td><td><span class="badge badge-${escHtml(f.severity)}">${escHtml(f.severity)}</span></td><td>${escHtml(f.category)}</td><td>${confLabel}</td><td>${evTag}</td></tr>${evidenceRow}`;
+  }).join('');
+}
+
+function toggleEvidenceRow(rowId) {
+  const row = document.getElementById(rowId);
+  if (!row) return;
+  row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+}
+
+function applyScanFindingFilters() {
+  renderScanFindingsTable();
+}
+
 function renderScanAnalytics(report, findings) {
   lastScanReport = report || {};
   const summary = report.summary || {};
@@ -410,15 +612,15 @@ function renderScanAnalytics(report, findings) {
   const siteClass = report.site_classification || {};
   const confidenceCounts = evidence.confidence_counts || {};
   const verifiedCount = evidence.verified_count || findings.filter((f) => f.verified).length;
-  const filteredTotal = Number(report.filtered_out_total ?? evidence.filtered_out_total ?? 0);
-  const filteredBreakdown = report.filtered_out_breakdown || evidence.filtered_out_breakdown || {};
+  const filteredTotal = filteredOutTotal(report);
+  const filteredBreakdown = filteredOutBreakdown(report);
   const proofBundle = (report.proof_bundle && typeof report.proof_bundle === 'object') ? report.proof_bundle : {};
   const proofCount = Number(proofBundle.total_bundles || 0);
   const replayCandidates = Number(proofBundle.replay_candidates || 0);
   const provenance = (report.report_provenance && typeof report.report_provenance === 'object') ? report.report_provenance : {};
   const score = typeof report.risk_score === 'number' ? report.risk_score : 0;
-  const verdict = report.risk_verdict || report.risk_summary || 'Unknown';
-  const runtime = Number(metrics.elapsed_sec || metrics.duration_sec || metrics.runtime_sec || 0);
+  const verdict = verdictDisplay(report);
+  const runtime = runtimeSeconds(metrics);
   const pages = Number(metrics.pages_crawled || 0);
   const endpoints = Number(metrics.endpoints_found || 0);
   const assessment = buildAssessmentModel(report, findings, diagnostics);
@@ -625,6 +827,10 @@ async function launchScan() {
 
     progressBox.classList.remove('show');
     showScanResults(url, scope, findings, attackPaths, report);
+    const autoNav = document.getElementById('prefAutoNav');
+    if (!autoNav || autoNav.checked) {
+      setActiveScanTab('findings');
+    }
     syncDashboardData();
   } catch (err) {
     termLine(terminal, ts() + ' Scan failed: ' + err.message, 'red');
@@ -634,28 +840,10 @@ async function launchScan() {
 
 function showScanResults(url, scope, findingsInput, pathsInput, report) {
   const container = document.getElementById('scanResults');
-  const body = document.getElementById('scanResultsBody');
-  const countEl = document.getElementById('scanFindingsCount');
-
-  const findings = (Array.isArray(findingsInput) ? findingsInput : []).map((f) => ({
-    title: f.title || 'Untitled finding',
-    severity: String(f.severity || 'low').toLowerCase(),
-    category: f.category || 'Other',
-    confidence: f.confidence || '',
-    verified: !!f.verified,
-    evidence: f.evidence || f.proof || '',
-  }));
-  const severityOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
-  findings.sort((a, b) => (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5));
-
-  countEl.textContent = findings.length + ' issues';
-
-  body.innerHTML = findings.map((f, idx) => {
-    const verifiedBadge = f.verified ? '<span style="color:#22c55e;font-size:0.7rem;margin-left:4px;" title="Verified">&#x2713;</span>' : '';
-    const confLabel = f.confidence ? `<span class="conf-${f.confidence}" style="font-size:0.6875rem;">${f.confidence}</span>` : '';
-    const evidenceRow = f.evidence ? `<tr class="evidence-row" id="ev-${idx}" style="display:none;"><td></td><td colspan="4"><pre style="white-space:pre-wrap;font-size:0.75rem;color:var(--text-dim);margin:0;max-height:200px;overflow:auto;">${f.evidence.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre></td></tr>` : '';
-    return `<tr style="cursor:pointer;" onclick="var r=document.getElementById('ev-${idx}');if(r)r.style.display=r.style.display==='none'?'table-row':'none';"><td class="col-num">${idx + 1}</td><td class="col-primary">${f.title}${verifiedBadge}</td><td><span class="badge badge-${f.severity}">${f.severity}</span></td><td>${f.category}</td><td>${confLabel}</td></tr>${evidenceRow}`;
-  }).join('');
+  const findings = normalizeFindings(findingsInput);
+  findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+  currentScanFindings = findings;
+  applyScanFindingFilters();
 
   container.style.display = 'block';
 
@@ -715,17 +903,43 @@ function renderFindings(newFindings, url) {
 }
 
 function renderFindingsPage() {
-  const findings = serverFindings.length
-    ? serverFindings
-    : JSON.parse(localStorage.getItem('dv_findings') || '[]');
+  const findings = getFindingsPageList();
   const body = document.getElementById('findingsBody');
-  if (!body || !findings.length) return;
+  if (!body) return;
+  const search = String(document.getElementById('findingsSearch')?.value || '').trim().toLowerCase();
+  const sort = String(document.getElementById('findingsSort')?.value || 'newest');
+  let out = [...findings];
 
-  body.innerHTML = findings.slice(0, 50).map((f, i) => {
+  if (currentFindingsFilter === 'verified') {
+    out = out.filter((f) => !!f.verified);
+  } else if (currentFindingsFilter !== 'all') {
+    out = out.filter((f) => String(f.severity || '').toLowerCase() === currentFindingsFilter);
+  }
+  if (search) {
+    out = out.filter((f) =>
+      String(f.title || '').toLowerCase().includes(search) ||
+      String(f.category || '').toLowerCase().includes(search) ||
+      String(f.target || '').toLowerCase().includes(search)
+    );
+  }
+  out.sort((a, b) => {
+    if (sort === 'severity') return severityRank(a.severity) - severityRank(b.severity);
+    if (sort === 'confidence') return confidenceRank(a.confidence) - confidenceRank(b.confidence);
+    if (sort === 'title') return String(a.title || '').localeCompare(String(b.title || ''));
+    const ad = parseDateSafe(a.date)?.getTime() || 0;
+    const bd = parseDateSafe(b.date)?.getTime() || 0;
+    return bd - ad;
+  });
+
+  if (!out.length) {
+    body.innerHTML = `<tr><td colspan="7"><div class="empty"><div class="empty-title">No findings</div><div class="empty-desc">Try a different filter or run a new scan.</div></div></td></tr>`;
+    return;
+  }
+  body.innerHTML = out.slice(0, 50).map((f, i) => {
     const sev = (f.severity || 'low').toLowerCase();
     const verifiedBadge = f.verified ? '<span style="color:#22c55e;font-size:0.7rem;margin-left:4px;" title="Verified">&#x2713;</span>' : '';
     const confLabel = f.confidence ? `<span style="font-size:0.6875rem;color:var(--text-dim);">${f.confidence}</span>` : '';
-    return `<tr><td class="col-num">${i + 1}</td><td class="col-primary">${f.title}${verifiedBadge}</td><td><span class="badge badge-${sev}">${sev}</span></td><td>${f.category}</td><td>${confLabel}</td><td class="col-mono" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;">${f.target || ''}</td><td class="col-mono">${f.date || ''}</td></tr>`;
+    return `<tr><td class="col-num">${i + 1}</td><td class="col-primary">${escHtml(f.title)}${verifiedBadge}</td><td><span class="badge badge-${sev}">${sev}</span></td><td>${escHtml(f.category)}</td><td>${confLabel}</td><td class="col-mono" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;">${escHtml(f.target || '')}</td><td class="col-mono">${escHtml(f.date || '')}</td></tr>`;
   }).join('');
 }
 
@@ -738,60 +952,75 @@ function clearScan() {
 function runChainLookup() {
   const addr = document.getElementById('chainAddr').value.trim();
   if (!addr) return;
-  const out = document.getElementById('chainOut');
-  out.style.display = 'block'; out.innerHTML = '';
-  termLine(out, ts() + ' Validating address...', 'dim');
-  termLine(out, ts() + ' Running blockchain lookup...', 'accent');
+  renderInvestigationCard('chain', {
+    title: 'Wallet Lookup',
+    subtitle: 'Running blockchain lookup...',
+    status: 'pending',
+    metrics: [],
+    topItems: [],
+  });
   const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
-  withProgress(out, 'Blockchain lookup', () => apiJson('/api/investigation/blockchain', {
+  apiJson('/api/investigation/blockchain', {
     address: addr,
     network: (localStorage.getItem('dv_helius_network') || 'mainnet'),
     helius_api_key: heliusApiKey,
-  }))
+  })
     .then((data) => {
-      termLine(out, '', null);
-      termLine(out, ts() + ' Backend responded', 'green');
-      termLine(out, 'Address : ' + (data.address || addr), null);
-      termLine(out, 'Chain   : ' + (data.chain || 'unknown'), null);
       const s = data.summary || {};
-      if (data.chain === 'evm') {
-        if (s.balance_eth) termLine(out, 'Balance : ' + s.balance_eth + ' ETH', 'green');
-        if (s.tx_count !== undefined) termLine(out, 'Txns    : ' + s.tx_count, null);
-      } else {
-        if (s.balance_sol !== undefined) termLine(out, 'Balance : ' + s.balance_sol + ' SOL', 'green');
-        if (s.recent_signatures !== undefined) termLine(out, 'Txns    : ' + s.recent_signatures, null);
-      }
-      if (data.error) termLine(out, 'Note    : ' + data.error, 'yellow');
-      if (data.intelligence_notice) termLine(out, 'Intel   : ' + data.intelligence_notice, 'dim');
+      const metrics = [
+        ['Address', data.address || addr],
+        ['Chain', data.evm_chain ? `evm (${data.evm_chain})` : (data.chain || 'unknown')],
+        ['Balance', s.eth_approx != null ? `${s.eth_approx} native` : (s.sol_approx != null ? `${s.sol_approx} native` : 'n/a')],
+        ['Transactions', s.etherscan_recent_tx_count ?? s.recent_signatures_count ?? 'n/a'],
+      ];
+      const topItems = [];
+      if (data.error) topItems.push(`Note: ${data.error}`);
+      if (data.intelligence_notice) topItems.push(data.intelligence_notice);
       const caps = data.intelligence_capabilities || {};
       if (caps.provider === 'arkham') {
         const capStatus = caps.available ? 'enabled (server-managed)' : 'unavailable on server';
-        termLine(out, 'Intel   : Arkham ' + capStatus, caps.available ? 'green' : 'yellow');
+        topItems.push(`Arkham: ${capStatus}`);
       }
       const ak = data.arkham;
       if (ak) {
-        if (ak.explorer_url) termLine(out, 'Arkham  : ' + ak.explorer_url, 'dim');
         const sm = ak.summary || {};
         const label = sm.entity_name || sm.label_name || '';
-        if (label) termLine(out, 'Intel   : ' + label, 'green');
-        if (ak.error) termLine(out, 'Arkham  : ' + ak.error, 'yellow');
-        else if (ak.ok === false && !label) termLine(out, 'Arkham  : no summary returned', 'yellow');
+        if (label) topItems.push(`Arkham label: ${label}`);
+        if (ak.explorer_url) topItems.push(`Arkham URL: ${ak.explorer_url}`);
+        if (ak.error) topItems.push(`Arkham note: ${ak.error}`);
       }
+      renderInvestigationCard('chain', {
+        title: 'Wallet Lookup',
+        subtitle: `Professional summary for ${data.address || addr}`,
+        verdict: data.error ? 'caution' : 'safe',
+        metrics,
+        topItems: topItems.slice(0, 6),
+      });
+      setInvestigationRaw('chain', data);
     })
-    .catch((err) => termLine(out, ts() + ' Lookup failed: ' + err.message, 'red'));
+    .catch((err) => {
+      renderInvestigationCard('chain', {
+        title: 'Wallet Lookup',
+        subtitle: `Lookup failed: ${err.message}`,
+        verdict: 'risky',
+        metrics: [['Address', addr]],
+        topItems: ['Check address format, API connectivity, and server authentication state.'],
+      });
+      setInvestigationRaw('chain', { error: err.message });
+    });
 }
 
 function runTokenBundle() {
   const mint = document.getElementById('tokenMint').value.trim();
   if (!mint) return;
-  const out = document.getElementById('tokenOut');
-  out.style.display = 'block'; out.innerHTML = '';
-  termLine(out, ts() + ' Validating mint address...', 'dim');
-  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
-    termLine(out, ts() + ' Warning: mint format looks unusual (continuing)', 'yellow');
-  }
+  renderInvestigationCard('token', {
+    title: 'Token Bundle Analysis',
+    subtitle: 'Running Solana token bundle analysis...',
+    status: 'pending',
+    metrics: [],
+    topItems: [],
+  });
   const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
-  termLine(out, ts() + ' Running full token bundle analysis...', 'accent');
   const payload = {
     mint,
     scan_all_holders: true,
@@ -799,116 +1028,153 @@ function runTokenBundle() {
     include_x_intel: true,
   };
   if (heliusApiKey) payload.helius_api_key = heliusApiKey;
-  withProgress(out, 'Token bundle analysis', () => apiJson('/api/investigation/solana-bundle', payload))
+  apiJson('/api/investigation/solana-bundle', payload)
     .then((data) => {
-      termLine(out, '', null);
-      termLine(out, ts() + ' Backend responded', 'green');
-      termLine(out, 'Mint       : ' + mint, null);
       if (data.error) {
-        termLine(out, 'Error      : ' + data.error, 'red');
-        const capsErr = data.intelligence_capabilities || {};
-        if (capsErr.provider === 'arkham' && capsErr.available === false) {
-          termLine(out, 'Intel      : Arkham unavailable on server (platform config required)', 'yellow');
-        }
+        renderInvestigationCard('token', {
+          title: 'Token Bundle Analysis',
+          subtitle: `Analysis unavailable: ${data.error}`,
+          verdict: 'risky',
+          metrics: [['Mint', mint]],
+          topItems: ['Server-side intelligence may be unavailable.'],
+        });
+        setInvestigationRaw('token', data);
         return;
       }
       const caps = data.intelligence_capabilities || {};
-      if (caps.provider === 'arkham') {
-        const capStatus = caps.available ? 'enabled (server-managed)' : 'unavailable on server';
-        termLine(out, 'Intel      : Arkham ' + capStatus, caps.available ? 'green' : 'yellow');
-      }
       const holderCount =
         data.params?.unique_holders_sampled ??
         data.top_holders?.length ??
         data.holder_count ??
         data.holders_count;
-      if (holderCount !== undefined) termLine(out, 'Holders    : ' + holderCount, null);
-
-      const clusterWalletCount = data.cluster_wallet_count ?? (Array.isArray(data.focus_cluster_wallets) ? data.focus_cluster_wallets.length : undefined);
-      if (clusterWalletCount !== undefined) termLine(out, 'Cluster    : ' + clusterWalletCount + ' wallets', 'yellow');
-
-      if (data.cluster_pct_supply !== undefined) {
-        termLine(out, 'Cluster %  : ' + data.cluster_pct_supply + '% supply', 'yellow');
+      const clusterWalletCount = data.cluster_wallet_count ?? (Array.isArray(data.focus_cluster_wallets) ? data.focus_cluster_wallets.length : 0);
+      const riskVerdict = data.risk_verdict || 'Unknown';
+      const riskScore = data.risk_score !== undefined ? `${data.risk_score}/100` : 'n/a';
+      const metrics = [
+        ['Mint', mint],
+        ['Risk', `${riskVerdict} (${riskScore})`],
+        ['Sampled holders', holderCount ?? 'n/a'],
+        ['Cluster wallets', clusterWalletCount ?? 'n/a'],
+        ['Cluster supply %', data.cluster_pct_supply ?? 'n/a'],
+      ];
+      const topItems = [];
+      if (data.risk_summary) topItems.push(`Summary: ${String(data.risk_summary).slice(0, 180)}`);
+      if (caps.provider === 'arkham') {
+        topItems.push(`Arkham: ${caps.available ? 'enabled (server-managed)' : 'unavailable on server'}`);
       }
-
-      if (data.risk_verdict || data.risk_score !== undefined) {
-        const riskVerdict = data.risk_verdict || 'Unknown';
-        const riskScore = data.risk_score !== undefined ? (' (' + data.risk_score + '/100)') : '';
-        const riskCls = /lower/i.test(riskVerdict) ? 'green' : /elevated|moderate/i.test(riskVerdict) ? 'yellow' : 'dim';
-        termLine(out, 'Risk       : ' + riskVerdict + riskScore, riskCls);
-      }
-
-      if (data.risk_summary) {
-        termLine(out, 'Summary    : ' + String(data.risk_summary).slice(0, 220), 'dim');
-      }
-      const ab = data.arkham;
-      if (ab && typeof ab === 'object') {
-        const n = ab.labeled_count != null ? ab.labeled_count : Object.keys(ab.batch_labels || {}).length;
-        if (n) termLine(out, 'Arkham     : ' + n + ' labeled wallet(s) in batch', 'dim');
-        if (ab.error) termLine(out, 'Arkham     : ' + ab.error, 'yellow');
-      }
-
-      const reasons = Array.isArray(data.risk_signals) ? data.risk_signals.slice(0, 3) : [];
-      reasons.forEach((r, i) => termLine(out, 'Signal ' + (i + 1) + '  : ' + String(r).slice(0, 200), 'dim'));
-
-      const topHolders = Array.isArray(data.top_holders) ? data.top_holders.slice(0, 3) : [];
-      topHolders.forEach((h, i) => {
-        const owner = h.owner || h.wallet || 'unknown';
-        const pct = h.pct_supply ?? h.pct ?? '';
-        termLine(out, 'Top ' + (i + 1) + '      : ' + owner.slice(0, 12) + '...' + owner.slice(-6) + (pct !== '' ? (' (' + pct + '%)') : ''), 'dim');
+      (Array.isArray(data.risk_signals) ? data.risk_signals.slice(0, 3) : []).forEach((sig) => {
+        topItems.push(`Signal: ${String(sig).slice(0, 180)}`);
       });
+      renderInvestigationCard('token', {
+        title: 'Token Bundle Analysis',
+        subtitle: 'Analyst summary with curated token risk indicators',
+        verdict: riskVerdict,
+        metrics,
+        topItems: topItems.slice(0, 7),
+      });
+      setInvestigationRaw('token', data);
     })
-    .catch((err) => termLine(out, ts() + ' Bundle analysis failed: ' + err.message, 'red'));
+    .catch((err) => {
+      renderInvestigationCard('token', {
+        title: 'Token Bundle Analysis',
+        subtitle: `Analysis failed: ${err.message}`,
+        verdict: 'risky',
+        metrics: [['Mint', mint]],
+        topItems: ['Check API auth and token mint validity.'],
+      });
+      setInvestigationRaw('token', { error: err.message });
+    });
 }
 
 function runOsint() {
   const domain = document.getElementById('osintDomain').value.trim();
   if (!domain) return;
-  const out = document.getElementById('osintOut');
-  out.style.display = 'block'; out.innerHTML = '';
-  termLine(out, ts() + ' Validating domain...', 'dim');
-  termLine(out, ts() + ' Running domain investigation...', 'accent');
-  withProgress(out, 'Domain OSINT', () => apiJson('/api/investigation/domain', { domain }))
+  renderInvestigationCard('osint', {
+    title: 'Domain OSINT',
+    subtitle: 'Running domain investigation...',
+    status: 'pending',
+    metrics: [],
+    topItems: [],
+  });
+  apiJson('/api/investigation/domain', { domain })
     .then((data) => {
-      termLine(out, '', null);
-      termLine(out, ts() + ' Backend responded', 'green');
-      termLine(out, 'Domain      : ' + (data.domain || domain), null);
-      termLine(out, 'Findings    : ' + (data.findings_count || (Array.isArray(data.findings) ? data.findings.length : 0)), 'yellow');
+      const findingsCount = data.findings_count || (Array.isArray(data.findings) ? data.findings.length : 0);
       const os = data.osint || {};
       const rc = data.recon || {};
       const hs = data.headers_ssl || {};
-      if (os.registrar) termLine(out, 'Registrar   : ' + os.registrar, null);
-      if (os.created || os.creation_date) termLine(out, 'Created     : ' + (os.created || os.creation_date), null);
-      if (rc.subdomains_found !== undefined) termLine(out, 'Subdomains  : ' + rc.subdomains_found, null);
-      if (hs.ssl_valid !== undefined) termLine(out, 'SSL Valid   : ' + hs.ssl_valid, hs.ssl_valid ? 'green' : 'red');
-      const top = Array.isArray(data.findings) ? data.findings.slice(0, 3) : [];
-      top.forEach((f, i) => termLine(out, 'Top ' + (i + 1) + '      : ' + (f.title || f.category || 'Finding'), 'dim'));
+      const metrics = [
+        ['Domain', data.domain || domain],
+        ['Findings', findingsCount],
+        ['Registrar', os.registrar || 'n/a'],
+        ['Created', os.created || os.creation_date || 'n/a'],
+        ['Subdomains', rc.subdomains_found ?? 'n/a'],
+        ['SSL valid', hs.ssl_valid === undefined ? 'n/a' : (hs.ssl_valid ? 'yes' : 'no')],
+      ];
+      const topItems = (Array.isArray(data.findings) ? data.findings.slice(0, 3) : [])
+        .map((f) => `${f.title || f.category || 'Finding'}`);
+      renderInvestigationCard('osint', {
+        title: 'Domain OSINT',
+        subtitle: 'External intel and infrastructure context',
+        verdict: findingsCount > 0 ? 'caution' : 'safe',
+        metrics,
+        topItems,
+      });
+      setInvestigationRaw('osint', data);
     })
-    .catch((err) => termLine(out, ts() + ' OSINT failed: ' + err.message, 'red'));
+    .catch((err) => {
+      renderInvestigationCard('osint', {
+        title: 'Domain OSINT',
+        subtitle: `OSINT failed: ${err.message}`,
+        verdict: 'risky',
+        metrics: [['Domain', domain]],
+        topItems: [],
+      });
+      setInvestigationRaw('osint', { error: err.message });
+    });
 }
 
 function runPoc() {
   const type = document.getElementById('pocType').value;
   const url = document.getElementById('pocUrl').value.trim();
   if (!url) return;
-  const out = document.getElementById('pocOut');
-  out.style.display = 'block'; out.innerHTML = '';
   const apiType = type === 'unauth' ? 'unauthenticated' : type;
-  termLine(out, ts() + ' Validating target URL & PoC type...', 'dim');
-  termLine(out, ts() + ' Running PoC simulation (' + apiType + ')...', 'accent');
-  withProgress(out, 'PoC simulation', () => apiJson('/api/poc/simulate', { type: apiType, url, verbose: true }))
+  renderInvestigationCard('poc', {
+    title: 'PoC Simulation',
+    subtitle: `Running ${apiType} simulation...`,
+    status: 'pending',
+    metrics: [],
+    topItems: [],
+  });
+  apiJson('/api/poc/simulate', { type: apiType, url, verbose: true })
     .then((data) => {
-      termLine(out, '', null);
-      termLine(out, ts() + ' Backend responded', 'green');
-      termLine(out, 'Success    : ' + !!data.success, data.success ? 'green' : 'red');
-      if (data.status_code !== undefined && data.status_code !== null) {
-        termLine(out, 'HTTP       : ' + data.status_code, null);
-      }
-      if (data.conclusion) termLine(out, 'Conclusion : ' + data.conclusion, data.success ? 'green' : 'yellow');
-      if (data.error) termLine(out, 'Error      : ' + data.error, 'red');
-      if (data.body_preview) termLine(out, 'Preview    : ' + String(data.body_preview).slice(0, 220), 'dim');
+      const metrics = [
+        ['PoC type', apiType],
+        ['Success', data.success ? 'yes' : 'no'],
+        ['HTTP', data.status_code ?? 'n/a'],
+      ];
+      const topItems = [];
+      if (data.conclusion) topItems.push(`Conclusion: ${data.conclusion}`);
+      if (data.error) topItems.push(`Error: ${data.error}`);
+      if (data.body_preview) topItems.push(`Preview: ${String(data.body_preview).slice(0, 180)}`);
+      renderInvestigationCard('poc', {
+        title: 'PoC Simulation',
+        subtitle: 'Controlled simulation results',
+        verdict: data.success ? 'safe' : 'caution',
+        metrics,
+        topItems,
+      });
+      setInvestigationRaw('poc', data);
     })
-    .catch((err) => termLine(out, ts() + ' PoC failed: ' + err.message, 'red'));
+    .catch((err) => {
+      renderInvestigationCard('poc', {
+        title: 'PoC Simulation',
+        subtitle: `Simulation failed: ${err.message}`,
+        verdict: 'risky',
+        metrics: [['PoC type', apiType]],
+        topItems: [],
+      });
+      setInvestigationRaw('poc', { error: err.message });
+    });
 }
 
 // ── History & Stats ──────────────────────────────────────────────────────
@@ -990,7 +1256,17 @@ function renderHistory() {
   const scans = serverScans.length
     ? serverScans
     : JSON.parse(localStorage.getItem('dv_scans') || '[]');
-  if (!scans.length) return;
+  const now = Date.now();
+  const maxAgeMs = currentHistoryWindow === '24h' ? 24 * 60 * 60 * 1000
+    : currentHistoryWindow === '7d' ? 7 * 24 * 60 * 60 * 1000
+      : currentHistoryWindow === '30d' ? 30 * 24 * 60 * 60 * 1000
+        : null;
+  const filteredScans = maxAgeMs == null
+    ? scans
+    : scans.filter((s) => {
+      const t = parseDateSafe(s.date)?.getTime();
+      return t && (now - t) <= maxAgeMs;
+    });
 
   const makeRows = (list) => list.map((s, i) =>
     `<tr><td class="col-num">${i + 1}</td><td class="col-primary col-mono">${s.url}</td><td><span class="badge badge-info">${s.scope}</span></td><td>${s.findings}</td><td>${s.score}/100</td><td class="col-mono">${s.date}</td><td><button class="btn btn-ghost" onclick="exportScanById('${String(s.id || '').replace(/'/g, '&#39;')}')">Export</button></td></tr>`
@@ -998,15 +1274,23 @@ function renderHistory() {
 
   const hb = document.getElementById('historyBody');
   const hsb = document.getElementById('homeScansBody');
-  if (hb) hb.innerHTML = makeRows(scans);
-  if (hsb) hsb.innerHTML = makeRows(scans.slice(0, 8));
+  if (hb) {
+    hb.innerHTML = filteredScans.length
+      ? makeRows(filteredScans)
+      : `<tr><td colspan="7"><div class="empty"><div class="empty-title">No history in selected window</div><div class="empty-desc">Change the time filter or run a new scan.</div></div></td></tr>`;
+  }
+  if (hsb) {
+    hsb.innerHTML = scans.length
+      ? makeRows(scans.slice(0, 8))
+      : `<tr><td colspan="6"><div class="empty"><div class="empty-title">No scans yet</div><div class="empty-desc">Launch a scan to get started.</div></div></td></tr>`;
+  }
 
   const rf = document.getElementById('homeRecentFindings');
   const findings = (serverFindings.length ? serverFindings : JSON.parse(localStorage.getItem('dv_findings') || '[]')).slice(0, 5);
-  if (rf && findings.length) {
-    rf.innerHTML = findings.map(f =>
+  if (rf) {
+    rf.innerHTML = findings.length ? findings.map(f =>
       `<tr><td class="col-primary" style="font-size:0.75rem;">${f.title}</td><td><span class="badge badge-${(f.severity || 'low').toLowerCase()}">${f.severity}</span></td><td class="col-mono" style="font-size:0.625rem;color:var(--text-dim);">${f.date || ''}</td></tr>`
-    ).join('');
+    ).join('') : `<tr><td colspan="3"><div class="empty" style="padding:20px;"><div class="empty-desc">No findings yet</div></div></td></tr>`;
   }
 }
 
@@ -1138,6 +1422,8 @@ function updateStats() {
   setDelta('metricWeeklyDelta', weekCount, prevWeekCount, 'percent');
   setDelta('metricMonthlyDelta', monthCount, prevMonthCount, 'percent');
 
+  set('bannerPointsDelta', 'Live');
+
   const maxBar = Math.max(totalCrit, totalHigh, totalMed, totalLow, 1);
   const pct = v => Math.round((v / maxBar) * 100) + '%';
   const setBar = (fillId, valId, v) => {
@@ -1204,17 +1490,16 @@ async function syncDashboardData() {
     if (findingsRes.ok) {
       const findingsData = await findingsRes.json();
       serverFindings = (findingsData.findings || []).map(row => {
-        const f = row.finding || {};
-        const sev = String(f.severity || 'low').toLowerCase();
+        const f = normalizeFinding(row.finding || {});
         return {
-          title: f.title || 'Untitled finding',
-          severity: sev,
-          category: f.category || 'Other',
+          title: f.title,
+          severity: f.severity,
+          category: f.category,
           target: row.target_url || '',
           date: row.scanned_at || '',
           confidence: f.confidence || '',
-          verified: !!f.verified,
-          evidence: f.evidence || f.proof || '',
+          verified: f.verified,
+          evidence: f.evidence,
         };
       });
       localStorage.setItem('dv_findings', JSON.stringify(serverFindings.slice(0, 2000)));
@@ -1317,6 +1602,14 @@ function loadSettings() {
   document.getElementById('apiUrl').value = getApiUrl();
   document.getElementById('heliusKey').value = localStorage.getItem('dv_helius_key') || '';
   document.getElementById('heliusNetwork').value = localStorage.getItem('dv_helius_network') || 'mainnet';
+  const prefAutoNav = document.getElementById('prefAutoNav');
+  if (prefAutoNav) {
+    const stored = localStorage.getItem('dv_pref_auto_nav');
+    prefAutoNav.checked = stored == null ? true : stored === '1';
+    prefAutoNav.addEventListener('change', () => {
+      localStorage.setItem('dv_pref_auto_nav', prefAutoNav.checked ? '1' : '0');
+    });
+  }
 }
 
 function exportData() {
