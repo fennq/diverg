@@ -741,14 +741,41 @@ function renderScanFindingsTable() {
   }
   body.innerHTML = findings.map((f, idx) => {
     const verifiedBadge = f.verified ? '<span style="color:#22c55e;font-size:0.7rem;margin-left:4px;" title="Verified">&#x2713;</span>' : '';
-    const confLabel = f.confidence ? `<span class="conf-${f.confidence}" style="font-size:0.6875rem;">${escHtml(f.confidence)}</span>` : '';
-    const evTag = f.evidence
-      ? `<button class="btn btn-ghost" style="padding:4px 8px;font-size:0.625rem;" onclick="toggleEvidenceRow('scan-ev-${idx}')">View evidence</button>`
-      : `<span class="evidence-tag">No direct evidence</span>`;
-    const evidenceRow = f.evidence
-      ? `<tr class="evidence-row" id="scan-ev-${idx}" style="display:none;"><td></td><td colspan="5"><pre style="white-space:pre-wrap;font-size:0.75rem;color:var(--text-dim);margin:0;max-height:220px;overflow:auto;">${escHtml(f.evidence)}</pre></td></tr>`
-      : '';
-    return `<tr><td class="col-num">${idx + 1}</td><td class="col-primary">${escHtml(f.title)}${verifiedBadge}</td><td><span class="badge badge-${escHtml(f.severity)}">${escHtml(f.severity)}</span></td><td>${escHtml(f.category)}</td><td>${confLabel}</td><td>${evTag}</td></tr>${evidenceRow}`;
+    const confLabel = f.confidence
+      ? `<span class="conf-${f.confidence}" style="font-size:0.6875rem;">${escHtml(f.confidence)}</span>`
+      : '<span style="font-size:0.6875rem;color:var(--text-dim);">n/a</span>';
+    const proofButton = f.evidence
+      ? `<button class="btn btn-ghost trust-action-btn" onclick="toggleEvidenceRow('scan-ev-${idx}')">View proof</button>`
+      : '<span class="evidence-tag">No direct proof</span>';
+    const fpButton = `<button class="btn btn-ghost trust-action-btn" onclick="markFindingFalsePositive(${idx})">Mark FP</button>`;
+    const why = `Severity ${escHtml(f.severity)} in ${escHtml(f.category)} with ${escHtml(f.confidence || 'unknown')} confidence.`;
+    const fix = `Review remediation guidance for this category and re-run scan after patching.`;
+    const proof = f.evidence ? escHtml(f.evidence) : 'No direct evidence captured in this run.';
+    const evidenceRow = `
+      <tr class="evidence-row" id="scan-ev-${idx}" style="display:none;">
+        <td></td>
+        <td colspan="5">
+          <div class="trust-details-grid">
+            <div class="trust-detail">
+              <span class="trust-label">What was found</span>
+              <p>${escHtml(f.title)}</p>
+            </div>
+            <div class="trust-detail">
+              <span class="trust-label">Why it matters</span>
+              <p>${why}</p>
+            </div>
+            <div class="trust-detail">
+              <span class="trust-label">Proof</span>
+              <pre>${proof}</pre>
+            </div>
+            <div class="trust-detail">
+              <span class="trust-label">Fix first</span>
+              <p>${fix}</p>
+            </div>
+          </div>
+        </td>
+      </tr>`;
+    return `<tr><td class="col-num">${idx + 1}</td><td class="col-primary">${escHtml(f.title)}${verifiedBadge}</td><td><span class="badge badge-${escHtml(f.severity)}">${escHtml(f.severity)}</span></td><td>${escHtml(f.category)}</td><td>${confLabel}</td><td><div class="trust-actions">${proofButton}${fpButton}</div></td></tr>${evidenceRow}`;
   }).join('');
 }
 
@@ -756,6 +783,17 @@ function toggleEvidenceRow(rowId) {
   const row = document.getElementById(rowId);
   if (!row) return;
   row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+}
+
+async function markFindingFalsePositive(index) {
+  const finding = currentScanFindings[index];
+  if (!finding) return;
+  try {
+    const out = await apiJson('/api/findings/false-positive', { finding });
+    alert(out.added ? 'Marked as false positive and learning rule added.' : 'Already known false positive pattern.');
+  } catch (err) {
+    alert('Failed to mark false positive: ' + err.message);
+  }
 }
 
 function applyScanFindingFilters() {

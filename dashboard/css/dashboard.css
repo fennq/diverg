@@ -688,6 +688,55 @@ body {
 
 .evidence-row td { border-top: none !important; padding-top: 0 !important; }
 .evidence-row pre { background: rgba(0,0,0,0.2); padding: 8px 12px; border-radius: 4px; }
+.trust-actions {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.trust-action-btn {
+  padding: 4px 8px;
+  font-size: 0.625rem;
+}
+
+.trust-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.trust-detail {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.trust-label {
+  display: block;
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.trust-detail p {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.trust-detail pre {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
 
 .scan-summary-grid { margin-bottom: 14px; }
 .assessment-card { margin-bottom: 14px; }
@@ -787,7 +836,8 @@ body {
   .analytics-grid-two,
   .analytics-grid-three,
   .mini-stat-grid,
-  .scan-guide-list {
+  .scan-guide-list,
+  .trust-details-grid {
     grid-template-columns: 1fr;
   }
 }
