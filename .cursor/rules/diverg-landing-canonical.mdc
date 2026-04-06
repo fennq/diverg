@@ -1,0 +1,18 @@
+---
+description: Marketing site and whitepaper — diverg-landing is canonical, not Sectester website/
+alwaysApply: true
+---
+
+# Diverg marketing site — use `diverg-landing`, not Sectester
+
+The **public landing site and documentation pages served at divergsec.com** are maintained in the **separate repository `diverg-landing`** (on this machine typically **`/Users/fen/Documents/diverg-landing`**, sibling to Sectester). It is **not** the same tree as this monorepo’s minimal `website/` or `resources/docs/` copies.
+
+## When changing copy, CTAs, or structure
+
+- **Whitepaper**, **roadmap-style pages**, **hero/footers**, **Request booking / Diverg Auto** messaging, **resources hub**, and **any HTML that ships on divergsec.com** → **edit and commit in `diverg-landing`**, then push from an account that has access to **`fennq/diverg-landing`**.
+- **Do not** assume that editing `website/` or `resources/docs/` under **Sectester** updates the live site. Those paths may be stubs, mirrors, or unused in production.
+- If a task mentions “landing page,” “marketing site,” “divergsec.com,” or “whitepaper” **without** explicitly saying “only the copy inside Sectester,” **default to `diverg-landing`**. Optionally sync or duplicate changes in Sectester **only if** the user asks for both repos to stay aligned.
+
+## Verification
+
+After marketing edits, grep **`diverg-landing`** for old strings (e.g. demo, lite product naming) and ensure **`git push`** for that repo succeeds (correct GitHub identity for `fennq/diverg-landing`).
