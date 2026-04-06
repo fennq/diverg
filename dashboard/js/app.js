@@ -117,21 +117,35 @@ document.addEventListener('DOMContentLoaded', () => {
   if (scanVerified) scanVerified.addEventListener('change', () => applyScanFindingFilters());
   if (scanSort) scanSort.addEventListener('change', () => applyScanFindingFilters());
 
-  document.addEventListener('click', e => {
-    if (!e.target.closest('.user') && !e.target.closest('.user-menu'))
-      document.getElementById('userMenu').classList.remove('show');
+  document.addEventListener('click', (e) => {
+    const userMenu = document.getElementById('userMenu');
+    if (
+      userMenu &&
+      !e.target.closest('.user') &&
+      !e.target.closest('.user-menu')
+    ) {
+      userMenu.classList.remove('show');
+    }
   });
   const avatarFileInput = document.getElementById('avatarFileInput');
   if (avatarFileInput) {
     avatarFileInput.addEventListener('change', onAvatarFileSelected);
   }
 
-  document.getElementById('quickUrl').addEventListener('keydown', e => {
-    if (e.key === 'Enter') {
-      const v = e.target.value.trim();
-      if (v) { navigate('scanner'); document.getElementById('scanUrl').value = v; launchScan(); }
-    }
-  });
+  const quickUrl = document.getElementById('quickUrl');
+  if (quickUrl) {
+    quickUrl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const v = e.target.value.trim();
+        const scanUrl = document.getElementById('scanUrl');
+        if (v && scanUrl) {
+          navigate('scanner');
+          scanUrl.value = v;
+          launchScan();
+        }
+      }
+    });
+  }
 
   loadSettings();
   loadUserProfile();
@@ -390,14 +404,6 @@ function verdictDisplay(report = {}) {
   return firstSentence || summary.slice(0, 80);
 }
 
-function verdictBadge(verdict) {
-  const v = String(verdict || '').toLowerCase();
-  if (v.includes('safe') || v.includes('low')) return { cls: 'badge-low', text: 'Low Risk' };
-  if (v.includes('caution') || v.includes('moderate') || v.includes('elevated')) return { cls: 'badge-medium', text: 'Needs Attention' };
-  if (v.includes('risky') || v.includes('high')) return { cls: 'badge-critical', text: 'High Risk' };
-  return { cls: 'badge-info', text: 'Unknown' };
-}
-
 function scoreOutOf100(v) {
   if (typeof v !== 'number' || Number.isNaN(v)) return 'n/a';
   return String(Math.max(0, Math.min(100, Math.round(v))));
@@ -411,26 +417,168 @@ function setInvestigationRaw(kind, data) {
   pre.textContent = JSON.stringify(data || {}, null, 2);
 }
 
-function renderInvestigationCard(kind, cfg) {
-  const box = document.getElementById(`${kind}Result`);
+function tokenVerdictBadge(verdict) {
+  const v = String(verdict || '').trim().toLowerCase();
+  if (v.includes('lower')) {
+    return {
+      cls: 'badge-low',
+      text: 'Mostly diffuse (sample)',
+      hint: 'In this holder sample, coordination stayed relatively low.',
+    };
+  }
+  if (v.includes('moderate')) {
+    return {
+      cls: 'badge-medium',
+      text: 'Mixed — worth a look',
+      hint: 'Some overlapping funding or cluster hints; not automatically malicious.',
+    };
+  }
+  if (v.includes('elevated')) {
+    return {
+      cls: 'badge-medium',
+      text: 'Elevated coordination',
+      hint: 'Stronger funding-pattern overlap in the sample and/or a larger clustered stake. Still a heuristic — verify manually.',
+    };
+  }
+  return { cls: 'badge-info', text: verdict || 'Unknown', hint: '' };
+}
+
+function tokenSignalHumanize(sig) {
+  const raw = String(sig);
+  const s = raw.toLowerCase();
+  if (s.startsWith('bridge_mixer:')) {
+    return 'Bridge- or mixer-style wording showed up on a funding path (see raw JSON for the exact line).';
+  }
+  if (s.includes('same_first_fund')) {
+    return 'Several holders received their first on-chain funds in very similar amounts — a coordination hint, not proof.';
+  }
+  if (s.includes('cex_strong_funder')) {
+    return 'A large share of sampled holders were first funded from exchange-style addresses.';
+  }
+  if (s.includes('parallel_cex_funder')) {
+    return 'Multiple holders show loosely aligned CEX-style funding timing or paths.';
+  }
+  if (s.includes('weak_custodial')) {
+    return 'Weak text heuristics suggested custodial / exchange-like labeling (low confidence alone).';
+  }
+  if (s.includes('mixer_keyword')) {
+    return 'A label or entity string matched mixer-related vocabulary — context matters.';
+  }
+  if (s.startsWith('venue:')) {
+    return 'A venue-style tag appeared on a funder path in this sample.';
+  }
+  return 'Heuristic from the bundle model — open raw JSON for the exact definition.';
+}
+
+function formatTokenPct(n) {
+  if (n === null || n === undefined || n === '') return '—';
+  const x = Number(n);
+  if (Number.isNaN(x)) return String(n);
+  if (x < 0.01) return '<0.01%';
+  return `${x.toFixed(2)}%`;
+}
+
+function renderTokenBundleLoading(deep) {
+  const box = document.getElementById('tokenResult');
   if (!box) return;
   box.style.display = 'block';
-  const badge = verdictBadge(cfg.verdict || cfg.status || '');
-  const kvRows = (cfg.metrics || []).map(([k, v]) => (
-    `<div class="investigation-kv"><span>${escHtml(k)}</span><span>${escHtml(v)}</span></div>`
-  )).join('');
-  const listRows = (cfg.topItems || []).map((txt) => (
-    `<div class="investigation-list-item">${escHtml(txt)}</div>`
-  )).join('');
+  const note = deep
+    ? 'Deep scan — often 1–3+ minutes (more holders and Arkham lookups).'
+    : 'Standard scan — often ~30–90s depending on mint size and APIs.';
   box.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-      <div style="font-size:0.8125rem;font-weight:700;color:var(--text);">${escHtml(cfg.title || 'Result')}</div>
-      <span class="badge ${badge.cls}">${escHtml(badge.text)}</span>
-    </div>
-    <div style="margin-top:6px;color:var(--text-secondary);font-size:0.75rem;">${escHtml(cfg.subtitle || '')}</div>
-    <div class="investigation-grid">${kvRows || ''}</div>
-    <div class="investigation-list">${listRows || ''}</div>
-  `;
+    <div class="token-bundle-report token-bundle-report--loading">
+      <div class="token-bundle-loading-title">Running holder sample…</div>
+      <p class="token-bundle-loading-note">${escHtml(note)}</p>
+      <div class="token-bundle-skeleton" aria-hidden="true"></div>
+    </div>`;
+}
+
+function renderTokenBundleError(mint, headline, detail) {
+  const box = document.getElementById('tokenResult');
+  if (!box) return;
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div class="token-bundle-report">
+      <div class="token-bundle-header">
+        <div>
+          <h3 class="token-bundle-h3">${escHtml(headline)}</h3>
+          <p class="token-bundle-lede">${escHtml(detail)}</p>
+        </div>
+        <span class="badge badge-critical">Unavailable</span>
+      </div>
+      <div class="token-mini-mono" title="${escHtml(mint)}">Mint: ${escHtml(mint)}</div>
+    </div>`;
+}
+
+function renderTokenBundleSuccess(mint, data) {
+  const box = document.getElementById('tokenResult');
+  if (!box) return;
+  box.style.display = 'block';
+  const verdict = data.risk_verdict || 'Unknown';
+  const badge = tokenVerdictBadge(verdict);
+  const coord = typeof data.risk_score === 'number' ? Math.max(0, Math.min(100, data.risk_score)) : 0;
+  const cp = typeof data.cluster_pct_supply === 'number' ? data.cluster_pct_supply : 0;
+  const cw = data.cluster_wallet_count ?? 0;
+  const holderCount = data.params?.unique_holders_sampled
+    ?? data.top_holders?.length
+    ?? data.holder_count
+    ?? data.holders_count
+    ?? '—';
+  const caps = data.intelligence_capabilities || {};
+  const arkhamOk = caps.provider === 'arkham' && caps.available;
+  const signals = Array.isArray(data.risk_signals) ? data.risk_signals : [];
+  const summary = String(data.risk_summary || '').trim();
+  const signalBlocks = signals.slice(0, 14).map((sig) => {
+    const raw = String(sig);
+    const human = tokenSignalHumanize(raw);
+    const label = raw.length > 96 ? `${raw.slice(0, 93)}…` : raw;
+    return `<div class="token-signal-card"><div class="token-signal-name">${escHtml(label)}</div><div class="token-signal-expl">${escHtml(human)}</div></div>`;
+  }).join('');
+  const cross = data.cross_chain_bundle && typeof data.cross_chain_bundle === 'object' && data.cross_chain_bundle.combined_escalation;
+  const crossNote = cross
+    ? '<p class="token-bundle-note">Cross-chain or bridge/mixer hints also fired — see <code>cross_chain_bundle</code> in raw JSON.</p>'
+    : '';
+  const hintRow = badge.hint
+    ? `<p class="token-bundle-verdict-hint">${escHtml(badge.hint)}</p>`
+    : '';
+  box.innerHTML = `
+    <div class="token-bundle-report">
+      <div class="token-bundle-header">
+        <div>
+          <h3 class="token-bundle-h3">Holder snapshot</h3>
+          <p class="token-bundle-lede">Sample-based heuristics only — not proof of wrongdoing. Small cluster % is common; read coordination score and signals together.</p>
+        </div>
+        <span class="badge ${badge.cls}">${escHtml(badge.text)}</span>
+      </div>
+      ${hintRow}
+      <div class="token-bundle-scores">
+        <div class="token-score-block">
+          <div class="token-score-head">
+            <span>Coordination score</span>
+            <span class="token-score-num">${coord.toFixed(1)} / 100</span>
+          </div>
+          <p class="token-score-desc">Overlap in <em>how</em> top holders were funded in this sample. This can be high even when only a few percent of supply sits in one cluster.</p>
+          <div class="token-meter" role="img" aria-label="Coordination ${coord} out of 100"><div class="token-meter-fill token-meter-fill--coord" style="width:${coord}%"></div></div>
+        </div>
+        <div class="token-score-block">
+          <div class="token-score-head">
+            <span>Largest cluster (sampled supply)</span>
+            <span class="token-score-num">${formatTokenPct(cp)} · ${cw} wallets</span>
+          </div>
+          <p class="token-score-desc">Share held by the largest linked-style group in this snapshot — not total insider ownership of the token.</p>
+          <div class="token-meter" role="img" aria-label="Cluster ${formatTokenPct(cp)}"><div class="token-meter-fill token-meter-fill--cluster" style="width:${Math.min(100, Math.max(0, cp))}%"></div></div>
+        </div>
+      </div>
+      <div class="token-bundle-metrics">
+        <div class="token-metric"><span class="token-metric-label">Mint</span><span class="token-metric-val token-mono-clip" title="${escHtml(mint)}">${escHtml(mint)}</span></div>
+        <div class="token-metric"><span class="token-metric-label">Model band</span><span class="token-metric-val">${escHtml(verdict)}</span></div>
+        <div class="token-metric"><span class="token-metric-label">Holders sampled</span><span class="token-metric-val">${escHtml(String(holderCount))}</span></div>
+        <div class="token-metric"><span class="token-metric-label">Arkham</span><span class="token-metric-val">${arkhamOk ? 'Active (server)' : 'Unavailable'}</span></div>
+      </div>
+      ${summary ? `<div class="token-bundle-summary"><span class="token-bundle-summary-label">Summary</span><p>${escHtml(summary)}</p></div>` : ''}
+      ${signals.length ? `<div class="token-signals-section"><h4 class="token-bundle-h4">What drove the score</h4><div class="token-signal-grid">${signalBlocks}</div></div>` : ''}
+      ${crossNote}
+    </div>`;
 }
 
 function getFindingsPageList() {
@@ -948,232 +1096,42 @@ function clearScan() {
   document.getElementById('scanUrl').value = '';
 }
 
-// ── Investigation ────────────────────────────────────────────────────────
-function runChainLookup() {
-  const addr = document.getElementById('chainAddr').value.trim();
-  if (!addr) return;
-  renderInvestigationCard('chain', {
-    title: 'Wallet Lookup',
-    subtitle: 'Running blockchain lookup...',
-    status: 'pending',
-    metrics: [],
-    topItems: [],
-  });
-  const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
-  apiJson('/api/investigation/blockchain', {
-    address: addr,
-    network: (localStorage.getItem('dv_helius_network') || 'mainnet'),
-    helius_api_key: heliusApiKey,
-  })
-    .then((data) => {
-      const s = data.summary || {};
-      const metrics = [
-        ['Address', data.address || addr],
-        ['Chain', data.evm_chain ? `evm (${data.evm_chain})` : (data.chain || 'unknown')],
-        ['Balance', s.eth_approx != null ? `${s.eth_approx} native` : (s.sol_approx != null ? `${s.sol_approx} native` : 'n/a')],
-        ['Transactions', s.etherscan_recent_tx_count ?? s.recent_signatures_count ?? 'n/a'],
-      ];
-      const topItems = [];
-      if (data.error) topItems.push(`Note: ${data.error}`);
-      if (data.intelligence_notice) topItems.push(data.intelligence_notice);
-      const caps = data.intelligence_capabilities || {};
-      if (caps.provider === 'arkham') {
-        const capStatus = caps.available ? 'enabled (server-managed)' : 'unavailable on server';
-        topItems.push(`Arkham: ${capStatus}`);
-      }
-      const ak = data.arkham;
-      if (ak) {
-        const sm = ak.summary || {};
-        const label = sm.entity_name || sm.label_name || '';
-        if (label) topItems.push(`Arkham label: ${label}`);
-        if (ak.explorer_url) topItems.push(`Arkham URL: ${ak.explorer_url}`);
-        if (ak.error) topItems.push(`Arkham note: ${ak.error}`);
-      }
-      renderInvestigationCard('chain', {
-        title: 'Wallet Lookup',
-        subtitle: `Professional summary for ${data.address || addr}`,
-        verdict: data.error ? 'caution' : 'safe',
-        metrics,
-        topItems: topItems.slice(0, 6),
-      });
-      setInvestigationRaw('chain', data);
-    })
-    .catch((err) => {
-      renderInvestigationCard('chain', {
-        title: 'Wallet Lookup',
-        subtitle: `Lookup failed: ${err.message}`,
-        verdict: 'risky',
-        metrics: [['Address', addr]],
-        topItems: ['Check address format, API connectivity, and server authentication state.'],
-      });
-      setInvestigationRaw('chain', { error: err.message });
-    });
-}
-
+// ── Investigation (SPL token scanner only) ───────────────────────────────
 function runTokenBundle() {
   const mint = document.getElementById('tokenMint').value.trim();
   if (!mint) return;
-  renderInvestigationCard('token', {
-    title: 'Token Bundle Analysis',
-    subtitle: 'Running Solana token bundle analysis...',
-    status: 'pending',
-    metrics: [],
-    topItems: [],
-  });
+  const deep = !!(document.getElementById('tokenDeepScan') && document.getElementById('tokenDeepScan').checked);
+  const btn = document.getElementById('tokenScanBtn');
+  if (btn) btn.disabled = true;
+  renderTokenBundleLoading(deep);
   const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
   const payload = {
     mint,
-    scan_all_holders: true,
-    max_funded_by_lookups: 1200,
-    include_x_intel: true,
+    scan_all_holders: deep,
+    max_funded_by_lookups: deep ? 1200 : 350,
+    include_x_intel: deep,
   };
   if (heliusApiKey) payload.helius_api_key = heliusApiKey;
   apiJson('/api/investigation/solana-bundle', payload)
     .then((data) => {
       if (data.error) {
-        renderInvestigationCard('token', {
-          title: 'Token Bundle Analysis',
-          subtitle: `Analysis unavailable: ${data.error}`,
-          verdict: 'risky',
-          metrics: [['Mint', mint]],
-          topItems: ['Server-side intelligence may be unavailable.'],
-        });
+        renderTokenBundleError(mint, 'Scan did not complete', String(data.error));
         setInvestigationRaw('token', data);
         return;
       }
-      const caps = data.intelligence_capabilities || {};
-      const holderCount =
-        data.params?.unique_holders_sampled ??
-        data.top_holders?.length ??
-        data.holder_count ??
-        data.holders_count;
-      const clusterWalletCount = data.cluster_wallet_count ?? (Array.isArray(data.focus_cluster_wallets) ? data.focus_cluster_wallets.length : 0);
-      const riskVerdict = data.risk_verdict || 'Unknown';
-      const riskScore = data.risk_score !== undefined ? `${data.risk_score}/100` : 'n/a';
-      const metrics = [
-        ['Mint', mint],
-        ['Risk', `${riskVerdict} (${riskScore})`],
-        ['Sampled holders', holderCount ?? 'n/a'],
-        ['Cluster wallets', clusterWalletCount ?? 'n/a'],
-        ['Cluster supply %', data.cluster_pct_supply ?? 'n/a'],
-      ];
-      const topItems = [];
-      if (data.risk_summary) topItems.push(`Summary: ${String(data.risk_summary).slice(0, 180)}`);
-      if (caps.provider === 'arkham') {
-        topItems.push(`Arkham: ${caps.available ? 'enabled (server-managed)' : 'unavailable on server'}`);
-      }
-      (Array.isArray(data.risk_signals) ? data.risk_signals.slice(0, 3) : []).forEach((sig) => {
-        topItems.push(`Signal: ${String(sig).slice(0, 180)}`);
-      });
-      renderInvestigationCard('token', {
-        title: 'Token Bundle Analysis',
-        subtitle: 'Analyst summary with curated token risk indicators',
-        verdict: riskVerdict,
-        metrics,
-        topItems: topItems.slice(0, 7),
-      });
+      renderTokenBundleSuccess(mint, data);
       setInvestigationRaw('token', data);
     })
     .catch((err) => {
-      renderInvestigationCard('token', {
-        title: 'Token Bundle Analysis',
-        subtitle: `Analysis failed: ${err.message}`,
-        verdict: 'risky',
-        metrics: [['Mint', mint]],
-        topItems: ['Check API auth and token mint validity.'],
-      });
-      setInvestigationRaw('token', { error: err.message });
-    });
-}
-
-function runOsint() {
-  const domain = document.getElementById('osintDomain').value.trim();
-  if (!domain) return;
-  renderInvestigationCard('osint', {
-    title: 'Domain OSINT',
-    subtitle: 'Running domain investigation...',
-    status: 'pending',
-    metrics: [],
-    topItems: [],
-  });
-  apiJson('/api/investigation/domain', { domain })
-    .then((data) => {
-      const findingsCount = data.findings_count || (Array.isArray(data.findings) ? data.findings.length : 0);
-      const os = data.osint || {};
-      const rc = data.recon || {};
-      const hs = data.headers_ssl || {};
-      const metrics = [
-        ['Domain', data.domain || domain],
-        ['Findings', findingsCount],
-        ['Registrar', os.registrar || 'n/a'],
-        ['Created', os.created || os.creation_date || 'n/a'],
-        ['Subdomains', rc.subdomains_found ?? 'n/a'],
-        ['SSL valid', hs.ssl_valid === undefined ? 'n/a' : (hs.ssl_valid ? 'yes' : 'no')],
-      ];
-      const topItems = (Array.isArray(data.findings) ? data.findings.slice(0, 3) : [])
-        .map((f) => `${f.title || f.category || 'Finding'}`);
-      renderInvestigationCard('osint', {
-        title: 'Domain OSINT',
-        subtitle: 'External intel and infrastructure context',
-        verdict: findingsCount > 0 ? 'caution' : 'safe',
-        metrics,
-        topItems,
-      });
-      setInvestigationRaw('osint', data);
+      let detail = String(err.message || 'Unknown error');
+      if (/authentication required/i.test(detail)) {
+        detail = 'Not signed in, or this tab’s token does not match the API (wrong API URL in Settings, or stale session). Log out, confirm Settings → API URL matches this server, then sign in again.';
+      }
+      renderTokenBundleError(mint, 'Request failed', detail);
+      setInvestigationRaw('token', { error: detail });
     })
-    .catch((err) => {
-      renderInvestigationCard('osint', {
-        title: 'Domain OSINT',
-        subtitle: `OSINT failed: ${err.message}`,
-        verdict: 'risky',
-        metrics: [['Domain', domain]],
-        topItems: [],
-      });
-      setInvestigationRaw('osint', { error: err.message });
-    });
-}
-
-function runPoc() {
-  const type = document.getElementById('pocType').value;
-  const url = document.getElementById('pocUrl').value.trim();
-  if (!url) return;
-  const apiType = type === 'unauth' ? 'unauthenticated' : type;
-  renderInvestigationCard('poc', {
-    title: 'PoC Simulation',
-    subtitle: `Running ${apiType} simulation...`,
-    status: 'pending',
-    metrics: [],
-    topItems: [],
-  });
-  apiJson('/api/poc/simulate', { type: apiType, url, verbose: true })
-    .then((data) => {
-      const metrics = [
-        ['PoC type', apiType],
-        ['Success', data.success ? 'yes' : 'no'],
-        ['HTTP', data.status_code ?? 'n/a'],
-      ];
-      const topItems = [];
-      if (data.conclusion) topItems.push(`Conclusion: ${data.conclusion}`);
-      if (data.error) topItems.push(`Error: ${data.error}`);
-      if (data.body_preview) topItems.push(`Preview: ${String(data.body_preview).slice(0, 180)}`);
-      renderInvestigationCard('poc', {
-        title: 'PoC Simulation',
-        subtitle: 'Controlled simulation results',
-        verdict: data.success ? 'safe' : 'caution',
-        metrics,
-        topItems,
-      });
-      setInvestigationRaw('poc', data);
-    })
-    .catch((err) => {
-      renderInvestigationCard('poc', {
-        title: 'PoC Simulation',
-        subtitle: `Simulation failed: ${err.message}`,
-        verdict: 'risky',
-        metrics: [['PoC type', apiType]],
-        topItems: [],
-      });
-      setInvestigationRaw('poc', { error: err.message });
+    .finally(() => {
+      if (btn) btn.disabled = false;
     });
 }
 

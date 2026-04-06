@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import errno
 import json
 import logging
 import os
@@ -111,19 +112,48 @@ except ImportError:
 
 # ── Config ────────────────────────────────────────────────────────────────
 
-JWT_SECRET = os.environ.get("DIVERG_JWT_SECRET", secrets.token_hex(32))
+IS_PRODUCTION = bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("DIVERG_PRODUCTION"))
+DIVERG_JWT_SECRET = (os.environ.get("DIVERG_JWT_SECRET") or "").strip()
+
+
+def _resolve_jwt_secret() -> str:
+    """JWT signing key. Production: set DIVERG_JWT_SECRET. Local dev: persist under data/ so restarts keep sessions valid."""
+    if DIVERG_JWT_SECRET:
+        return DIVERG_JWT_SECRET
+    if IS_PRODUCTION:
+        return secrets.token_hex(32)
+    path = ROOT / "data" / ".jwt_secret"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_file():
+            raw = path.read_text(encoding="utf-8").strip()
+            if len(raw) >= 16:
+                return raw
+    except OSError as e:
+        logging.getLogger("diverg.api").warning("jwt secret file read: %s", e)
+    key = secrets.token_hex(32)
+    try:
+        path.write_text(key + "\n", encoding="utf-8")
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+    except OSError as e:
+        logging.getLogger("diverg.api").warning("jwt secret file write: %s", e)
+    return key
+
+
+JWT_SECRET = _resolve_jwt_secret()
 JWT_EXPIRY_HOURS = 72
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 ALLOWED_ORIGINS = [
     o.strip() for o in
     os.environ.get(
         "DIVERG_ALLOWED_ORIGINS",
-        "https://dash.divergsec.com,https://divergsec.com,http://127.0.0.1:5000,http://localhost:5000"
+        "https://dash.divergsec.com,https://divergsec.com,http://127.0.0.1:5000,http://localhost:5000,http://127.0.0.1:5001,http://localhost:5001"
     ).split(",") if o.strip()
 ]
 MAX_REQUEST_SIZE = 2 * 1024 * 1024  # 2 MB
-IS_PRODUCTION = os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("DIVERG_PRODUCTION")
-DIVERG_JWT_SECRET = os.environ.get("DIVERG_JWT_SECRET", "").strip()
 DIVERG_AUDIT_LOG_RETENTION_DAYS = int(os.environ.get("DIVERG_AUDIT_LOG_RETENTION_DAYS", "90") or "90")
 DIVERG_ENABLE_STRICT_PROOF_API = (os.environ.get("DIVERG_ENABLE_STRICT_PROOF_API", "1").strip().lower() in ("1", "true", "yes"))
 # Default off so deploy healthchecks succeed; set DIVERG_REQUIRE_ARKHAM=1 when ARKHAM_API_KEY is always in env.
@@ -2409,13 +2439,24 @@ def main():
     print(f"  Login           →  http://{args.host}:{args.port}/login")
     print(f"  API             →  http://{args.host}:{args.port}/api/health")
     if not DIVERG_JWT_SECRET:
-        print("  Warning         →  DIVERG_JWT_SECRET not set; JWT secret rotates at process start.")
+        if IS_PRODUCTION:
+            print("  Warning         →  DIVERG_JWT_SECRET not set; new random JWT secret each start (logins invalid after restart).")
+        else:
+            print("  Note            →  DIVERG_JWT_SECRET not set; dev JWT key stored in data/.jwt_secret (stable across restarts).")
     if DIVERG_REQUIRE_ARKHAM and not (os.environ.get("ARKHAM_API_KEY") or "").strip():
         print("  Fatal           →  ARKHAM_API_KEY is required but missing (DIVERG_REQUIRE_ARKHAM=1).")
         sys.exit(1)
     if not (os.environ.get("ARKHAM_API_KEY") or "").strip():
         print("  Warning         →  ARKHAM_API_KEY not set; token-bundle / some intel endpoints will return 503 until set.")
     _cleanup_old_audit_logs()
+
+    def _port_in_use_hint(exc: OSError) -> None:
+        if exc.errno != errno.EADDRINUSE and getattr(exc, "winerror", None) != 10048:
+            return
+        print("  Fatal           →  That port is already in use (another app is bound there).")
+        print("                  →  macOS: System Settings → General → AirPlay Receiver can take port 5000.")
+        print("                  →  Try:  PORT=5001 python3 api_server.py   or   python3 api_server.py --port 5001")
+
     try:
         from waitress import serve
         try:
@@ -2424,13 +2465,21 @@ def main():
             w_threads = 16
         w_threads = max(4, min(w_threads, 32))
         print(f"  Server          →  waitress on {args.host}:{args.port} (threads={w_threads})")
-        serve(app, host=args.host, port=args.port, threads=w_threads, channel_timeout=300)
+        try:
+            serve(app, host=args.host, port=args.port, threads=w_threads, channel_timeout=300)
+        except OSError as e:
+            _port_in_use_hint(e)
+            raise
     except ImportError:
         print("  Server          →  Flask dev (waitress not installed)")
         from werkzeug.serving import WSGIRequestHandler
         WSGIRequestHandler.server_version = "Diverg"
         WSGIRequestHandler.sys_version = ""
-        app.run(host=args.host, port=args.port, threaded=True)
+        try:
+            app.run(host=args.host, port=args.port, threaded=True)
+        except OSError as e:
+            _port_in_use_hint(e)
+            raise
 
 
 if __name__ == "__main__":
