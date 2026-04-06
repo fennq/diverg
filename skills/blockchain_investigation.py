@@ -55,6 +55,12 @@ EVM_CHAIN_META: dict[str, tuple[int, str]] = {
     "arbitrum": (42161, "https://arbiscan.io"),
     "optimism": (10, "https://optimistic.etherscan.io"),
     "avalanche": (43114, "https://snowtrace.io"),
+    "linea": (59144, "https://lineascan.build"),
+    "scroll": (534352, "https://scrollscan.com"),
+    "blast": (81457, "https://blastscan.io"),
+    "celo": (42220, "https://celoscan.io"),
+    "gnosis": (100, "https://gnosisscan.io"),
+    "fantom": (250, "https://ftmscan.com"),
 }
 ETHERSCAN_V2_API = "https://api.etherscan.io/v2/api"
 ETHERSCAN_BASE = "https://api.etherscan.io/api"  # legacy v1
@@ -200,7 +206,16 @@ KNOWN_MIXER_EVM_CONTRACTS, KNOWN_MIXER_EVM_WALLETS, KNOWN_MIXER_LABEL_MARKERS = 
 
 def _normalize_evm_chain_slug(chain: str) -> str:
     c = (chain or "solana").strip().lower()
-    aliases = {"bnb": "bsc", "matic": "polygon", "arb": "arbitrum", "op": "optimism", "avax": "avalanche", "eth": "ethereum"}
+    aliases = {
+        "bnb": "bsc",
+        "matic": "polygon",
+        "arb": "arbitrum",
+        "op": "optimism",
+        "avax": "avalanche",
+        "eth": "ethereum",
+        "xdai": "gnosis",
+        "ftm": "fantom",
+    }
     return aliases.get(c, c)
 
 
@@ -499,6 +514,34 @@ def _finalize_finding(finding: Finding) -> Finding:
 
 def _finalize_findings(findings: list[Finding]) -> list[Finding]:
     return [_finalize_finding(f) for f in findings]
+
+
+def _strict_evidence_findings(findings: list[Finding]) -> tuple[list[Finding], int]:
+    """
+    Keep only evidence-backed findings for strict public output.
+    Drop heuristic/review-only or weakly corroborated items.
+    """
+    out: list[Finding] = []
+    dropped = 0
+    for f in findings:
+        title = str(f.title or "").lower()
+        source = str(f.source or "").lower()
+        conf = _normalize_confidence(f.confidence)
+        proof = str(f.proof or "").strip()
+        # Explicitly exclude heuristic/review-style findings from strict output.
+        if "[review]" in title or "heuristic" in title:
+            dropped += 1
+            continue
+        # Require concrete proof artifact and non-low confidence.
+        if not proof or conf == "low":
+            dropped += 1
+            continue
+        # For non-Intel items, require verification flag to avoid soft inferences.
+        if source not in ("arkham_api", "solscan_api", "etherscan_api") and not bool(f.verified):
+            dropped += 1
+            continue
+        out.append(f)
+    return out, dropped
 
 
 def _build_evidence_summary(findings: list[Finding]) -> dict:
@@ -1957,6 +2000,16 @@ def run(
     for fee in scraped.get("fee_mentions", [])[:5]:
         report.fee_alerts.append({"mention": fee})
 
+    strict_evidence_only = (os.environ.get("DIVERG_TOKEN_EVIDENCE_ONLY", "1") or "1").strip().lower() not in (
+        "0", "false", "no", "off"
+    )
+    if strict_evidence_only:
+        filtered, dropped = _strict_evidence_findings(report.findings)
+        report.findings = filtered
+        if dropped > 0:
+            report.errors.append(
+                f"Strict evidence mode removed {dropped} heuristic/weak findings from token report output."
+            )
     report.findings = _finalize_findings(report.findings)
     # Crime report: risk score, linked wallets, structured report
     report.risk_score = _compute_risk_score(report)

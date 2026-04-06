@@ -32,6 +32,12 @@ EXPLORER_TOKEN_PREFIX: dict[str, str] = {
     "arbitrum": "https://arbiscan.io/token/",
     "optimism": "https://optimistic.etherscan.io/token/",
     "avalanche": "https://snowtrace.io/token/",
+    "linea": "https://lineascan.build/token/",
+    "scroll": "https://scrollscan.com/token/",
+    "blast": "https://blastscan.io/token/",
+    "celo": "https://celoscan.io/token/",
+    "gnosis": "https://gnosisscan.io/token/",
+    "fantom": "https://ftmscan.com/token/",
 }
 SOLSCAN_TOKEN_URL = "https://solscan.io/token/"
 # CoinGecko / API platform id -> slug keys in EXPLORER_TOKEN_PREFIX (or solana)
@@ -43,6 +49,12 @@ _COINGECKO_PLAT_TO_SLUG: dict[str, str] = {
     "arbitrum-one": "arbitrum",
     "optimistic-ethereum": "optimism",
     "avalanche": "avalanche",
+    "linea": "linea",
+    "scroll": "scroll",
+    "blast": "blast",
+    "celo": "celo",
+    "xdai": "gnosis",
+    "fantom": "fantom",
     "solana": "solana",
 }
 _WORMHOLE_CSV_URL = (

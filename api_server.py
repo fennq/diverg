@@ -126,6 +126,8 @@ IS_PRODUCTION = os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("DIVERG_
 DIVERG_JWT_SECRET = os.environ.get("DIVERG_JWT_SECRET", "").strip()
 DIVERG_AUDIT_LOG_RETENTION_DAYS = int(os.environ.get("DIVERG_AUDIT_LOG_RETENTION_DAYS", "90") or "90")
 DIVERG_ENABLE_STRICT_PROOF_API = (os.environ.get("DIVERG_ENABLE_STRICT_PROOF_API", "1").strip().lower() in ("1", "true", "yes"))
+DIVERG_REQUIRE_ARKHAM = (os.environ.get("DIVERG_REQUIRE_ARKHAM", "1").strip().lower() in ("1", "true", "yes"))
+DIVERG_HEALTH_ARKHAM_PROBE = (os.environ.get("DIVERG_HEALTH_ARKHAM_PROBE", "0").strip().lower() in ("1", "true", "yes"))
 
 _INVESTIGATION_DIR = str(ROOT / "investigation")
 if _INVESTIGATION_DIR not in sys.path:
@@ -189,7 +191,7 @@ def _attach_arkham_intel_block(out: dict, addr: str) -> None:
 
 
 def _enrich_solana_bundle_arkham(raw: dict) -> dict:
-    """Batch Arkham labels for focus cluster + top holders (requires ARKHAM_API_KEY, already validated)."""
+    """Batch Arkham labels for focus cluster + top holders (requires ARKHAM_API_KEY)."""
     if not raw.get("ok") or not requests:
         return raw
     key = (os.environ.get("ARKHAM_API_KEY") or "").strip()
@@ -1168,10 +1170,41 @@ _bundle_api_lock = Lock()
 _blockchain_full_lock = Lock()
 
 _ETH_ADDR_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
+_EVM_CHAIN_META = {
+    "ethereum": {"chainid": 1, "explorer": "https://etherscan.io", "rpc": "https://cloudflare-eth.com"},
+    "bsc": {"chainid": 56, "explorer": "https://bscscan.com", "rpc": "https://bsc-rpc.publicnode.com"},
+    "polygon": {"chainid": 137, "explorer": "https://polygonscan.com", "rpc": "https://polygon-bor-rpc.publicnode.com"},
+    "base": {"chainid": 8453, "explorer": "https://basescan.org", "rpc": "https://base-rpc.publicnode.com"},
+    "arbitrum": {"chainid": 42161, "explorer": "https://arbiscan.io", "rpc": "https://arbitrum-one-rpc.publicnode.com"},
+    "optimism": {"chainid": 10, "explorer": "https://optimistic.etherscan.io", "rpc": "https://optimism-rpc.publicnode.com"},
+    "avalanche": {"chainid": 43114, "explorer": "https://snowtrace.io", "rpc": "https://avalanche-c-chain-rpc.publicnode.com"},
+    "linea": {"chainid": 59144, "explorer": "https://lineascan.build", "rpc": "https://linea-rpc.publicnode.com"},
+    "scroll": {"chainid": 534352, "explorer": "https://scrollscan.com", "rpc": "https://scroll-rpc.publicnode.com"},
+    "blast": {"chainid": 81457, "explorer": "https://blastscan.io", "rpc": "https://blast-rpc.publicnode.com"},
+    "celo": {"chainid": 42220, "explorer": "https://celoscan.io", "rpc": "https://forno.celo.org"},
+    "gnosis": {"chainid": 100, "explorer": "https://gnosisscan.io", "rpc": "https://rpc.gnosischain.com"},
+    "fantom": {"chainid": 250, "explorer": "https://ftmscan.com", "rpc": "https://rpcapi.fantom.network"},
+}
 
 BLOCKCHAIN_FULL_HTTP_TIMEOUT_SEC = max(60, int(os.environ.get("DIVERG_BLOCKCHAIN_FULL_TIMEOUT_SEC", "120")))
 BLOCKCHAIN_FULL_MAX_FINDINGS = min(500, max(40, int(os.environ.get("DIVERG_BLOCKCHAIN_FULL_MAX_FINDINGS", "120"))))
 BLOCKCHAIN_FULL_MAX_FLOW_EDGES = min(300, max(40, int(os.environ.get("DIVERG_BLOCKCHAIN_FULL_MAX_FLOW_EDGES", "150"))))
+
+
+def _normalize_evm_chain_slug(chain: str) -> str:
+    c = (chain or "ethereum").strip().lower()
+    aliases = {
+        "eth": "ethereum",
+        "bnb": "bsc",
+        "matic": "polygon",
+        "arb": "arbitrum",
+        "op": "optimism",
+        "avax": "avalanche",
+        "xdai": "gnosis",
+        "ftm": "fantom",
+    }
+    c = aliases.get(c, c)
+    return c if c in _EVM_CHAIN_META else "ethereum"
 
 
 def _truncate_blockchain_full_payload(d: dict) -> dict:
@@ -1220,9 +1253,11 @@ def _helius_solana_rpc(network: str, api_key: str, method: str, params: list | d
     return r.json()
 
 
-def _evm_public_rpc(method: str, params: list) -> dict:
+def _evm_public_rpc(method: str, params: list, chain: str = "ethereum") -> dict:
+    c = _normalize_evm_chain_slug(chain)
+    rpc_url = _EVM_CHAIN_META.get(c, _EVM_CHAIN_META["ethereum"])["rpc"]
     r = requests.post(
-        "https://cloudflare-eth.com",
+        rpc_url,
         json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
         timeout=20,
         headers={"Content-Type": "application/json"},
@@ -1267,6 +1302,10 @@ def _summarize_chain_solana(raw: dict) -> dict:
 
 def _summarize_chain_evm(raw: dict) -> dict:
     s = {}
+    bal_wei = raw.get("etherscan_balance_wei")
+    if isinstance(bal_wei, int):
+        s["balance_wei"] = bal_wei
+        s["eth_approx"] = round(bal_wei / 1e18, 8)
     bal = raw.get("eth_getBalance") or {}
     if isinstance(bal, dict) and bal.get("result"):
         wei_hex = bal["result"]
@@ -1296,18 +1335,20 @@ def _summarize_chain_evm(raw: dict) -> dict:
     return s
 
 
-def _etherscan_v2_txlist_mainnet(address: str, offset: int = 14) -> list | None:
-    """Recent mainnet txs when ETHERSCAN_API_KEY is set. Returns trimmed dict rows or None."""
+def _etherscan_v2_txlist(address: str, chain: str = "ethereum", offset: int = 14) -> list | None:
+    """Recent tx list from Etherscan v2 multichain API."""
     if not requests:
         return None
     api_key = (os.environ.get("ETHERSCAN_API_KEY") or "").strip()
     if not api_key or not _ETH_ADDR_RE.match(address):
         return None
+    c = _normalize_evm_chain_slug(chain)
+    chain_id = _EVM_CHAIN_META.get(c, _EVM_CHAIN_META["ethereum"])["chainid"]
     try:
         r = requests.get(
             "https://api.etherscan.io/v2/api",
             params={
-                "chainid": 1,
+                "chainid": chain_id,
                 "apikey": api_key,
                 "module": "account",
                 "action": "txlist",
@@ -1340,6 +1381,35 @@ def _etherscan_v2_txlist_mainnet(address: str, offset: int = 14) -> list | None:
         return None
 
 
+def _etherscan_v2_balance_wei(address: str, chain: str = "ethereum") -> int | None:
+    if not requests:
+        return None
+    api_key = (os.environ.get("ETHERSCAN_API_KEY") or "").strip()
+    if not api_key or not _ETH_ADDR_RE.match(address):
+        return None
+    c = _normalize_evm_chain_slug(chain)
+    chain_id = _EVM_CHAIN_META.get(c, _EVM_CHAIN_META["ethereum"])["chainid"]
+    try:
+        r = requests.get(
+            "https://api.etherscan.io/v2/api",
+            params={
+                "chainid": chain_id,
+                "apikey": api_key,
+                "module": "account",
+                "action": "balance",
+                "address": address,
+                "tag": "latest",
+            },
+            timeout=18,
+        )
+        j = r.json()
+        if j.get("status") != "1":
+            return None
+        return int(str(j.get("result") or "0"))
+    except Exception:
+        return None
+
+
 @app.route("/api/investigation/blockchain", methods=["OPTIONS"])
 def investigation_blockchain_options():
     return "", 204
@@ -1359,6 +1429,7 @@ def investigation_blockchain():
     network = sanitize_text(data.get("network") or "mainnet", 16).lower()
     if network not in ("mainnet", "devnet"):
         network = "mainnet"
+    requested_chain = sanitize_text(data.get("chain") or "", 32).lower().strip()
 
     env_key = (os.environ.get("HELIUS_API_KEY") or "").strip()
     body_key = sanitize_text(data.get("helius_api_key") or "", 256).strip()
@@ -1372,19 +1443,26 @@ def investigation_blockchain():
         )
 
     if _ETH_ADDR_RE.match(addr):
+        evm_chain = _normalize_evm_chain_slug(requested_chain or "ethereum")
         out["chain"] = "evm"
+        out["evm_chain"] = evm_chain
         try:
-            raw = {
-                "eth_getBalance": _evm_public_rpc("eth_getBalance", [addr, "latest"]),
-                "eth_getTransactionCount": _evm_public_rpc("eth_getTransactionCount", [addr, "latest"]),
+            raw: dict = {
+                "eth_getTransactionCount": _evm_public_rpc("eth_getTransactionCount", [addr, "latest"], chain=evm_chain),
+                "explorer_address_url": f"{_EVM_CHAIN_META[evm_chain]['explorer']}/address/{addr}",
             }
-            etx = _etherscan_v2_txlist_mainnet(addr)
+            bal = _etherscan_v2_balance_wei(addr, chain=evm_chain)
+            if bal is not None:
+                raw["etherscan_balance_wei"] = bal
+            else:
+                raw["eth_getBalance"] = _evm_public_rpc("eth_getBalance", [addr, "latest"], chain=evm_chain)
+            etx = _etherscan_v2_txlist(addr, chain=evm_chain)
             if etx is not None:
                 raw["etherscan_recent_txs"] = etx
             out["raw"] = raw
             out["summary"] = _summarize_chain_evm(raw)
         except Exception as e:
-            err_out = {"error": str(e), "address": addr, "chain": "evm"}
+            err_out = {"error": str(e), "address": addr, "chain": "evm", "evm_chain": evm_chain}
             _attach_arkham_capabilities(err_out, required=False)
             return jsonify(err_out), 200
         _attach_arkham_intel_block(out, addr)
@@ -2276,11 +2354,28 @@ def stats():
 @app.route("/api/health", methods=["GET"])
 def health():
     user_count = 0
+    arkham_status = _arkham_capabilities(required=True)
     try:
         with _db() as conn:
             user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
     except Exception:
         pass
+    # Optional runtime probe so ops can detect degraded Arkham connectivity quickly.
+    if DIVERG_HEALTH_ARKHAM_PROBE:
+        try:
+            import arkham_intel as ai  # type: ignore
+            probe = ai.arkham_runtime_status(requests.Session() if requests else None)
+            arkham_status = {
+                **arkham_status,
+                "runtime_reachable": bool(probe.get("reachable")),
+                "runtime_configured": bool(probe.get("configured")),
+            }
+            if "latency_ms" in probe:
+                arkham_status["runtime_latency_ms"] = probe.get("latency_ms")
+            if probe.get("error"):
+                arkham_status["runtime_error"] = str(probe.get("error"))
+        except Exception:
+            pass
     return jsonify({
         "status": "ok",
         "service": "diverg-console",
@@ -2290,6 +2385,7 @@ def health():
         "users": user_count if not IS_PRODUCTION else None,
         "program_strategy": {"option": "C", "enterprise_weight": 70, "offensive_weight": 30},
         "audit_retention_days": DIVERG_AUDIT_LOG_RETENTION_DAYS,
+        "arkham": arkham_status,
     })
 
 
@@ -2313,6 +2409,9 @@ def main():
     print(f"  API             →  http://{args.host}:{args.port}/api/health")
     if not DIVERG_JWT_SECRET:
         print("  Warning         →  DIVERG_JWT_SECRET not set; JWT secret rotates at process start.")
+    if DIVERG_REQUIRE_ARKHAM and not (os.environ.get("ARKHAM_API_KEY") or "").strip():
+        print("  Fatal           →  ARKHAM_API_KEY is required but missing (DIVERG_REQUIRE_ARKHAM=1).")
+        sys.exit(1)
     _cleanup_old_audit_logs()
     try:
         from waitress import serve

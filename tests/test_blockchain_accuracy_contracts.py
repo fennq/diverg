@@ -28,6 +28,7 @@ def test_arkham_missing_response_has_capability_block() -> None:
     assert "Arkham intelligence is currently unavailable" in payload["error"]
     assert payload["intelligence_capabilities"]["provider"] == "arkham"
     assert payload["intelligence_capabilities"]["available"] is False
+    assert payload["intelligence_capabilities"]["required_for_endpoint"] is True
 
 
 def test_normalize_token_candidates_filters_invalid() -> None:
@@ -71,3 +72,82 @@ def test_concentration_heuristic_filters_lp_labels() -> None:
     # LP should be excluded; remaining top2 = 200/1000 = 20% < threshold
     assert alerts == []
 
+
+def test_api_server_evm_chain_normalization_supports_multichain() -> None:
+    assert api_server._normalize_evm_chain_slug("base") == "base"
+    assert api_server._normalize_evm_chain_slug("arb") == "arbitrum"
+    assert api_server._normalize_evm_chain_slug("xdai") == "gnosis"
+    assert api_server._normalize_evm_chain_slug("unknown-chain") == "ethereum"
+
+
+def test_arkham_chain_slug_mapping_supports_extended_evm() -> None:
+    from investigation import arkham_intel as ai
+
+    assert ai.evm_chain_slug_for_arkham("linea") == "linea"
+    assert ai.evm_chain_slug_for_arkham("scroll") == "scroll"
+    assert ai.evm_chain_slug_for_arkham("blast") == "blast"
+    assert ai.evm_chain_slug_for_arkham("celo") == "celo"
+    assert ai.evm_chain_slug_for_arkham("ftm") == "fantom"
+
+
+def test_health_includes_arkham_status_block() -> None:
+    with api_server.app.test_client() as client:
+        res = client.get("/api/health")
+        assert res.status_code == 200
+        payload = res.get_json()
+    assert isinstance(payload, dict)
+    assert isinstance(payload.get("arkham"), dict)
+    assert payload["arkham"]["provider"] == "arkham"
+    assert payload["arkham"]["mode"] == "server_managed"
+
+
+def test_strict_evidence_findings_drops_review_and_weak_items() -> None:
+    def _f(
+        *,
+        title: str,
+        source: str,
+        confidence: str,
+        proof: str,
+        verified: bool,
+    ) -> bi.Finding:
+        return bi.Finding(
+            title=title,
+            severity="Info",
+            url="https://example.test",
+            category="Blockchain / Test",
+            evidence=proof or "test",
+            impact="test",
+            remediation="test",
+            source=source,
+            confidence=confidence,
+            proof=proof,
+            verified=verified,
+        )
+
+    src = [
+        _f(
+            title="Cross-chain asset hints [REVIEW]",
+            source="cross_chain_hints",
+            confidence="medium",
+            proof="chain-map maybe",
+            verified=False,
+        ),
+        _f(
+            title="Wallet labeled (Arkham Intel): Test",
+            source="arkham_api",
+            confidence="high",
+            proof="addr -> label",
+            verified=True,
+        ),
+        _f(
+            title="Stated fee vs on-chain fee mismatch [REVIEW]",
+            source="solscan_api",
+            confidence="low",
+            proof="",
+            verified=False,
+        ),
+    ]
+    kept, dropped = bi._strict_evidence_findings(src)
+    assert dropped == 2
+    assert len(kept) == 1
+    assert kept[0].source == "arkham_api"
