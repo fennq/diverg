@@ -4,7 +4,7 @@
 
 ### Project overview
 
-Diverg is an AI-assisted security testing platform. See `README.md` for full details. **Private investigations and security analysis** (beyond self-serve Diverg Auto) are booked via **company@divergsec.com**. The main services are:
+Diverg is an AI-assisted security testing platform. See `README.md` for full details. **Private investigations and security analysis** (beyond self-serve **Diverg Open**) are booked via **company@divergsec.com**. **Diverg Auto** refers to the OpenClaw agent integration layer. The main services are:
 
 | Service | Entry point | How to run |
 |---|---|---|
