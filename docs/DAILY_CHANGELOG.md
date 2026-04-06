@@ -88,3 +88,19 @@ Copy this template for each new day:
 ### Notes
 - Local environment has multiple active API ports; testing used known-good local instances to validate behavior.
 - Some unrelated workspace files remain modified/untracked and were intentionally left untouched.
+
+### Detailed Release Notes
+- **Scanner Discoverability**
+  - `Scan Diff` is now visible before a scan starts so users can understand comparison behavior earlier.
+  - First-run empty-state copy now explains baseline setup directly instead of showing a generic empty panel.
+  - First-run CTA now points users to immediate recheck behavior once baseline exists.
+- **Diff Interpretation Quality**
+  - Added micro-help hints (`?`) on each bucket to explain how `new`, `fixed`, `regressed`, and `improved` are computed.
+  - Changed baseline timestamp rendering from raw API string to human-readable local time for faster triage.
+  - Highlighted outcome buckets visually (positive for fixed/improved, warning for regressed) for better scan-read speed.
+- **Workflow Decisions**
+  - Removed GitHub integration actions from scanner findings after product review; current remediation flow remains in-console by design.
+  - Preserved all diff API and data-layer behavior; change was strictly workflow/UI simplification, not model rollback.
+- **Operational Impact**
+  - No auth or permissions model changes introduced with this pass.
+  - No scan-engine skill selection changes were made; improvements are focused on result interpretation and usability.
