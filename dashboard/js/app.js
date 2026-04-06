@@ -45,6 +45,7 @@ let lastScanReport = null;
 let currentScanFindings = [];
 let currentHistoryWindow = 'all';
 let currentFindingsFilter = 'all';
+let healthSnapshot = null;
 const SCOPE_HELP_TEXT = {
   full: 'Recommended: Full — complete assessment across recon, web, API, and high-value flaw checks.',
   quick: 'Quick — fastest baseline pass for rapid triage and smoke checks.',
@@ -162,6 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadUserProfile();
   ensureDefaultScope();
   updateScopeHelp('full');
+  refreshScannerHealth();
   syncDashboardData();
 });
 
@@ -178,6 +180,84 @@ function ensureDefaultScope() {
   if (active) return;
   const full = pills.find((p) => (p.dataset.scope || '') === 'full');
   (full || pills[0]).classList.add('active');
+}
+
+function setHealthValue(id, text, state) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = state === 'ok' ? '#22c55e' : state === 'warn' ? '#f59e0b' : state === 'bad' ? '#ef4444' : '';
+}
+
+function setOverallHealth(state, label) {
+  const pill = document.getElementById('scanHealthOverall');
+  if (!pill) return;
+  pill.className = `scan-health-pill scan-health-pill-${state}`;
+  pill.textContent = label;
+}
+
+function updateLastRunReliability(report = {}) {
+  const el = document.getElementById('scanLastRunQuality');
+  if (!el) return;
+  if (!report || !Object.keys(report).length) {
+    el.textContent = 'No scan has been run in this session yet.';
+    return;
+  }
+  const metrics = report.scan_metrics || {};
+  const diagnostics = Array.isArray(report.scan_diagnostics) ? report.scan_diagnostics : [];
+  const findings = Array.isArray(report.findings) ? report.findings : [];
+  const elapsed = Number(metrics.elapsed_sec || metrics.duration_sec || metrics.runtime_sec || 0);
+  const pages = Number(metrics.pages_crawled || 0);
+  const endpoints = Number(metrics.endpoints_found || 0);
+  const quality = diagnostics.length === 0 ? 'stable' : diagnostics.length <= 3 ? 'partial' : 'degraded';
+  el.textContent = `Last run quality: ${quality} · ${elapsed.toFixed(1)}s · pages ${pages} · endpoints ${endpoints} · findings ${findings.length} · diagnostics ${diagnostics.length}`;
+}
+
+async function refreshScannerHealth() {
+  const notes = document.getElementById('scanHealthNotes');
+  if (notes) notes.textContent = 'Running readiness checks...';
+  try {
+    const res = await fetch(getApiUrl() + '/api/health', {
+      headers: { Authorization: 'Bearer ' + getSessionToken() },
+    });
+    if (!res.ok) throw new Error('health endpoint unavailable');
+    const h = await res.json();
+    healthSnapshot = h;
+    setHealthValue('scanHealthApi', 'Reachable', 'ok');
+    setHealthValue('scanHealthDb', h.db_exists ? 'Ready' : 'Missing', h.db_exists ? 'ok' : 'bad');
+    const ark = h.arkham || {};
+    const configured = !!ark.configured;
+    const reachable = ark.runtime_reachable === undefined ? null : !!ark.runtime_reachable;
+    if (!configured) {
+      setHealthValue('scanHealthIntel', 'Not configured', 'warn');
+      setHealthValue('scanHealthRuntime', 'Skipped', 'warn');
+    } else {
+      setHealthValue('scanHealthIntel', 'Configured', 'ok');
+      if (reachable === null) {
+        setHealthValue('scanHealthRuntime', 'Probe disabled', 'warn');
+      } else {
+        setHealthValue('scanHealthRuntime', reachable ? 'Reachable' : 'Unreachable', reachable ? 'ok' : 'bad');
+      }
+    }
+    const overallBad = !h.db_exists || (configured && reachable === false);
+    const overallWarn = !overallBad && (!configured || reachable === null);
+    setOverallHealth(overallBad ? 'bad' : overallWarn ? 'warn' : 'ok', overallBad ? 'Degraded' : overallWarn ? 'Partial' : 'Ready');
+    if (notes) {
+      const extra = [];
+      if (!configured) extra.push('ARKHAM_API_KEY missing');
+      if (configured && reachable === false) extra.push('intel runtime unreachable');
+      notes.textContent = extra.length
+        ? `Readiness warnings: ${extra.join(' · ')}.`
+        : 'All core scanner dependencies are available.';
+    }
+  } catch (err) {
+    setHealthValue('scanHealthApi', 'Unavailable', 'bad');
+    setHealthValue('scanHealthDb', 'Unknown', 'warn');
+    setHealthValue('scanHealthIntel', 'Unknown', 'warn');
+    setHealthValue('scanHealthRuntime', 'Unknown', 'warn');
+    setOverallHealth('bad', 'Offline');
+    if (notes) notes.textContent = `Health check failed: ${err.message}`;
+  }
 }
 
 function getAvatarStorageKey(userId) {
@@ -844,6 +924,7 @@ function applyScanFindingFilters() {
 
 function renderScanAnalytics(report, findings) {
   lastScanReport = report || {};
+  updateLastRunReliability(report || {});
   const summary = report.summary || {};
   const evidence = report.evidence_summary || {};
   const metrics = report.scan_metrics || {};
@@ -995,6 +1076,7 @@ async function launchScan() {
   termLine(terminal, ts() + ' Target: ' + url, null);
   termLine(terminal, ts() + ' Scope:  ' + scope.toUpperCase(), null);
   termLine(terminal, ts() + ' Connecting to scan engine...', 'dim');
+  refreshScannerHealth();
 
   const apiUrl = getApiUrl() + '/api/scan/stream';
   const token = getSessionToken();

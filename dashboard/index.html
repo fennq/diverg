@@ -262,6 +262,34 @@
         <div class="scope-pill active" data-scope="full">Full</div><div class="scope-pill" data-scope="quick">Quick</div><div class="scope-pill" data-scope="web">Web</div><div class="scope-pill" data-scope="api">API</div><div class="scope-pill" data-scope="crypto">Crypto</div><div class="scope-pill" data-scope="recon">Recon</div><div class="scope-pill" data-scope="passive">Passive</div><div class="scope-pill" data-scope="attack">Attack</div>
       </div>
       <div class="scan-scope-help" id="scanScopeHelp">Recommended: Full — complete assessment across recon, web, API, and high-value flaw checks.</div>
+      <div class="card scan-reliability-card">
+        <div class="card-header">
+          <span class="card-title">Scanner Readiness</span>
+          <span class="scan-health-pill scan-health-pill-info" id="scanHealthOverall">Checking</span>
+        </div>
+        <div class="card-body">
+          <div class="scan-health-grid">
+            <div class="scan-health-item">
+              <span class="scan-health-label">API</span>
+              <span class="scan-health-value" id="scanHealthApi">Checking</span>
+            </div>
+            <div class="scan-health-item">
+              <span class="scan-health-label">Database</span>
+              <span class="scan-health-value" id="scanHealthDb">Checking</span>
+            </div>
+            <div class="scan-health-item">
+              <span class="scan-health-label">Intel Provider</span>
+              <span class="scan-health-value" id="scanHealthIntel">Checking</span>
+            </div>
+            <div class="scan-health-item">
+              <span class="scan-health-label">Runtime Probe</span>
+              <span class="scan-health-value" id="scanHealthRuntime">Checking</span>
+            </div>
+          </div>
+          <div class="scan-health-notes" id="scanHealthNotes">Running readiness checks...</div>
+          <div class="scan-health-lastrun" id="scanLastRunQuality">No scan has been run in this session yet.</div>
+        </div>
+      </div>
       <div class="progress-box" id="scanProgress"><div class="terminal" id="scanTerminal"></div></div>
       <div id="scanResults" style="display:none;">
         <div class="card assessment-card" id="scanAssessmentCard">
