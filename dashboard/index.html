@@ -36,7 +36,7 @@
         </div>
         <div class="nav-item" data-page="investigation">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          Investigation
+          Tokens
         </div>
         <div class="nav-item" data-page="findings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -158,7 +158,7 @@
       <div class="tab-bar" id="homeTabBar">
         <div class="tab-bar-item active" data-page="home">Overview</div>
         <div class="tab-bar-item" data-page="scanner">Scanner</div>
-        <div class="tab-bar-item" data-page="investigation">Investigation</div>
+        <div class="tab-bar-item" data-page="investigation">Tokens</div>
         <div class="tab-bar-item" data-page="findings">Findings</div>
         <div class="tab-bar-item" data-page="history">History</div>
         <div class="tab-bar-item" data-page="analytics">Analysis</div>
@@ -405,12 +405,15 @@
 
     <!-- ══════════ INVESTIGATION ══════════ -->
     <div class="page" id="page-investigation">
-      <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">Investigation</h1><p style="font-size:0.6875rem;color:var(--text-dim);margin-top:2px;">On-chain &amp; domain intelligence</p></div></div>
+      <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">Token investigation</h1><p style="font-size:0.6875rem;color:var(--text-dim);margin-top:2px;">SPL mint holder sample — coordination &amp; cluster heuristics (not financial advice)</p></div></div>
       <div class="tool-list">
-        <div class="tool-card"><div class="tool-header"><span class="tool-num">01</span><span class="tool-title">Wallet Lookup</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Balance, account shape, recent signatures</span></span></div><div class="tool-row"><input type="text" class="input input-mono" id="chainAddr" placeholder="0x... or Solana address"><button class="btn btn-primary" onclick="runChainLookup()">Lookup</button></div><div class="investigation-result" id="chainResult" style="display:none;margin-top:12px;"></div><details class="investigation-raw" id="chainRawWrap" style="display:none;"><summary>Raw JSON</summary><pre id="chainRawJson"></pre></details></div>
-        <div class="tool-card"><div class="tool-header"><span class="tool-num">02</span><span class="tool-title">Token Bundle</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Holder sampling, cluster analysis</span></span></div><div class="tool-row"><input type="text" class="input input-mono" id="tokenMint" placeholder="SPL mint address"><button class="btn btn-primary" onclick="runTokenBundle()">Analyze</button></div><div class="investigation-result" id="tokenResult" style="display:none;margin-top:12px;"></div><details class="investigation-raw" id="tokenRawWrap" style="display:none;"><summary>Raw JSON</summary><pre id="tokenRawJson"></pre></details></div>
-        <div class="tool-card"><div class="tool-header"><span class="tool-num">03</span><span class="tool-title">Domain OSINT</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">WHOIS, DNS, SSL cert info</span></span></div><div class="tool-row"><input type="text" class="input input-mono" id="osintDomain" placeholder="example.com"><button class="btn btn-primary" onclick="runOsint()">Investigate</button></div><div class="investigation-result" id="osintResult" style="display:none;margin-top:12px;"></div><details class="investigation-raw" id="osintRawWrap" style="display:none;"><summary>Raw JSON</summary><pre id="osintRawJson"></pre></details></div>
-        <div class="tool-card"><div class="tool-header"><span class="tool-num">04</span><span class="tool-title">PoC Simulator</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">IDOR and unauth access tests</span></span></div><div style="display:flex;gap:8px;margin-bottom:8px;"><select class="input" id="pocType" style="width:110px;"><option value="idor">IDOR</option><option value="unauth">Unauth</option></select><input type="text" class="input input-mono" id="pocUrl" placeholder="https://api.example.com/user/123" style="flex:1;"></div><button class="btn btn-primary" onclick="runPoc()">Simulate</button><div class="investigation-result" id="pocResult" style="display:none;margin-top:12px;"></div><details class="investigation-raw" id="pocRawWrap" style="display:none;"><summary>Raw JSON</summary><pre id="pocRawJson"></pre></details></div>
+        <div class="tool-card tool-card-token">
+          <div class="tool-header"><span class="tool-num">01</span><span class="tool-title">SPL token scanner</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Uses Helius + server Arkham. Scores reflect overlapping funding patterns in a holder sample. A modest cluster % is common; weigh it together with coordination score and the explained signals below.</span></span></div>
+          <div class="tool-row token-scan-row"><input type="text" class="input input-mono" id="tokenMint" placeholder="SPL mint address" autocomplete="off"><button class="btn btn-primary" id="tokenScanBtn" onclick="runTokenBundle()">Run scan</button></div>
+          <label class="token-deep-scan"><input type="checkbox" id="tokenDeepScan"> Deep scan (all holders, more Arkham lookups — slower, often ~1–3 min)</label>
+          <div class="investigation-result token-bundle-wrap" id="tokenResult" style="display:none;margin-top:14px;"></div>
+          <details class="investigation-raw" id="tokenRawWrap" style="display:none;"><summary>Raw JSON</summary><pre id="tokenRawJson"></pre></details>
+        </div>
       </div>
     </div>
 
