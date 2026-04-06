@@ -1,6 +1,6 @@
 /**
  * Diverg Extension — Popup logic.
- * Full web scan via API when configured; otherwise built-in quick scan.
+ * Full web scan via API when configured; otherwise Diverg Auto (in-browser scan).
  */
 
 (function () {
@@ -346,7 +346,7 @@
           try {
             result = await DivergScan.runExtendedScan(url);
           } catch (err) {
-            setStatus('Full scan failed: ' + (err && err.message ? err.message : 'Could not complete scan. Try Quick scan or set API URL in Options.'), true);
+            setStatus('Full scan failed: ' + (err && err.message ? err.message : 'Could not complete scan. Try Diverg Auto or set API URL in Options.'), true);
             return;
           }
         }
