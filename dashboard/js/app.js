@@ -903,12 +903,6 @@ async function launchScan() {
     return;
   }
 
-  const authorized = !!document.getElementById('scanAuthorized')?.checked;
-  if (!authorized) {
-    alert('Confirm written authorization before scanning.');
-    return;
-  }
-
   const scope = document.querySelector('.scope-pill.active')?.dataset.scope || 'full';
   const progressBox = document.getElementById('scanProgress');
   const terminal = document.getElementById('scanTerminal');
