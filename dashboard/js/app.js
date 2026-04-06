@@ -419,55 +419,24 @@ function setInvestigationRaw(kind, data) {
 
 function tokenVerdictBadge(verdict) {
   const v = String(verdict || '').trim().toLowerCase();
-  if (v.includes('lower')) {
-    return {
-      cls: 'badge-low',
-      text: 'Mostly diffuse (sample)',
-      hint: 'In this holder sample, coordination stayed relatively low.',
-    };
-  }
-  if (v.includes('moderate')) {
-    return {
-      cls: 'badge-medium',
-      text: 'Mixed — worth a look',
-      hint: 'Some overlapping funding or cluster hints; not automatically malicious.',
-    };
-  }
-  if (v.includes('elevated')) {
-    return {
-      cls: 'badge-medium',
-      text: 'Elevated coordination',
-      hint: 'Stronger funding-pattern overlap in the sample and/or a larger clustered stake. Still a heuristic — verify manually.',
-    };
-  }
-  return { cls: 'badge-info', text: verdict || 'Unknown', hint: '' };
+  if (v.includes('clean')) return { cls: 'badge-low', text: 'Clean' };
+  if (v.includes('moderate')) return { cls: 'badge-medium', text: 'Moderate' };
+  if (v.includes('high')) return { cls: 'badge-critical', text: 'High risk' };
+  return { cls: 'badge-info', text: verdict || 'Unknown' };
 }
 
 function tokenSignalHumanize(sig) {
-  const raw = String(sig);
-  const s = raw.toLowerCase();
-  if (s.startsWith('bridge_mixer:')) {
-    return 'Bridge- or mixer-style wording showed up on a funding path (see raw JSON for the exact line).';
-  }
-  if (s.includes('same_first_fund')) {
-    return 'Several holders received their first on-chain funds in very similar amounts — a coordination hint, not proof.';
-  }
-  if (s.includes('cex_strong_funder')) {
-    return 'A large share of sampled holders were first funded from exchange-style addresses.';
-  }
-  if (s.includes('parallel_cex_funder')) {
-    return 'Multiple holders show loosely aligned CEX-style funding timing or paths.';
-  }
-  if (s.includes('weak_custodial')) {
-    return 'Weak text heuristics suggested custodial / exchange-like labeling (low confidence alone).';
-  }
-  if (s.includes('mixer_keyword')) {
-    return 'A label or entity string matched mixer-related vocabulary — context matters.';
-  }
-  if (s.startsWith('venue:')) {
-    return 'A venue-style tag appeared on a funder path in this sample.';
-  }
-  return 'Heuristic from the bundle model — open raw JSON for the exact definition.';
+  const s = String(sig).toLowerCase();
+  if (s.startsWith('bridge_mixer:')) return 'Funding path includes bridge or mixer contract interaction.';
+  if (s.includes('same_first_fund')) return 'Multiple holders received initial funding in matching amounts.';
+  if (s.includes('cex_strong_funder')) return 'A high share of holders were funded from exchange deposit wallets.';
+  if (s.includes('parallel_cex_funder')) return 'Holders show parallel funding paths through exchange accounts.';
+  if (s.includes('weak_custodial')) return 'Funder addresses show custodial or exchange-like labeling.';
+  if (s.includes('mixer_keyword')) return 'Funder entity matched mixer-related labeling.';
+  if (s.includes('shared_inbound')) return 'Multiple holders share the same inbound counterparty address.';
+  if (s.includes('shared_outbound')) return 'Multiple holders sent tokens to the same receiving address.';
+  if (s.startsWith('venue:')) return 'Funding routed through a known venue address.';
+  return '';
 }
 
 function formatTokenPct(n) {
@@ -482,13 +451,10 @@ function renderTokenBundleLoading(deep) {
   const box = document.getElementById('tokenResult');
   if (!box) return;
   box.style.display = 'block';
-  const note = deep
-    ? 'Deep scan — often 1–3+ minutes (more holders and Arkham lookups).'
-    : 'Standard scan — often ~30–90s depending on mint size and APIs.';
+  const note = deep ? 'Running deep analysis…' : 'Scanning on-chain holders…';
   box.innerHTML = `
     <div class="token-bundle-report token-bundle-report--loading">
-      <div class="token-bundle-loading-title">Running holder sample…</div>
-      <p class="token-bundle-loading-note">${escHtml(note)}</p>
+      <div class="token-bundle-loading-title">${escHtml(note)}</div>
       <div class="token-bundle-skeleton" aria-hidden="true"></div>
     </div>`;
 }
@@ -510,6 +476,11 @@ function renderTokenBundleError(mint, headline, detail) {
     </div>`;
 }
 
+function truncAddr(addr) {
+  const a = String(addr || '');
+  return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
+}
+
 function renderTokenBundleSuccess(mint, data) {
   const box = document.getElementById('tokenResult');
   if (!box) return;
@@ -524,59 +495,77 @@ function renderTokenBundleSuccess(mint, data) {
     ?? data.holder_count
     ?? data.holders_count
     ?? '—';
-  const caps = data.intelligence_capabilities || {};
-  const arkhamOk = caps.provider === 'arkham' && caps.available;
   const signals = Array.isArray(data.risk_signals) ? data.risk_signals : [];
   const summary = String(data.risk_summary || '').trim();
   const signalBlocks = signals.slice(0, 14).map((sig) => {
     const raw = String(sig);
     const human = tokenSignalHumanize(raw);
     const label = raw.length > 96 ? `${raw.slice(0, 93)}…` : raw;
+    if (!human) return `<div class="token-signal-card"><div class="token-signal-name">${escHtml(label)}</div></div>`;
     return `<div class="token-signal-card"><div class="token-signal-name">${escHtml(label)}</div><div class="token-signal-expl">${escHtml(human)}</div></div>`;
   }).join('');
   const cross = data.cross_chain_bundle && typeof data.cross_chain_bundle === 'object' && data.cross_chain_bundle.combined_escalation;
   const crossNote = cross
-    ? '<p class="token-bundle-note">Cross-chain or bridge/mixer hints also fired — see <code>cross_chain_bundle</code> in raw JSON.</p>'
+    ? '<p class="token-bundle-note">Cross-chain bridge and mixer funding signals detected across linked tokens.</p>'
     : '';
-  const hintRow = badge.hint
-    ? `<p class="token-bundle-verdict-hint">${escHtml(badge.hint)}</p>`
-    : '';
+
+  const holders = Array.isArray(data.top_holders) ? data.top_holders : [];
+  const holdersRows = holders.slice(0, 20).map((h, i) => {
+    const addr = h.wallet || '';
+    const bal = h.amount_ui != null ? Number(h.amount_ui).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—';
+    const pct = h.pct_supply != null ? `${Number(h.pct_supply).toFixed(2)}%` : '—';
+    const funder = h.funder || '—';
+    const cluster = h.in_focus_cluster ? '<span class="token-cluster-tag">cluster</span>' : '';
+    return `<tr><td class="col-num">${i + 1}</td><td class="col-mono" title="${escHtml(addr)}">${escHtml(truncAddr(addr))}</td><td>${escHtml(bal)}</td><td>${escHtml(pct)}</td><td class="col-mono" title="${escHtml(funder)}">${escHtml(truncAddr(funder))}</td><td>${cluster}</td></tr>`;
+  }).join('');
+
+  const clusterWallets = Array.isArray(data.focus_cluster_wallets) ? data.focus_cluster_wallets : [];
+  const holderMap = {};
+  holders.forEach((h) => { if (h.wallet) holderMap[h.wallet] = h; });
+  const clusterRows = clusterWallets.slice(0, 40).map((addr) => {
+    const h = holderMap[addr] || {};
+    const bal = h.amount_ui != null ? Number(h.amount_ui).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—';
+    const pct = h.pct_supply != null ? `${Number(h.pct_supply).toFixed(2)}%` : '—';
+    const funder = h.funder || '—';
+    return `<tr><td class="col-mono" title="${escHtml(addr)}">${escHtml(truncAddr(addr))}</td><td>${escHtml(bal)}</td><td>${escHtml(pct)}</td><td class="col-mono" title="${escHtml(funder)}">${escHtml(truncAddr(funder))}</td></tr>`;
+  }).join('');
+
   box.innerHTML = `
     <div class="token-bundle-report">
       <div class="token-bundle-header">
         <div>
-          <h3 class="token-bundle-h3">Holder snapshot</h3>
-          <p class="token-bundle-lede">Sample-based heuristics only — not proof of wrongdoing. Small cluster % is common; read coordination score and signals together.</p>
+          <h3 class="token-bundle-h3">Scan results</h3>
         </div>
         <span class="badge ${badge.cls}">${escHtml(badge.text)}</span>
       </div>
-      ${hintRow}
       <div class="token-bundle-scores">
         <div class="token-score-block">
           <div class="token-score-head">
-            <span>Coordination score</span>
+            <span>Funding overlap</span>
             <span class="token-score-num">${coord.toFixed(1)} / 100</span>
           </div>
-          <p class="token-score-desc">Overlap in <em>how</em> top holders were funded in this sample. This can be high even when only a few percent of supply sits in one cluster.</p>
-          <div class="token-meter" role="img" aria-label="Coordination ${coord} out of 100"><div class="token-meter-fill token-meter-fill--coord" style="width:${coord}%"></div></div>
+          <p class="token-score-desc">Higher values indicate stronger overlap in how holders were funded.</p>
+          <div class="token-meter" role="img" aria-label="Funding overlap ${coord} out of 100"><div class="token-meter-fill token-meter-fill--coord" style="width:${coord}%"></div></div>
         </div>
         <div class="token-score-block">
           <div class="token-score-head">
-            <span>Largest cluster (sampled supply)</span>
+            <span>Largest cluster</span>
             <span class="token-score-num">${formatTokenPct(cp)} · ${cw} wallets</span>
           </div>
-          <p class="token-score-desc">Share held by the largest linked-style group in this snapshot — not total insider ownership of the token.</p>
+          <p class="token-score-desc">Percentage of sampled supply held by the largest linked wallet group.</p>
           <div class="token-meter" role="img" aria-label="Cluster ${formatTokenPct(cp)}"><div class="token-meter-fill token-meter-fill--cluster" style="width:${Math.min(100, Math.max(0, cp))}%"></div></div>
         </div>
       </div>
       <div class="token-bundle-metrics">
         <div class="token-metric"><span class="token-metric-label">Mint</span><span class="token-metric-val token-mono-clip" title="${escHtml(mint)}">${escHtml(mint)}</span></div>
-        <div class="token-metric"><span class="token-metric-label">Model band</span><span class="token-metric-val">${escHtml(verdict)}</span></div>
-        <div class="token-metric"><span class="token-metric-label">Holders sampled</span><span class="token-metric-val">${escHtml(String(holderCount))}</span></div>
-        <div class="token-metric"><span class="token-metric-label">Arkham</span><span class="token-metric-val">${arkhamOk ? 'Active (server)' : 'Unavailable'}</span></div>
+        <div class="token-metric"><span class="token-metric-label">Verdict</span><span class="token-metric-val">${escHtml(verdict)}</span></div>
+        <div class="token-metric"><span class="token-metric-label">Holders scanned</span><span class="token-metric-val">${escHtml(String(holderCount))}</span></div>
+        <div class="token-metric"><span class="token-metric-label">Cluster wallets</span><span class="token-metric-val">${cw}</span></div>
       </div>
       ${summary ? `<div class="token-bundle-summary"><span class="token-bundle-summary-label">Summary</span><p>${escHtml(summary)}</p></div>` : ''}
       ${signals.length ? `<div class="token-signals-section"><h4 class="token-bundle-h4">What drove the score</h4><div class="token-signal-grid">${signalBlocks}</div></div>` : ''}
+      ${holdersRows ? `<details class="token-wallet-section"><summary class="token-bundle-h4">Top holders (${holders.length})</summary><div class="token-wallet-table"><table><thead><tr><th class="col-num">#</th><th>Address</th><th>Balance</th><th>% Supply</th><th>Funder</th><th></th></tr></thead><tbody>${holdersRows}</tbody></table></div></details>` : ''}
+      ${clusterRows ? `<details class="token-wallet-section"><summary class="token-bundle-h4">Cluster wallets (${clusterWallets.length})</summary><div class="token-wallet-table"><table><thead><tr><th>Address</th><th>Balance</th><th>% Supply</th><th>Funder</th></tr></thead><tbody>${clusterRows}</tbody></table></div></details>` : ''}
       ${crossNote}
     </div>`;
 }

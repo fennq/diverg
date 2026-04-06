@@ -1342,6 +1342,67 @@ body {
   word-break: break-all;
 }
 
+.token-wallet-section {
+  margin-top: 14px;
+  border: 1px solid var(--border-card);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+.token-wallet-section > summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text);
+  user-select: none;
+}
+
+.token-wallet-table {
+  border-top: 1px solid var(--border-card);
+  overflow-x: auto;
+}
+
+.token-wallet-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.6875rem;
+}
+
+.token-wallet-table th {
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border-card);
+  white-space: nowrap;
+}
+
+.token-wallet-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.token-wallet-table .col-mono {
+  font-family: var(--mono);
+}
+
+.token-cluster-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.5625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: rgba(245,158,11,0.15);
+  color: #f59e0b;
+}
+
 .investigation-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -1748,25 +1748,21 @@ def _enrich_solana_bundle_payload(raw: dict) -> dict:
     if isinstance(fc_lines, list) and fc_lines:
         extra = [str(x) for x in fc_lines[:6] if x]
         raw["risk_signals"] = list(raw["risk_signals"]) + [f"bridge_mixer: {x}" for x in extra]
-    if coord_f >= 50 or cp >= 35:
-        verdict = "Elevated"
-    elif coord_f >= 28 or cp >= 18:
+    if coord_f >= 70 or (coord_f >= 45 and cp >= 20):
+        verdict = "High risk"
+    elif coord_f >= 40 or (coord_f >= 25 and cp >= 12):
         verdict = "Moderate"
     else:
-        verdict = "Lower in sampled holders"
+        verdict = "Clean"
     raw["risk_verdict"] = verdict
-    sig_txt = ", ".join(str(x) for x in raw["risk_signals"][:8]) if raw["risk_signals"] else "none"
+    cw = raw["cluster_wallet_count"]
     raw["risk_summary"] = (
-        f"{verdict}: coordination {raw['risk_score']}/100; "
-        f"cluster {raw['cluster_wallet_count']} wallets hold ~{cp}% of sampled supply. "
-        f"Signals: {sig_txt}."
+        f"{verdict}: {raw['risk_score']}/100 funding overlap across {cw} cluster wallet{'s' if cw != 1 else ''} "
+        f"holding {cp:.2f}% of sampled supply."
     )
     ccb = raw.get("cross_chain_bundle")
     if isinstance(ccb, dict) and ccb.get("combined_escalation"):
-        raw["risk_summary"] = (
-            raw["risk_summary"]
-            + " Cross-chain token mapping plus bridge- and mixer-style funding signals overlap — see cross_chain_bundle in JSON for notes."
-        )
+        raw["risk_summary"] += " Cross-chain bridge and mixer funding signals detected."
     return raw
 
 
@@ -1864,8 +1860,6 @@ def investigation_solana_bundle():
         out = _enrich_solana_bundle_payload(out)
         out = _enrich_solana_bundle_arkham(out)
     payload = out if isinstance(out, dict) else {"ok": False, "error": "Unexpected response"}
-    if isinstance(payload, dict):
-        _attach_arkham_capabilities(payload, required=True)
     if isinstance(payload, dict) and payload.get("ok"):
         _reward_investigation(g.user["id"], "solana_bundle")
     try:
