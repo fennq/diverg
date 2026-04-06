@@ -376,6 +376,12 @@ FEE_PATTERNS = [
     re.compile(r"transaction\s*(?:fee|tax)\s*[:\s]*(\d+(?:\.\d+)?)", re.I),
 ]
 TOKEN_MINT_RE = re.compile(r"[1-9A-HJ-NP-Za-km-z]{32,44}")  # Solana base58-like
+_LP_POOL_WORDS = ("pool", "liquidity", "amm", "lp", "vault", "whirlpool", "clmm")
+_KNOWN_SOLANA_NON_USER_ACCOUNTS = {
+    "11111111111111111111111111111111",  # System Program
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",  # SPL Token Program
+    "So11111111111111111111111111111111111111112",  # Wrapped SOL mint
+}
 PROGRAM_ID_RE = re.compile(r"Program\s*(?:id|Id)?\s*[:\s]*([1-9A-HJ-NP-Za-km-z]{32,44})", re.I)
 
 # Known CEX/mixer addresses (optional): tag as counterparty in flow graph. Extend via env DIVERG_KNOWN_CEX_MIXER (comma-separated).
@@ -598,6 +604,102 @@ def _scrape_for_tokens_and_fees(session: requests.Session, target_url: str, run_
     return out
 
 
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    try:
+        if isinstance(v, str):
+            vv = v.replace(",", "").strip()
+            if not vv:
+                return default
+            return float(vv)
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def _extract_transfer_timestamp(tx: dict) -> int | None:
+    raw = tx.get("block_time") or tx.get("blockTime") or tx.get("timeStamp") or tx.get("timestamp")
+    if raw is None:
+        return None
+    try:
+        ts = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if ts > 10**12:
+        ts //= 1000
+    return ts if ts > 0 else None
+
+
+def _looks_like_non_user_wallet(address: str, token: str | None = None) -> bool:
+    addr = (address or "").strip()
+    if not addr:
+        return True
+    if token and addr == token:
+        return True
+    if addr in _KNOWN_SOLANA_NON_USER_ACCOUNTS:
+        return True
+    return False
+
+
+def _looks_like_lp_or_program_holder(holder: dict, total_supply: float) -> bool:
+    if not isinstance(holder, dict):
+        return False
+    owner = str(holder.get("owner") or holder.get("address") or holder.get("owner_address") or "").strip().lower()
+    label = str(
+        holder.get("owner_name")
+        or holder.get("name")
+        or holder.get("label")
+        or holder.get("owner_label")
+        or holder.get("owner_tag")
+        or ""
+    ).strip().lower()
+    owner_program = str(holder.get("owner_program") or holder.get("ownerProgram") or "").strip().lower()
+    if owner in (x.lower() for x in _KNOWN_SOLANA_NON_USER_ACCOUNTS):
+        return True
+    if owner_program and owner_program in (x.lower() for x in _KNOWN_SOLANA_NON_USER_ACCOUNTS):
+        return True
+    if any(w in label for w in _LP_POOL_WORDS):
+        return True
+    amount = _safe_float(holder.get("amount") or holder.get("balance"), default=0.0)
+    pct = (100.0 * amount / total_supply) if total_supply > 0 else 0.0
+    if pct >= 12.0 and any(w in owner for w in _LP_POOL_WORDS):
+        return True
+    return False
+
+
+def _is_valid_solana_token_candidate(token: str) -> bool:
+    t = (token or "").strip()
+    if not t or not TOKEN_MINT_RE.fullmatch(t):
+        return False
+    if t in _KNOWN_SOLANA_NON_USER_ACCOUNTS:
+        return False
+    if t.lower().startswith(("http", "www")):
+        return False
+    return True
+
+
+def _normalize_token_candidates(candidates: list[str], chain: str) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    is_evm = _is_evm_chain(chain)
+    for raw in candidates:
+        t = str(raw or "").strip()
+        if not t:
+            continue
+        if is_evm:
+            if not (t.startswith("0x") and len(t) == 42):
+                continue
+            key = t.lower()
+        else:
+            if not _is_valid_solana_token_candidate(t):
+                continue
+            key = t
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+    return out
+
+
 def _solscan_get(
     session: requests.Session,
     path: str,
@@ -796,19 +898,43 @@ def _heuristic_sniper(
     same_wallet_min_tokens: int = 3,
 ) -> list[dict]:
     wallet_to_tokens = defaultdict(set)
+    wallet_events = defaultdict(int)
     for token, txs in transfers_by_token.items():
-        for t in txs[:15]:
+        if not isinstance(txs, list) or not txs:
+            continue
+        candidate_txs = txs[:25]
+        earliest = None
+        for t in candidate_txs:
+            ts = _extract_transfer_timestamp(t)
+            if ts is not None:
+                earliest = ts if earliest is None else min(earliest, ts)
+        for t in candidate_txs:
+            ts = _extract_transfer_timestamp(t)
+            if earliest is not None and ts is not None and ts > earliest + 600:
+                continue
             to_addr = (t.get("to_address") or t.get("to") or t.get("destination") or "").strip()
-            if to_addr and to_addr != token:
-                wallet_to_tokens[to_addr].add(token)
+            from_addr = (t.get("from_address") or t.get("from") or t.get("source") or "").strip()
+            if not to_addr or _looks_like_non_user_wallet(to_addr, token=token):
+                continue
+            if from_addr and to_addr == from_addr:
+                continue
+            wallet_to_tokens[to_addr].add(token)
+            wallet_events[to_addr] += 1
     alerts = []
     for wallet, tokens in wallet_to_tokens.items():
-        if len(tokens) >= same_wallet_min_tokens:
+        token_count = len(tokens)
+        event_count = int(wallet_events.get(wallet) or 0)
+        if token_count >= same_wallet_min_tokens and event_count >= max(3, same_wallet_min_tokens):
             alerts.append({
                 "wallet": wallet,
                 "tokens_bought_early": list(tokens)[:10],
-                "count": len(tokens),
-                "description": f"Same wallet bought in early window across {len(tokens)} tokens (possible sniper).",
+                "token_count": token_count,
+                "count": token_count,
+                "event_count": event_count,
+                "description": (
+                    f"Same wallet received early-token flow across {token_count} tokens "
+                    f"({event_count} early events within first-window heuristics; possible sniper)."
+                ),
             })
     return alerts
 
@@ -817,17 +943,25 @@ def _heuristic_concentrated_holders(holders: list[dict], top_n: int = 10, thresh
     alerts = []
     if not holders:
         return alerts
-    total = sum(float(h.get("amount", 0) or h.get("balance", 0)) for h in holders)
+    total = sum(_safe_float(h.get("amount", 0) or h.get("balance", 0)) for h in holders if isinstance(h, dict))
     if total <= 0:
         return alerts
-    top = holders[:top_n]
-    top_amount = sum(float(h.get("amount", 0) or h.get("balance", 0)) for h in top)
+    considered = [h for h in holders if isinstance(h, dict) and not _looks_like_lp_or_program_holder(h, total)]
+    if len(considered) < max(2, top_n // 2):
+        considered = [h for h in holders if isinstance(h, dict)]
+    top = considered[:top_n]
+    top_amount = sum(_safe_float(h.get("amount", 0) or h.get("balance", 0)) for h in top)
     pct = (top_amount / total) * 100
     if pct >= threshold_pct:
         alerts.append({
+            "type": "concentration",
             "top_n": top_n,
             "percentage": round(pct, 1),
-            "description": f"Top {top_n} holders control {pct:.1f}% of supply (rug/coordinated dump risk).",
+            "considered_holders": len(considered),
+            "description": (
+                f"Top {top_n} non-LP holders control {pct:.1f}% of supply "
+                f"({len(considered)} holders considered after LP/program filtering)."
+            ),
         })
     return alerts
 
@@ -839,14 +973,24 @@ def _compute_risk_score(report: BlockchainInvestigationReport) -> float:
         score += _finding_risk_weight(f)
     # Explicit risk signals (avoid double-counting with severity)
     for a in report.liquidity_alerts:
-        if "remove" in str(a).lower() or "REMOVE_LIQ" in str(a):
+        a_str = str(a).lower()
+        if "remove" in a_str or "remove_liq" in a_str:
             score += 22
         else:
-            score += 12  # concentration
+            score += 6  # concentration alerts are noisy unless corroborated
     if report.sniper_alerts:
-        score += 20
+        score += min(18, 6 * len(report.sniper_alerts))
     if report.counterparties:
-        score += 5  # known counterparties (CEX/OTC) = traceability, slight risk if deployer
+        risky_cp = any(
+            c.get("name")
+            and any(
+                k in str(c.get("name", "")).lower()
+                for k in ("exchange", "cex", "binance", "coinbase", "kraken", "mixer", "tornado", "jambler")
+            )
+            for c in report.counterparties
+        )
+        if risky_cp:
+            score += 3
     evidence_summary = _build_evidence_summary(report.findings)
     if evidence_summary.get("quality") == "limited":
         score *= 0.82
@@ -1257,6 +1401,22 @@ def run(
         report.tokens_discovered = list(token_addresses)[:20]
     else:
         report.tokens_discovered = tokens_from_scrape
+    raw_token_count = len(report.tokens_discovered or [])
+    report.tokens_discovered = _normalize_token_candidates(report.tokens_discovered or [], report.chain)[:20]
+    if raw_token_count > len(report.tokens_discovered):
+        report.findings.append(Finding(
+            title="Dropped invalid token candidates during curation",
+            severity="Info",
+            url=target_url,
+            category="Blockchain / Curation",
+            evidence=f"Retained {len(report.tokens_discovered)} token candidates out of {raw_token_count} raw candidates.",
+            impact="Reduces false positives from non-token or malformed token identifiers.",
+            remediation="Provide canonical mint/contract addresses for highest-confidence results.",
+            confidence="high",
+            source="curation",
+            proof=f"raw={raw_token_count}; curated={len(report.tokens_discovered)}",
+            verified=True,
+        ))
 
     stated_fee_pct = _extract_stated_fee_pct(scraped.get("fee_mentions", []))
     if stated_fee_pct is not None:
@@ -1479,6 +1639,31 @@ def run(
             report.errors.append("ARKHAM_API_KEY is required when Solscan API keys are set.")
         else:
             report.on_chain_used = True
+            validated_tokens: list[str] = []
+            for token in (report.tokens_discovered or [])[:8]:
+                if _over_budget(run_start):
+                    break
+                if not _is_valid_solana_token_candidate(token):
+                    continue
+                meta = _solscan_token_meta(SESSION, token, solscan_key)
+                if isinstance(meta, dict) and meta:
+                    validated_tokens.append(token)
+            if validated_tokens:
+                report.tokens_discovered = validated_tokens
+            elif report.tokens_discovered:
+                report.findings.append(Finding(
+                    title="No token candidates validated on-chain",
+                    severity="Info",
+                    url=target_url,
+                    category="Blockchain / Curation",
+                    evidence="None of the provided/scraped token candidates returned Solscan token metadata.",
+                    impact="Token-specific heuristics were skipped to avoid false-positive conclusions.",
+                    remediation="Provide known canonical mint addresses and re-run.",
+                    confidence="high",
+                    source="curation",
+                    proof="solscan_token_meta returned empty for all candidates",
+                    verified=True,
+                ))
             # --- Sniper across launches: token/transfer per token, earliest first ---
             transfers_by_token = {}
             for token in (report.tokens_discovered or [])[:5]:
@@ -1813,30 +1998,39 @@ def run(
             cc_payload["summary"] = summarize_cross_chain_payload(cc_payload)
             report.cross_chain = cc_payload
             titles = []
+            high_tier_titles = []
             for block in xc_sources:
                 for c in (block.get("candidates") or [])[:4]:
                     fc = c.get("foreign_chain", "?")
                     fa = (c.get("foreign_address") or "")[:18]
                     tier = c.get("confidence_tier") or c.get("confidence", "")
+                    tier_l = str(tier or "").lower()
                     ex = c.get("foreign_explorer_url")
                     if ex:
-                        titles.append(f"{fc} {fa}… ({tier}) — {ex}")
+                        row = f"{fc} {fa}… ({tier}) — {ex}"
                     else:
-                        titles.append(f"{fc} {fa}… ({tier})")
-            if titles:
+                        row = f"{fc} {fa}… ({tier})"
+                    titles.append(row)
+                    if any(k in tier_l for k in ("high", "verified_primary", "strong")):
+                        high_tier_titles.append(row)
+            if high_tier_titles:
                 report.findings.append(Finding(
                     title="Cross-chain asset hints [REVIEW]",
                     severity="Info",
                     url=target_url,
                     category="Blockchain / Cross-chain",
-                    evidence="; ".join(titles[:6]),
+                    evidence="; ".join(high_tier_titles[:6]),
                     impact="Token may have bridged or wrapped counterparts elsewhere; confirms nothing about misconduct.",
                     remediation="Verify mappings on official bridge registries and destination-chain explorers.",
                     confidence="medium",
                     source="cross_chain_hints",
-                    proof="; ".join(titles[:3]),
+                    proof="; ".join(high_tier_titles[:3]),
                     verified=False,
                 ))
+            elif titles:
+                report.errors.append(
+                    "Cross-chain hints found only low-certainty mappings; excluded from findings pending corroboration."
+                )
     except Exception as _xce:
         report.cross_chain = {
             "error": str(_xce),

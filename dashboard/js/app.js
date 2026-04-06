@@ -762,6 +762,12 @@ function runChainLookup() {
         if (s.recent_signatures !== undefined) termLine(out, 'Txns    : ' + s.recent_signatures, null);
       }
       if (data.error) termLine(out, 'Note    : ' + data.error, 'yellow');
+      if (data.intelligence_notice) termLine(out, 'Intel   : ' + data.intelligence_notice, 'dim');
+      const caps = data.intelligence_capabilities || {};
+      if (caps.provider === 'arkham') {
+        const capStatus = caps.available ? 'enabled (server-managed)' : 'unavailable on server';
+        termLine(out, 'Intel   : Arkham ' + capStatus, caps.available ? 'green' : 'yellow');
+      }
       const ak = data.arkham;
       if (ak) {
         if (ak.explorer_url) termLine(out, 'Arkham  : ' + ak.explorer_url, 'dim');
@@ -785,25 +791,31 @@ function runTokenBundle() {
     termLine(out, ts() + ' Warning: mint format looks unusual (continuing)', 'yellow');
   }
   const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
-  if (!heliusApiKey) {
-    termLine(out, ts() + ' Missing Helius API key — add it in Settings to run bundle analysis', 'red');
-    return;
-  }
   termLine(out, ts() + ' Running full token bundle analysis...', 'accent');
-  withProgress(out, 'Token bundle analysis', () => apiJson('/api/investigation/solana-bundle', {
+  const payload = {
     mint,
-    helius_api_key: heliusApiKey,
     scan_all_holders: true,
     max_funded_by_lookups: 1200,
     include_x_intel: true,
-  }))
+  };
+  if (heliusApiKey) payload.helius_api_key = heliusApiKey;
+  withProgress(out, 'Token bundle analysis', () => apiJson('/api/investigation/solana-bundle', payload))
     .then((data) => {
       termLine(out, '', null);
       termLine(out, ts() + ' Backend responded', 'green');
       termLine(out, 'Mint       : ' + mint, null);
       if (data.error) {
         termLine(out, 'Error      : ' + data.error, 'red');
+        const capsErr = data.intelligence_capabilities || {};
+        if (capsErr.provider === 'arkham' && capsErr.available === false) {
+          termLine(out, 'Intel      : Arkham unavailable on server (platform config required)', 'yellow');
+        }
         return;
+      }
+      const caps = data.intelligence_capabilities || {};
+      if (caps.provider === 'arkham') {
+        const capStatus = caps.available ? 'enabled (server-managed)' : 'unavailable on server';
+        termLine(out, 'Intel      : Arkham ' + capStatus, caps.available ? 'green' : 'yellow');
       }
       const holderCount =
         data.params?.unique_holders_sampled ??

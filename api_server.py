@@ -133,14 +133,32 @@ if _INVESTIGATION_DIR not in sys.path:
 FP_MEMORY_PATH = ROOT / "content" / "false_positive_memory.json"
 
 
-def _arkham_env_error_response():
+def _arkham_capabilities(required: bool = True) -> dict:
+    """Arkham capability metadata for user-facing payloads (never exposes secrets)."""
+    available = bool((os.environ.get("ARKHAM_API_KEY") or "").strip())
+    return {
+        "provider": "arkham",
+        "mode": "server_managed",
+        "required_for_endpoint": bool(required),
+        "available": available,
+        "client_supplied_key_allowed": False,
+        "status": "enabled" if available else "unavailable",
+    }
+
+
+def _attach_arkham_capabilities(out: dict, required: bool = True) -> None:
+    out["intelligence_capabilities"] = _arkham_capabilities(required=required)
+
+
+def _arkham_env_error_response(endpoint_label: str = "blockchain investigation"):
     """Return (jsonify(...), status) if ARKHAM_API_KEY is missing on the server; else None."""
     if (os.environ.get("ARKHAM_API_KEY") or "").strip():
         return None
     return jsonify({
-        "error": "ARKHAM_API_KEY must be set on the server for blockchain investigation endpoints.",
-        "hint": "Request access at https://intel.arkm.com/api and add the key to the server environment or .env.",
-    }), 400
+        "error": f"Arkham intelligence is currently unavailable for {endpoint_label}.",
+        "hint": "Set ARKHAM_API_KEY on the server. End-users should not provide personal Arkham keys.",
+        "intelligence_capabilities": _arkham_capabilities(required=True),
+    }), 503
 
 
 def _attach_arkham_intel_block(out: dict, addr: str) -> None:
@@ -153,6 +171,8 @@ def _attach_arkham_intel_block(out: dict, addr: str) -> None:
             "summary": {},
             "ok": False,
             "error": "arkham_intel module unavailable on server",
+            "mode": "server_managed",
+            "client_supplied_key_allowed": False,
         }
         return
     key = (os.environ.get("ARKHAM_API_KEY") or "").strip()
@@ -163,6 +183,8 @@ def _attach_arkham_intel_block(out: dict, addr: str) -> None:
         "summary": ai.summarize_for_report(data),
         "ok": err is None,
         "error": err,
+        "mode": "server_managed",
+        "client_supplied_key_allowed": False,
     }
 
 
@@ -1334,9 +1356,6 @@ def investigation_blockchain():
     addr = sanitize_text(data.get("address") or "", 128).strip()
     if not addr:
         return jsonify({"error": "Missing address"}), 400
-    ark_miss = _arkham_env_error_response()
-    if ark_miss is not None:
-        return ark_miss
     network = sanitize_text(data.get("network") or "mainnet", 16).lower()
     if network not in ("mainnet", "devnet"):
         network = "mainnet"
@@ -1346,6 +1365,11 @@ def investigation_blockchain():
     api_key = body_key or env_key
 
     out: dict = {"address": addr, "network": network}
+    _attach_arkham_capabilities(out, required=False)
+    if any(k in data for k in ("arkham_api_key", "arkhamKey", "arkham_key")):
+        out["intelligence_notice"] = (
+            "Client-supplied Arkham keys are ignored. Diverg uses a server-managed Arkham key when configured."
+        )
 
     if _ETH_ADDR_RE.match(addr):
         out["chain"] = "evm"
@@ -1360,7 +1384,9 @@ def investigation_blockchain():
             out["raw"] = raw
             out["summary"] = _summarize_chain_evm(raw)
         except Exception as e:
-            return jsonify({"error": str(e), "address": addr, "chain": "evm"}), 200
+            err_out = {"error": str(e), "address": addr, "chain": "evm"}
+            _attach_arkham_capabilities(err_out, required=False)
+            return jsonify(err_out), 200
         _attach_arkham_intel_block(out, addr)
         _reward_investigation(g.user["id"], "blockchain")
         return jsonify(out)
@@ -1385,7 +1411,9 @@ def investigation_blockchain():
             network, api_key, "getSignaturesForAddress", [addr, {"limit": 35}],
         )
     except Exception as e:
-        return jsonify({"error": str(e), "address": addr, "chain": "solana", "raw": raw}), 200
+        err_out = {"error": str(e), "address": addr, "chain": "solana", "raw": raw}
+        _attach_arkham_capabilities(err_out, required=False)
+        return jsonify(err_out), 200
     try:
         raw["getTokenAccountsByOwner"] = _helius_solana_rpc(
             network,
@@ -1441,7 +1469,7 @@ def investigation_blockchain_full():
     if not deployer and not token_addresses:
         return jsonify({"error": "Provide address, deployer_address, or token_addresses"}), 400
 
-    ark_miss = _arkham_env_error_response()
+    ark_miss = _arkham_env_error_response("full blockchain investigation")
     if ark_miss is not None:
         return ark_miss
 
@@ -1499,6 +1527,8 @@ def investigation_blockchain_full():
         return jsonify({"error": "Unexpected investigation shape"}), 500
 
     payload = _truncate_blockchain_full_payload(payload)
+    if isinstance(payload, dict):
+        _attach_arkham_capabilities(payload, required=True)
     _reward_investigation(g.user["id"], "blockchain_full")
     try:
         return jsonify(payload)
@@ -1656,7 +1686,7 @@ def investigation_solana_bundle():
     if not api_key:
         return jsonify({"error": "Helius API key required. Add it in Settings or set HELIUS_API_KEY on the server."}), 400
 
-    ark_miss = _arkham_env_error_response()
+    ark_miss = _arkham_env_error_response("Solana bundle investigation")
     if ark_miss is not None:
         return ark_miss
 
@@ -1725,6 +1755,8 @@ def investigation_solana_bundle():
         out = _enrich_solana_bundle_payload(out)
         out = _enrich_solana_bundle_arkham(out)
     payload = out if isinstance(out, dict) else {"ok": False, "error": "Unexpected response"}
+    if isinstance(payload, dict):
+        _attach_arkham_capabilities(payload, required=True)
     if isinstance(payload, dict) and payload.get("ok"):
         _reward_investigation(g.user["id"], "solana_bundle")
     try:
