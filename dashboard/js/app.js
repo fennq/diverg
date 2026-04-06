@@ -618,6 +618,19 @@ function renderSimpleList(items, emptyText = 'No data') {
   return items.join('');
 }
 
+function formatDiffBaselineTime(rawTs) {
+  if (!rawTs) return '';
+  const d = new Date(rawTs);
+  if (Number.isNaN(d.getTime())) return String(rawTs);
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 function renderScanDiff(report) {
   const diff = (report && report.scan_diff && typeof report.scan_diff === 'object') ? report.scan_diff : null;
   const hasBaseline = !!(diff && diff.has_baseline);
@@ -631,14 +644,23 @@ function renderScanDiff(report) {
   setText('scanDiffImproved', diff ? Number(diff.improved_count || 0) : 0);
 
   const note = document.getElementById('scanDiffNote');
+  const cta = document.getElementById('scanDiffCta');
   if (note) {
     if (!diff) {
-      note.textContent = 'Run another scan on the same target to track changes.';
+      note.textContent = 'Run a first scan to create a baseline, then recheck the same target to track deltas.';
     } else if (!hasBaseline) {
       note.textContent = 'No baseline scan for this target yet. This run establishes the baseline.';
     } else {
-      const baselineAt = diff.baseline_scanned_at ? ` (baseline: ${diff.baseline_scanned_at})` : '';
+      const baselineLabel = formatDiffBaselineTime(diff.baseline_scanned_at);
+      const baselineAt = baselineLabel ? ` (baseline: ${baselineLabel})` : '';
       note.textContent = `Compared against your most recent scan on this target${baselineAt}.`;
+    }
+  }
+  if (cta) {
+    if (!diff || !hasBaseline) {
+      cta.innerHTML = '<button class="btn btn-primary btn-sm" onclick="recheckLastTarget()">Run recheck now</button>';
+    } else {
+      cta.innerHTML = '';
     }
   }
 
@@ -675,7 +697,7 @@ function renderScanDiff(report) {
 function recheckLastTarget() {
   const url = String(lastScanTarget || '').trim();
   if (!url) {
-    alert('Run a scan first so we know which target to recheck.');
+    alert('Run a first scan so we can establish a baseline for diff tracking.');
     return;
   }
   const scanUrl = document.getElementById('scanUrl');
