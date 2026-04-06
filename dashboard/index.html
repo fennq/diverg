@@ -262,34 +262,6 @@
         <div class="scope-pill active" data-scope="full">Full</div><div class="scope-pill" data-scope="quick">Quick</div><div class="scope-pill" data-scope="web">Web</div><div class="scope-pill" data-scope="api">API</div><div class="scope-pill" data-scope="crypto">Crypto</div><div class="scope-pill" data-scope="recon">Recon</div><div class="scope-pill" data-scope="passive">Passive</div><div class="scope-pill" data-scope="attack">Attack</div>
       </div>
       <div class="scan-scope-help" id="scanScopeHelp">Recommended: Full — complete assessment across recon, web, API, and high-value flaw checks.</div>
-      <div class="card scan-reliability-card">
-        <div class="card-header">
-          <span class="card-title">Scanner Readiness</span>
-          <span class="scan-health-pill scan-health-pill-info" id="scanHealthOverall">Checking</span>
-        </div>
-        <div class="card-body">
-          <div class="scan-health-grid">
-            <div class="scan-health-item">
-              <span class="scan-health-label">API</span>
-              <span class="scan-health-value" id="scanHealthApi">Checking</span>
-            </div>
-            <div class="scan-health-item">
-              <span class="scan-health-label">Database</span>
-              <span class="scan-health-value" id="scanHealthDb">Checking</span>
-            </div>
-            <div class="scan-health-item">
-              <span class="scan-health-label">Intel Provider</span>
-              <span class="scan-health-value" id="scanHealthIntel">Checking</span>
-            </div>
-            <div class="scan-health-item">
-              <span class="scan-health-label">Runtime Probe</span>
-              <span class="scan-health-value" id="scanHealthRuntime">Checking</span>
-            </div>
-          </div>
-          <div class="scan-health-notes" id="scanHealthNotes">Running readiness checks...</div>
-          <div class="scan-health-lastrun" id="scanLastRunQuality">No scan has been run in this session yet.</div>
-        </div>
-      </div>
       <div class="progress-box" id="scanProgress"><div class="terminal" id="scanTerminal"></div></div>
       <div id="scanResults" style="display:none;">
         <div class="card assessment-card" id="scanAssessmentCard">
@@ -389,6 +361,41 @@
           </details>
         </div>
         <div class="scan-tab-panel active" id="scanTab-findings">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Scan Diff</span>
+              <button class="btn btn-ghost" onclick="recheckLastTarget()">Recheck target</button>
+            </div>
+            <div class="card-body">
+              <div class="mini-stat-grid">
+                <div class="mini-stat"><span class="mini-stat-label">New</span><span class="mini-stat-value" id="scanDiffNew">0</span></div>
+                <div class="mini-stat"><span class="mini-stat-label">Fixed</span><span class="mini-stat-value" id="scanDiffFixed">0</span></div>
+                <div class="mini-stat"><span class="mini-stat-label">Regressed</span><span class="mini-stat-value" id="scanDiffRegressed">0</span></div>
+                <div class="mini-stat"><span class="mini-stat-label">Improved</span><span class="mini-stat-value" id="scanDiffImproved">0</span></div>
+              </div>
+              <div class="scan-diff-note" id="scanDiffNote">Run another scan on the same target to track changes.</div>
+              <div class="analytics-grid-two">
+                <div>
+                  <div class="analytics-subtitle">New Findings</div>
+                  <div class="analytics-list" id="scanDiffNewList"></div>
+                </div>
+                <div>
+                  <div class="analytics-subtitle">Fixed Findings</div>
+                  <div class="analytics-list" id="scanDiffFixedList"></div>
+                </div>
+              </div>
+              <div class="analytics-grid-two">
+                <div>
+                  <div class="analytics-subtitle">Regressed Severity</div>
+                  <div class="analytics-list" id="scanDiffRegressedList"></div>
+                </div>
+                <div>
+                  <div class="analytics-subtitle">Improved Severity</div>
+                  <div class="analytics-list" id="scanDiffImprovedList"></div>
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="card">
             <div class="card-header"><span class="card-title">Fix First (Top 3)</span></div>
             <div class="card-body"><div id="scanPriorityList" class="priority-list"></div></div>

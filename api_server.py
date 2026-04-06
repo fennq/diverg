@@ -418,6 +418,157 @@ def _count_severity(findings: list, level: str) -> int:
     return sum(1 for f in findings if (f.get("severity") or "").lower() == level.lower())
 
 
+def _severity_rank(sev: str) -> int:
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+    return order.get(str(sev or "").strip().lower(), 5)
+
+
+def _finding_signature(finding: dict) -> str:
+    if not isinstance(finding, dict):
+        return ""
+    title = str(finding.get("title") or "").strip().lower()
+    category = str(finding.get("category") or "").strip().lower()
+    source = str(finding.get("source") or finding.get("_source_skill") or "").strip().lower()
+    url = str(finding.get("url") or finding.get("endpoint") or "").strip().lower()
+    return "|".join([title[:180], category[:120], source[:120], url[:240]])
+
+
+def _finding_base_signature(finding: dict) -> str:
+    if not isinstance(finding, dict):
+        return ""
+    title = str(finding.get("title") or "").strip().lower()
+    category = str(finding.get("category") or "").strip().lower()
+    source = str(finding.get("source") or finding.get("_source_skill") or "").strip().lower()
+    url = str(finding.get("url") or finding.get("endpoint") or "").strip().lower()
+    return "|".join([title[:180], category[:120], source[:120], url[:240]])
+
+
+def _safe_findings(report: dict | None) -> list[dict]:
+    if not isinstance(report, dict):
+        return []
+    findings = report.get("findings")
+    if not isinstance(findings, list):
+        return []
+    return [f for f in findings if isinstance(f, dict)]
+
+
+def _scan_diff(previous_report: dict, current_report: dict) -> dict:
+    previous_findings = _safe_findings(previous_report)
+    current_findings = _safe_findings(current_report)
+
+    prev_by_sig = {}
+    curr_by_sig = {}
+    for f in previous_findings:
+        sig = _finding_signature(f)
+        if sig and sig not in prev_by_sig:
+            prev_by_sig[sig] = f
+    for f in current_findings:
+        sig = _finding_signature(f)
+        if sig and sig not in curr_by_sig:
+            curr_by_sig[sig] = f
+
+    prev_sigs = set(prev_by_sig.keys())
+    curr_sigs = set(curr_by_sig.keys())
+
+    new_rows = [curr_by_sig[s] for s in sorted(curr_sigs - prev_sigs)]
+    fixed_rows = [prev_by_sig[s] for s in sorted(prev_sigs - curr_sigs)]
+
+    prev_by_base = {}
+    curr_by_base = {}
+    for f in previous_findings:
+        base = _finding_base_signature(f)
+        if not base:
+            continue
+        rank = _severity_rank(str(f.get("severity") or ""))
+        old = prev_by_base.get(base)
+        if old is None or rank < _severity_rank(str(old.get("severity") or "")):
+            prev_by_base[base] = f
+    for f in current_findings:
+        base = _finding_base_signature(f)
+        if not base:
+            continue
+        rank = _severity_rank(str(f.get("severity") or ""))
+        old = curr_by_base.get(base)
+        if old is None or rank < _severity_rank(str(old.get("severity") or "")):
+            curr_by_base[base] = f
+
+    regressed = []
+    improved = []
+    unchanged = 0
+    for base, curr in curr_by_base.items():
+        prev = prev_by_base.get(base)
+        if not prev:
+            continue
+        curr_rank = _severity_rank(str(curr.get("severity") or ""))
+        prev_rank = _severity_rank(str(prev.get("severity") or ""))
+        if curr_rank < prev_rank:
+            regressed.append({"before": prev, "after": curr})
+        elif curr_rank > prev_rank:
+            improved.append({"before": prev, "after": curr})
+        else:
+            unchanged += 1
+
+    return {
+        "baseline_total": len(prev_by_sig),
+        "current_total": len(curr_by_sig),
+        "new_count": len(new_rows),
+        "fixed_count": len(fixed_rows),
+        "regressed_count": len(regressed),
+        "improved_count": len(improved),
+        "unchanged_count": unchanged,
+        "new_findings": new_rows[:25],
+        "fixed_findings": fixed_rows[:25],
+        "regressed_findings": regressed[:25],
+        "improved_findings": improved[:25],
+    }
+
+
+def _latest_previous_report_for_target(user_id: str, target_url: str) -> dict:
+    target_norm = str(target_url or "").strip().lower()
+    if not user_id or not target_norm:
+        return {}
+    with _db() as conn:
+        row = conn.execute(
+            """SELECT report_json
+               FROM scans
+               WHERE user_id = ?
+                 AND lower(target_url) = ?
+               ORDER BY created_at DESC
+               LIMIT 1""",
+            (user_id, target_norm),
+        ).fetchone()
+    if not row:
+        return {}
+    return _safe_report_json(row["report_json"])
+
+
+def _attach_scan_diff(result: dict, user_id: str) -> dict:
+    if not isinstance(result, dict):
+        return result
+    prev_report = _latest_previous_report_for_target(user_id, str(result.get("target_url") or ""))
+    if not prev_report:
+        result["scan_diff"] = {
+            "baseline_total": 0,
+            "current_total": len(_safe_findings(result)),
+            "new_count": len(_safe_findings(result)),
+            "fixed_count": 0,
+            "regressed_count": 0,
+            "improved_count": 0,
+            "unchanged_count": 0,
+            "new_findings": _safe_findings(result)[:25],
+            "fixed_findings": [],
+            "regressed_findings": [],
+            "improved_findings": [],
+            "has_baseline": False,
+        }
+        return result
+    diff = _scan_diff(prev_report, result)
+    diff["has_baseline"] = True
+    diff["baseline_scanned_at"] = prev_report.get("scanned_at")
+    result["scan_diff"] = diff
+    return result
+
+
 def save_scan(scan_id: str, result: dict, scope: str, user_id: str = ""):
     findings = result.get("findings") or []
     sev = {s: _count_severity(findings, s) for s in ("Critical", "High", "Medium", "Low", "Info")}
@@ -960,6 +1111,7 @@ def api_scan():
     try:
         _audit_log(g.user["id"], "scan.start", target=url, metadata={"scope": scope, "goal": goal or ""})
         result = run_web_scan(url, scope=scope, goal=goal, auth_context=auth_context)
+        result = _attach_scan_diff(result, g.user["id"])
         scan_id = str(uuid.uuid4())
         save_scan(scan_id, result, scope, user_id=g.user["id"])
         payload = {
@@ -987,6 +1139,7 @@ def api_scan():
             "proof_bundle": result.get("proof_bundle"),
             "report_provenance": result.get("report_provenance"),
             "scan_fingerprint": result.get("scan_fingerprint"),
+            "scan_diff": result.get("scan_diff"),
         }
         _audit_log(g.user["id"], "scan.complete", target=url, metadata={"scope": scope, "scan_id": scan_id, "findings": len(result.get("findings") or [])})
         return jsonify(payload)
@@ -1025,8 +1178,10 @@ def api_scan_stream():
             for event in run_web_scan_streaming(url, scope=scope, goal=goal, auth_context=auth_context):
                 if event.get("event") == "done":
                     report = event.get("report") or {}
+                    report = _attach_scan_diff(report, user_id)
                     report["id"] = scan_id
                     accumulated = report
+                    event["report"] = report
                     event["id"] = scan_id
                 try:
                     yield _ndjson(event)

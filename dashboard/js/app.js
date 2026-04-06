@@ -42,10 +42,11 @@ let serverFindings = [];
 let serverSummary = null;
 let currentUser = null;
 let lastScanReport = null;
+let lastScanTarget = '';
+let lastScanScope = 'full';
 let currentScanFindings = [];
 let currentHistoryWindow = 'all';
 let currentFindingsFilter = 'all';
-let healthSnapshot = null;
 const SCOPE_HELP_TEXT = {
   full: 'Recommended: Full — complete assessment across recon, web, API, and high-value flaw checks.',
   quick: 'Quick — fastest baseline pass for rapid triage and smoke checks.',
@@ -163,7 +164,6 @@ document.addEventListener('DOMContentLoaded', () => {
   loadUserProfile();
   ensureDefaultScope();
   updateScopeHelp('full');
-  refreshScannerHealth();
   syncDashboardData();
 });
 
@@ -180,84 +180,6 @@ function ensureDefaultScope() {
   if (active) return;
   const full = pills.find((p) => (p.dataset.scope || '') === 'full');
   (full || pills[0]).classList.add('active');
-}
-
-function setHealthValue(id, text, state) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = text;
-  el.style.color = state === 'ok' ? '#22c55e' : state === 'warn' ? '#f59e0b' : state === 'bad' ? '#ef4444' : '';
-}
-
-function setOverallHealth(state, label) {
-  const pill = document.getElementById('scanHealthOverall');
-  if (!pill) return;
-  pill.className = `scan-health-pill scan-health-pill-${state}`;
-  pill.textContent = label;
-}
-
-function updateLastRunReliability(report = {}) {
-  const el = document.getElementById('scanLastRunQuality');
-  if (!el) return;
-  if (!report || !Object.keys(report).length) {
-    el.textContent = 'No scan has been run in this session yet.';
-    return;
-  }
-  const metrics = report.scan_metrics || {};
-  const diagnostics = Array.isArray(report.scan_diagnostics) ? report.scan_diagnostics : [];
-  const findings = Array.isArray(report.findings) ? report.findings : [];
-  const elapsed = Number(metrics.elapsed_sec || metrics.duration_sec || metrics.runtime_sec || 0);
-  const pages = Number(metrics.pages_crawled || 0);
-  const endpoints = Number(metrics.endpoints_found || 0);
-  const quality = diagnostics.length === 0 ? 'stable' : diagnostics.length <= 3 ? 'partial' : 'degraded';
-  el.textContent = `Last run quality: ${quality} · ${elapsed.toFixed(1)}s · pages ${pages} · endpoints ${endpoints} · findings ${findings.length} · diagnostics ${diagnostics.length}`;
-}
-
-async function refreshScannerHealth() {
-  const notes = document.getElementById('scanHealthNotes');
-  if (notes) notes.textContent = 'Running readiness checks...';
-  try {
-    const res = await fetch(getApiUrl() + '/api/health', {
-      headers: { Authorization: 'Bearer ' + getSessionToken() },
-    });
-    if (!res.ok) throw new Error('health endpoint unavailable');
-    const h = await res.json();
-    healthSnapshot = h;
-    setHealthValue('scanHealthApi', 'Reachable', 'ok');
-    setHealthValue('scanHealthDb', h.db_exists ? 'Ready' : 'Missing', h.db_exists ? 'ok' : 'bad');
-    const ark = h.arkham || {};
-    const configured = !!ark.configured;
-    const reachable = ark.runtime_reachable === undefined ? null : !!ark.runtime_reachable;
-    if (!configured) {
-      setHealthValue('scanHealthIntel', 'Not configured', 'warn');
-      setHealthValue('scanHealthRuntime', 'Skipped', 'warn');
-    } else {
-      setHealthValue('scanHealthIntel', 'Configured', 'ok');
-      if (reachable === null) {
-        setHealthValue('scanHealthRuntime', 'Probe disabled', 'warn');
-      } else {
-        setHealthValue('scanHealthRuntime', reachable ? 'Reachable' : 'Unreachable', reachable ? 'ok' : 'bad');
-      }
-    }
-    const overallBad = !h.db_exists || (configured && reachable === false);
-    const overallWarn = !overallBad && (!configured || reachable === null);
-    setOverallHealth(overallBad ? 'bad' : overallWarn ? 'warn' : 'ok', overallBad ? 'Degraded' : overallWarn ? 'Partial' : 'Ready');
-    if (notes) {
-      const extra = [];
-      if (!configured) extra.push('ARKHAM_API_KEY missing');
-      if (configured && reachable === false) extra.push('intel runtime unreachable');
-      notes.textContent = extra.length
-        ? `Readiness warnings: ${extra.join(' · ')}.`
-        : 'All core scanner dependencies are available.';
-    }
-  } catch (err) {
-    setHealthValue('scanHealthApi', 'Unavailable', 'bad');
-    setHealthValue('scanHealthDb', 'Unknown', 'warn');
-    setHealthValue('scanHealthIntel', 'Unknown', 'warn');
-    setHealthValue('scanHealthRuntime', 'Unknown', 'warn');
-    setOverallHealth('bad', 'Offline');
-    if (notes) notes.textContent = `Health check failed: ${err.message}`;
-  }
 }
 
 function getAvatarStorageKey(userId) {
@@ -696,6 +618,71 @@ function renderSimpleList(items, emptyText = 'No data') {
   return items.join('');
 }
 
+function renderScanDiff(report) {
+  const diff = (report && report.scan_diff && typeof report.scan_diff === 'object') ? report.scan_diff : null;
+  const hasBaseline = !!(diff && diff.has_baseline);
+  const setText = (id, v) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(v);
+  };
+  setText('scanDiffNew', diff ? Number(diff.new_count || 0) : 0);
+  setText('scanDiffFixed', diff ? Number(diff.fixed_count || 0) : 0);
+  setText('scanDiffRegressed', diff ? Number(diff.regressed_count || 0) : 0);
+  setText('scanDiffImproved', diff ? Number(diff.improved_count || 0) : 0);
+
+  const note = document.getElementById('scanDiffNote');
+  if (note) {
+    if (!diff) {
+      note.textContent = 'Run another scan on the same target to track changes.';
+    } else if (!hasBaseline) {
+      note.textContent = 'No baseline scan for this target yet. This run establishes the baseline.';
+    } else {
+      const baselineAt = diff.baseline_scanned_at ? ` (baseline: ${diff.baseline_scanned_at})` : '';
+      note.textContent = `Compared against your most recent scan on this target${baselineAt}.`;
+    }
+  }
+
+  const toFindingRow = (f) =>
+    `<div class="analytics-item analytics-item-stack"><strong>${escHtml(f.title || 'Untitled finding')}</strong><span>${escHtml((f.severity || 'info').toUpperCase())} · ${escHtml(f.category || 'Other')}</span></div>`;
+  const toSeverityChangeRow = (pair) => {
+    const before = pair.before || {};
+    const after = pair.after || {};
+    return `<div class="analytics-item analytics-item-stack"><strong>${escHtml(after.title || before.title || 'Untitled finding')}</strong><span>${escHtml((before.severity || 'info').toUpperCase())} → ${escHtml((after.severity || 'info').toUpperCase())}</span></div>`;
+  };
+
+  const newList = document.getElementById('scanDiffNewList');
+  if (newList) {
+    const rows = (diff?.new_findings || []).slice(0, 5).map(toFindingRow);
+    newList.innerHTML = renderSimpleList(rows, hasBaseline ? 'No new findings in this run.' : 'Baseline run (no prior diff).');
+  }
+  const fixedList = document.getElementById('scanDiffFixedList');
+  if (fixedList) {
+    const rows = (diff?.fixed_findings || []).slice(0, 5).map(toFindingRow);
+    fixedList.innerHTML = renderSimpleList(rows, hasBaseline ? 'No fixed findings in this run.' : 'Baseline run (no prior diff).');
+  }
+  const regressedList = document.getElementById('scanDiffRegressedList');
+  if (regressedList) {
+    const rows = (diff?.regressed_findings || []).slice(0, 5).map(toSeverityChangeRow);
+    regressedList.innerHTML = renderSimpleList(rows, 'No severity regressions.');
+  }
+  const improvedList = document.getElementById('scanDiffImprovedList');
+  if (improvedList) {
+    const rows = (diff?.improved_findings || []).slice(0, 5).map(toSeverityChangeRow);
+    improvedList.innerHTML = renderSimpleList(rows, 'No severity improvements.');
+  }
+}
+
+function recheckLastTarget() {
+  const url = String(lastScanTarget || '').trim();
+  if (!url) {
+    alert('Run a scan first so we know which target to recheck.');
+    return;
+  }
+  const scanUrl = document.getElementById('scanUrl');
+  if (scanUrl) scanUrl.value = url;
+  launchScan();
+}
+
 function buildAssessmentModel(report, findings, diagnostics) {
   const verdict = report.risk_verdict || 'Unknown';
   const score = typeof report.risk_score === 'number' ? report.risk_score : 0;
@@ -924,7 +911,6 @@ function applyScanFindingFilters() {
 
 function renderScanAnalytics(report, findings) {
   lastScanReport = report || {};
-  updateLastRunReliability(report || {});
   const summary = report.summary || {};
   const evidence = report.evidence_summary || {};
   const metrics = report.scan_metrics || {};
@@ -1054,6 +1040,7 @@ function renderScanAnalytics(report, findings) {
     diagnostics.map((d) => `<div class="analytics-item analytics-item-stack"><strong>${escHtml((d.skill || 'scanner') + ' · ' + (d.level || 'info'))}</strong><span>${escHtml(d.message || '')}</span></div>`),
     'No diagnostics'
   );
+  renderScanDiff(report || {});
 }
 
 // ── Scanner (streaming) ─────────────────────────────────────────────────
@@ -1076,7 +1063,6 @@ async function launchScan() {
   termLine(terminal, ts() + ' Target: ' + url, null);
   termLine(terminal, ts() + ' Scope:  ' + scope.toUpperCase(), null);
   termLine(terminal, ts() + ' Connecting to scan engine...', 'dim');
-  refreshScannerHealth();
 
   const apiUrl = getApiUrl() + '/api/scan/stream';
   const token = getSessionToken();
@@ -1173,6 +1159,8 @@ function showScanResults(url, scope, findingsInput, pathsInput, report) {
   const findings = normalizeFindings(findingsInput);
   findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
   currentScanFindings = findings;
+  lastScanTarget = String(url || '').trim();
+  lastScanScope = String(scope || 'full').trim().toLowerCase() || 'full';
   applyScanFindingFilters();
   renderScanPriorities(findings);
 
