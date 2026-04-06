@@ -45,6 +45,16 @@ let lastScanReport = null;
 let currentScanFindings = [];
 let currentHistoryWindow = 'all';
 let currentFindingsFilter = 'all';
+const SCOPE_HELP_TEXT = {
+  full: 'Recommended: Full — complete assessment across recon, web, API, and high-value flaw checks.',
+  quick: 'Quick — fastest baseline pass for rapid triage and smoke checks.',
+  web: 'Web — focused web app and browser-surface testing.',
+  api: 'API — API endpoint and abuse-path focused coverage.',
+  crypto: 'Crypto — chain-aware checks for crypto-facing surfaces.',
+  recon: 'Recon — discovery-focused map of exposed assets and surface area.',
+  passive: 'Passive — non-invasive checks with low operational impact.',
+  attack: 'Attack — deeper exploit-chain style checks that may take longer.',
+};
 
 // ── Init ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -82,6 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
     pill.addEventListener('click', () => {
       document.querySelectorAll('.scope-pill').forEach(p => p.classList.remove('active'));
       pill.classList.add('active');
+      updateScopeHelp(pill.dataset.scope || 'full');
     });
   });
 
@@ -149,8 +160,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadSettings();
   loadUserProfile();
+  ensureDefaultScope();
+  updateScopeHelp('full');
   syncDashboardData();
 });
+
+function updateScopeHelp(scope) {
+  const el = document.getElementById('scanScopeHelp');
+  if (!el) return;
+  el.textContent = SCOPE_HELP_TEXT[scope] || SCOPE_HELP_TEXT.full;
+}
+
+function ensureDefaultScope() {
+  const pills = Array.from(document.querySelectorAll('.scope-pill'));
+  if (!pills.length) return;
+  const active = pills.find((p) => p.classList.contains('active'));
+  if (active) return;
+  const full = pills.find((p) => (p.dataset.scope || '') === 'full');
+  (full || pills[0]).classList.add('active');
+}
 
 function getAvatarStorageKey(userId) {
   return 'dv_avatar_' + (userId || 'anon');
@@ -870,7 +898,16 @@ function renderScanAnalytics(report, findings) {
 // ── Scanner (streaming) ─────────────────────────────────────────────────
 async function launchScan() {
   const url = document.getElementById('scanUrl').value.trim();
-  if (!url) return;
+  if (!url) {
+    alert('Enter a target URL before starting a scan.');
+    return;
+  }
+
+  const authorized = !!document.getElementById('scanAuthorized')?.checked;
+  if (!authorized) {
+    alert('Confirm written authorization before scanning.');
+    return;
+  }
 
   const scope = document.querySelector('.scope-pill.active')?.dataset.scope || 'full';
   const progressBox = document.getElementById('scanProgress');

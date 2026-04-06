@@ -241,6 +241,18 @@
     <!-- ══════════ SCANNER ══════════ -->
     <div class="page" id="page-scanner">
       <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">Scanner</h1><p style="font-size:0.6875rem;color:var(--text-dim);margin-top:2px;">Automated security assessment</p></div></div>
+      <div class="scan-guide-card">
+        <div class="scan-guide-head">
+          <span class="scan-guide-step">Step 1</span>
+          <h2 class="scan-guide-title">Run your first scan in under 2 minutes</h2>
+        </div>
+        <p class="scan-guide-subtitle">Paste a target URL, keep the recommended profile, then run scan. Diverg prioritizes what to fix first.</p>
+        <div class="scan-guide-list">
+          <div class="scan-guide-item"><strong>Full</strong><span>Recommended default for complete recon, web, API, and high-value checks.</span></div>
+          <div class="scan-guide-item"><strong>Quick</strong><span>Fast baseline when you need a short triage pass.</span></div>
+          <div class="scan-guide-item"><strong>Web / API / Crypto</strong><span>Focused testing when you already know the target class.</span></div>
+        </div>
+      </div>
       <div class="scan-input-wrap">
         <span class="scan-prefix">&gt;</span>
         <input type="text" class="scan-input" id="scanUrl" placeholder="https://target.com" spellcheck="false" autocomplete="off">
@@ -249,6 +261,11 @@
       <div class="scope-row" id="scopeRow">
         <div class="scope-pill active" data-scope="full">Full</div><div class="scope-pill" data-scope="quick">Quick</div><div class="scope-pill" data-scope="web">Web</div><div class="scope-pill" data-scope="api">API</div><div class="scope-pill" data-scope="crypto">Crypto</div><div class="scope-pill" data-scope="recon">Recon</div><div class="scope-pill" data-scope="passive">Passive</div><div class="scope-pill" data-scope="attack">Attack</div>
       </div>
+      <div class="scan-scope-help" id="scanScopeHelp">Recommended: Full — complete assessment across recon, web, API, and high-value flaw checks.</div>
+      <label class="scan-authorization">
+        <input type="checkbox" id="scanAuthorized">
+        <span>I confirm I have written authorization to test this target.</span>
+      </label>
       <div class="progress-box" id="scanProgress"><div class="terminal" id="scanTerminal"></div></div>
       <div id="scanResults" style="display:none;">
         <div class="card assessment-card" id="scanAssessmentCard">

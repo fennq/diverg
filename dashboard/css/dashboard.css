@@ -786,7 +786,8 @@ body {
 @media (max-width: 960px) {
   .analytics-grid-two,
   .analytics-grid-three,
-  .mini-stat-grid {
+  .mini-stat-grid,
+  .scan-guide-list {
     grid-template-columns: 1fr;
   }
 }
@@ -806,6 +807,74 @@ body {
 
 .toggle-pill:hover { color: var(--text-secondary); }
 .toggle-pill.active { background: var(--bg-hover); color: var(--text); }
+
+/* ── Scanner guide ─────────────────────────────────────────────────── */
+.scan-guide-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--r);
+  padding: 16px 18px;
+  margin-bottom: 12px;
+  box-shadow: var(--glass-shadow);
+}
+
+.scan-guide-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.scan-guide-step {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: var(--accent-light);
+  background: rgba(37, 99, 235, 0.12);
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  border-radius: 999px;
+  padding: 3px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.scan-guide-title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.scan-guide-subtitle {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.scan-guide-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.scan-guide-item {
+  background: var(--bg-card-inner);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.scan-guide-item strong {
+  font-size: 0.6875rem;
+  color: var(--text);
+}
+
+.scan-guide-item span {
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
 
 /* ── Scanner Input — glass ───────────────────────────────────────── */
 .scan-input-wrap {
@@ -871,6 +940,26 @@ body {
 .scope-pill.active {
   background: var(--accent-dim); border-color: var(--accent); color: var(--accent-light);
   box-shadow: 0 0 12px rgba(37,99,235,0.1);
+}
+
+.scan-scope-help {
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  margin: -6px 0 10px;
+}
+
+.scan-authorization {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+}
+
+.scan-authorization input {
+  margin-top: 2px;
+  accent-color: var(--accent);
 }
 
 /* ── Tool Cards — glass ──────────────────────────────────────────── */
