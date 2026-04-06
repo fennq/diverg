@@ -18,6 +18,19 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../../styles.css?v=2">
   <link rel="stylesheet" href="docs.css">
+  <style>
+    .nav-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: flex-end; }
+    .nav-actions .btn-book {
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--accent, #58a6ff);
+      border-radius: 6px;
+      color: var(--accent, #58a6ff);
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+    .nav-actions .btn-book:hover { opacity: 0.88; }
+  </style>
 </head>
 <body class="docs-page">
   <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
@@ -53,7 +66,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
       </button>
       <div class="nav-actions">
-        <a href="https://dash.divergsec.com/login" class="btn btn-primary">Get Started</a>
+        <a href="mailto:company@divergsec.com?subject=Booking%3A%20Investigation%20%26%20security%20analysis" class="btn-book">Request booking</a>
+        <a href="https://dash.divergsec.com/login" class="btn btn-primary">Diverg Auto</a>
       </div>
     </div>
   </nav>
@@ -308,8 +322,8 @@
           </ul>
           <p>This phase is about sharpening our edge in on-chain security and investigations, and turning that experience into a stronger, more focused product.</p>
           <div class="highlight-box">
-            <h4>Public vs private</h4>
-            <p>Our public tools are for general use and early access—they are not the same depth as full forensic run-downs such as our Drift case work, which is aimed at our private platform and professional investigations.</p>
+            <h4>Diverg Auto vs private</h4>
+            <p><strong>Diverg Auto</strong> is the self-serve surface—extension, console, and API where offered—for authorized scans and on-chain analysis. <strong>Private</strong> engagements use our internal pipeline for forensic-grade investigations and tailored security analysis; they are not the same depth as Auto. Book private work at <a href="mailto:company@divergsec.com">company@divergsec.com</a>.</p>
           </div>
           
           <h3 id="enterprise">8.2 Later: Enterprise &amp; extensibility</h3>
@@ -333,10 +347,10 @@
           <h2 id="conclusion">9. Conclusion</h2>
           <p>Diverg represents a new approach to security investigation—one that treats the analyst's time as valuable and their trust as paramount. By unifying web security, blockchain analysis, and OSINT into a single platform with a strict fact-only reporting philosophy, we enable security teams to work more efficiently and with greater confidence in their findings.</p>
           
-          <p>The platform is available now for select partners and enterprise customers. For hands-on evaluation, <a href="https://dash.divergsec.com/login">request a demonstration</a>.</p>
+          <p><strong>Diverg Auto</strong> is available for self-serve use where we offer it—sign in at <a href="https://dash.divergsec.com/login">dash.divergsec.com</a>. For <strong>private</strong> investigations and security analysis with our internal tooling, <a href="mailto:company@divergsec.com?subject=Booking%3A%20Investigation%20%26%20security%20analysis">request a booking</a> at <a href="mailto:company@divergsec.com">company@divergsec.com</a>.</p>
 
           <footer class="docs-footer">
-            <p>&copy; 2026 Diverg. All rights reserved. — <a href="https://dash.divergsec.com/login">Request a demo</a>.</p>
+            <p>&copy; 2026 Diverg. All rights reserved. — <a href="mailto:company@divergsec.com?subject=Booking%3A%20Investigation%20%26%20security%20analysis">Request a booking</a> · <a href="mailto:company@divergsec.com">company@divergsec.com</a> · <a href="https://dash.divergsec.com/login">Diverg Auto</a></p>
           </footer>
         </article>
       </main>

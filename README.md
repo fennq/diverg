@@ -6,6 +6,17 @@
 
 **Diverg** is an AI-assisted security testing platform for web applications and APIs. It runs coordinated **skills** (specialized scan modules)—transport, recon, application logic, auth, APIs, high-value flaw patterns—and returns structured findings with evidence and remediation guidance. Deliver through the **CLI**, **HTTP API** + **web console**, or the **Chrome extension**.
 
+### Product: Diverg Auto vs private
+
+| Tier | What it is |
+|------|------------|
+| **Diverg Auto** | Self-serve security testing: browser extension (in-browser scans), web console, and API where we offer them—for authorized assessments. |
+| **Private** | Professional investigations and deep security analysis using Diverg’s internal tooling and pipelines—not the same as self-serve Auto. |
+
+**Book private engagements:** [company@divergsec.com](mailto:company@divergsec.com?subject=Booking%3A%20Investigation%20%26%20security%20analysis)
+
+This repository powers the Auto/console stack and shared skills; it is not the full private delivery surface.
+
 ---
 
 ## Highlights

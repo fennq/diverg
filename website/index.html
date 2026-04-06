@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0d1117" />
-  <title>Diverg — Security testing platform</title>
+  <title>Diverg — Security testing &amp; investigations</title>
   <style>
     :root {
       --bg: #0d1117;
@@ -57,11 +57,29 @@
     .tagline {
       color: var(--muted);
       font-size: clamp(0.95rem, 3.5vw, 1.1rem);
-      max-width: 480px;
-      margin: 0 auto 2rem;
+      max-width: 520px;
+      margin: 0 auto 1rem;
       padding: 0 1rem;
       hyphens: auto;
       -webkit-hyphens: auto;
+    }
+    .hero-cta {
+      margin-bottom: 2rem;
+      padding: 0 1rem;
+      text-align: center;
+    }
+    .hero-cta a {
+      color: var(--accent);
+      font-size: clamp(0.9rem, 3vw, 1rem);
+      font-weight: 500;
+      text-decoration: none;
+    }
+    .hero-cta a:hover { text-decoration: underline; }
+    .hero-cta .sub {
+      display: block;
+      margin-top: 0.35rem;
+      color: var(--muted);
+      font-size: clamp(0.8rem, 2.5vw, 0.875rem);
     }
     .features {
       max-width: 720px;
@@ -112,20 +130,24 @@
     <div class="hero-content">
       <img src="logo.png" alt="Diverg" class="logo" />
       <h1>Diverg</h1>
-      <p class="tagline">Security testing platform — recon, vulnerability scanning, and blockchain-aware investigation. Findings delivered via Telegram.</p>
+      <p class="tagline">Self-serve security testing with <strong style="color: var(--text); font-weight: 600;">Diverg Auto</strong>, plus <strong style="color: var(--text); font-weight: 600;">private</strong> investigations and analysis when you need our full internal tooling.</p>
+      <p class="hero-cta">
+        <a href="mailto:company@divergsec.com?subject=Booking%3A%20Investigation%20%26%20security%20analysis">Request a booking</a>
+        <span class="sub">Professional investigations and security analysis — email company@divergsec.com</span>
+      </p>
     </div>
   </section>
   <section class="features">
-    <h2>What it does</h2>
+    <h2>How you can work with us</h2>
     <div class="grid">
-      <div class="card"><strong>Web</strong><span>Recon, headers/SSL, web vulns, auth and API testing, OSINT.</span></div>
-      <div class="card"><strong>Blockchain</strong><span>Wallet and token investigation, flow diagrams, Bubblemaps.</span></div>
-      <div class="card"><strong>Delivery</strong><span>Telegram bot for reports; dashboard coming.</span></div>
+      <div class="card"><strong>Diverg Auto</strong><span>Self-serve scans: web recon, headers and TLS, web and API testing, OSINT, and blockchain-aware checks through the browser extension and console where available. Reports via Telegram and dashboard.</span></div>
+      <div class="card"><strong>Private</strong><span>Forensic-grade investigations and tailored security analysis using Diverg’s internal pipeline—not the same depth as self-serve Auto. <a href="mailto:company@divergsec.com?subject=Booking%3A%20Investigation%20%26%20security%20analysis" style="color: var(--accent);">Request a booking</a> at company@divergsec.com.</span></div>
     </div>
   </section>
   <p class="to-roadmap"><a href="roadmap.html">Roadmap &amp; extensibility — Q2 focus</a></p>
   <footer>
-    Use only for <strong>authorized</strong> security testing. Get written permission and define scope.
+    Use only for <strong>authorized</strong> security testing. Get written permission and define scope.<br />
+    Private engagements: <a href="mailto:company@divergsec.com">company@divergsec.com</a>
   </footer>
 </body>
 </html>
