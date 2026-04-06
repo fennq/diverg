@@ -1,0 +1,19 @@
+---
+description: GitHub identity — always fennq org; never BloopTeam credentials
+alwaysApply: true
+---
+
+# GitHub: `fennq` only
+
+- **Organization / user:** All Diverg-related GitHub remotes belong under **`fennq`** (e.g. `fennq/diverg`, `fennq/diverg-landing`, `fennq/diverg-auto`, `fennq/diverg-extension`).
+- **Do not** use, assume, or document authentication as **BloopTeam** for these repos. If a push fails with `Permission denied to BloopTeam`, the machine is using the wrong stored credential — that is an environment fix, not a repo change.
+- **Remote URLs:** Prefer **no credentials in the URL**. Use `https://github.com/fennq/<repo>.git` or `git@github.com:fennq/<repo>.git`. Never commit or paste personal access tokens into remote URLs or docs.
+
+## If push returns 403 for the wrong GitHub user (macOS)
+
+1. Open **Keychain Access**, search **`github.com`**, and remove stale **Internet password** / **generic password** entries tied to the wrong account (or remove all `github.com` entries and re-authenticate).
+2. Push again; when prompted, sign in as **`fennq`** (PAT or browser flow). Alternatively install **`gh`** and run **`gh auth login`** choosing the **`fennq`** account, or use **SSH** with a key registered on **`fennq`**.
+
+## Agent behavior
+
+When running `git push` in automation, if GitHub denies access to **`fennq/*`**, report that **`fennq` credentials are required** and that **BloopTeam (or any other user) must not** be the active GitHub identity for these remotes.
