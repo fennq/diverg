@@ -126,7 +126,8 @@ IS_PRODUCTION = os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("DIVERG_
 DIVERG_JWT_SECRET = os.environ.get("DIVERG_JWT_SECRET", "").strip()
 DIVERG_AUDIT_LOG_RETENTION_DAYS = int(os.environ.get("DIVERG_AUDIT_LOG_RETENTION_DAYS", "90") or "90")
 DIVERG_ENABLE_STRICT_PROOF_API = (os.environ.get("DIVERG_ENABLE_STRICT_PROOF_API", "1").strip().lower() in ("1", "true", "yes"))
-DIVERG_REQUIRE_ARKHAM = (os.environ.get("DIVERG_REQUIRE_ARKHAM", "1").strip().lower() in ("1", "true", "yes"))
+# Default off so deploy healthchecks succeed; set DIVERG_REQUIRE_ARKHAM=1 when ARKHAM_API_KEY is always in env.
+DIVERG_REQUIRE_ARKHAM = (os.environ.get("DIVERG_REQUIRE_ARKHAM", "0").strip().lower() in ("1", "true", "yes"))
 DIVERG_HEALTH_ARKHAM_PROBE = (os.environ.get("DIVERG_HEALTH_ARKHAM_PROBE", "0").strip().lower() in ("1", "true", "yes"))
 
 _INVESTIGATION_DIR = str(ROOT / "investigation")
@@ -2412,6 +2413,8 @@ def main():
     if DIVERG_REQUIRE_ARKHAM and not (os.environ.get("ARKHAM_API_KEY") or "").strip():
         print("  Fatal           →  ARKHAM_API_KEY is required but missing (DIVERG_REQUIRE_ARKHAM=1).")
         sys.exit(1)
+    if not (os.environ.get("ARKHAM_API_KEY") or "").strip():
+        print("  Warning         →  ARKHAM_API_KEY not set; token-bundle / some intel endpoints will return 503 until set.")
     _cleanup_old_audit_logs()
     try:
         from waitress import serve
