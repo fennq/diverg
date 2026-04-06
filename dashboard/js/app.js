@@ -396,12 +396,17 @@ function findingEvidence(f) {
 
 function normalizeFinding(f = {}) {
   return {
+    id: String(f.id || f.fingerprint || f.title || '') || undefined,
     title: f.title || 'Untitled finding',
     severity: String(f.severity || 'low').toLowerCase(),
     category: f.category || 'Other',
     confidence: String(f.confidence || '').toLowerCase(),
     verified: !!f.verified,
     evidence: findingEvidence(f),
+    impact: String(f.impact || f.business_impact || '').trim(),
+    remediation: String(f.remediation || f.fix || f.recommendation || '').trim(),
+    source: String(f.source || f._source_skill || '').trim(),
+    url: String(f.url || f.endpoint || '').trim(),
   };
 }
 
@@ -748,9 +753,15 @@ function renderScanFindingsTable() {
       ? `<button class="btn btn-ghost trust-action-btn" onclick="toggleEvidenceRow('scan-ev-${idx}')">View proof</button>`
       : '<span class="evidence-tag">No direct proof</span>';
     const fpButton = `<button class="btn btn-ghost trust-action-btn" onclick="markFindingFalsePositive(${idx})">Mark FP</button>`;
-    const why = `Severity ${escHtml(f.severity)} in ${escHtml(f.category)} with ${escHtml(f.confidence || 'unknown')} confidence.`;
-    const fix = `Review remediation guidance for this category and re-run scan after patching.`;
+    const why = f.impact
+      ? escHtml(f.impact)
+      : `Severity ${escHtml(f.severity)} in ${escHtml(f.category)} with ${escHtml(f.confidence || 'unknown')} confidence.`;
+    const fix = f.remediation
+      ? escHtml(f.remediation)
+      : 'Review remediation guidance for this category and re-run scan after patching.';
     const proof = f.evidence ? escHtml(f.evidence) : 'No direct evidence captured in this run.';
+    const sourceLine = f.source ? `<p class="trust-source">Source: ${escHtml(f.source)}</p>` : '';
+    const targetLine = f.url ? `<p class="trust-source">Target: ${escHtml(f.url)}</p>` : '';
     const evidenceRow = `
       <tr class="evidence-row" id="scan-ev-${idx}" style="display:none;">
         <td></td>
@@ -759,6 +770,8 @@ function renderScanFindingsTable() {
             <div class="trust-detail">
               <span class="trust-label">What was found</span>
               <p>${escHtml(f.title)}</p>
+              ${sourceLine}
+              ${targetLine}
             </div>
             <div class="trust-detail">
               <span class="trust-label">Why it matters</span>
@@ -788,12 +801,41 @@ function toggleEvidenceRow(rowId) {
 async function markFindingFalsePositive(index) {
   const finding = currentScanFindings[index];
   if (!finding) return;
+  const reason = window.prompt(
+    'Reason for false positive?\nExample: expected behavior, protected by WAF, unreachable endpoint, duplicate finding',
+    'expected behavior'
+  );
+  if (reason === null) return;
+  const notes = window.prompt('Optional notes for future triage (can be empty):', '') ?? '';
   try {
-    const out = await apiJson('/api/findings/false-positive', { finding });
+    const out = await apiJson('/api/findings/false-positive', { finding, reason, notes });
     alert(out.added ? 'Marked as false positive and learning rule added.' : 'Already known false positive pattern.');
   } catch (err) {
     alert('Failed to mark false positive: ' + err.message);
   }
+}
+
+function renderScanPriorities(findings) {
+  const box = document.getElementById('scanPriorityList');
+  if (!box) return;
+  const ranked = [...(findings || [])]
+    .sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || confidenceRank(a.confidence) - confidenceRank(b.confidence))
+    .slice(0, 3);
+  if (!ranked.length) {
+    box.innerHTML = '<div class="analytics-empty">No strict findings detected in this run.</div>';
+    return;
+  }
+  box.innerHTML = ranked.map((f, i) => {
+    const why = f.impact || `${f.category} issue with ${f.confidence || 'unknown'} confidence.`;
+    return `<div class="priority-item">
+      <div class="priority-rank">#${i + 1}</div>
+      <div class="priority-copy">
+        <div class="priority-title">${escHtml(f.title)}</div>
+        <div class="priority-meta"><span class="badge badge-${escHtml(f.severity)}">${escHtml(f.severity)}</span>${f.verified ? '<span class="priority-verified">verified</span>' : ''}</div>
+        <p>${escHtml(why)}</p>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function applyScanFindingFilters() {
@@ -1050,6 +1092,7 @@ function showScanResults(url, scope, findingsInput, pathsInput, report) {
   findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
   currentScanFindings = findings;
   applyScanFindingFilters();
+  renderScanPriorities(findings);
 
   container.style.display = 'block';
 
@@ -1516,6 +1559,10 @@ async function syncDashboardData() {
           confidence: f.confidence || '',
           verified: f.verified,
           evidence: f.evidence,
+          impact: f.impact || '',
+          remediation: f.remediation || '',
+          source: f.source || '',
+          url: f.url || '',
         };
       });
       localStorage.setItem('dv_findings', JSON.stringify(serverFindings.slice(0, 2000)));

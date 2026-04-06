@@ -1166,6 +1166,8 @@ def mark_false_positive():
     finding = data.get("finding")
     if not isinstance(finding, dict):
         return jsonify({"error": "finding must be an object"}), 400
+    reason = sanitize_text(str(data.get("reason") or ""), 240)
+    notes = sanitize_text(str(data.get("notes") or ""), 1000)
     memory = _read_fp_memory()
     rules = memory.get("rules") if isinstance(memory.get("rules"), list) else []
     src = str(finding.get("source") or finding.get("_source_skill") or "").strip().lower()
@@ -1185,12 +1187,28 @@ def mark_false_positive():
     if not existing and rule["title_contains"]:
         rules.append(rule)
     memory["rules"] = rules[:500]
+    feedback = memory.get("feedback") if isinstance(memory.get("feedback"), list) else []
+    feedback.append({
+        "ts": int(time.time()),
+        "title": rule["title_contains"],
+        "category": rule["category_contains"],
+        "source": rule["source_equals"],
+        "reason": reason,
+        "notes": notes,
+    })
+    memory["feedback"] = feedback[-500:]
     _write_fp_memory(memory)
     _audit_log(
         g.user["id"],
         "finding.mark_false_positive",
         target=sanitize_text(str(finding.get("url") or ""), 500),
-        metadata={"title": rule["title_contains"], "source": rule["source_equals"], "existing": existing},
+        metadata={
+            "title": rule["title_contains"],
+            "source": rule["source_equals"],
+            "existing": existing,
+            "reason": reason,
+            "notes_len": len(notes),
+        },
     )
     return jsonify({"ok": True, "rules_total": len(memory["rules"]), "added": not existing})
 
