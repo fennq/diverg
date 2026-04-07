@@ -49,6 +49,7 @@ Copy this template for each new day:
 - Rolled out Solana ecosystem security framework integration across API, dashboard investigation, scanner analytics, and public docs.
 - Added a shared `solana_security_profile` model so Solana guidance is consistent between investigation and scan workflows.
 - Published same-day release notes in internal and public changelogs.
+- Added dashboard-first initiative push pass with role-based CTAs, activation hooks, and KPI review tracking for Solana Security Program adoption.
 
 ### Product & UX
 - Added Solana Security Program rendering in token bundle investigation results with:
@@ -58,6 +59,9 @@ Copy this template for each new day:
   - pillar and action summaries
 - Added Solana Security Program card in scanner analytics for crypto-relevant scans.
 - Kept scanner presentation aligned with existing dashboard cards and analytics list patterns.
+- Added a scanner-side “What this means” block, trust row (`Framework-aligned`, profile logic date), role mode switch, and CTA hierarchy.
+- Added token investigation-side initiative actions: deeper recheck trigger, framework reference, baseline reminder, and incident summary export.
+- Added weekly KPI review panel in Analytics for Solana initiative usage (views, CTR, rechecks, investigations) with copy-adjustment guidance.
 
 ### Platform & API
 - Added deterministic Solana profile model generation with:
@@ -69,6 +73,14 @@ Copy this template for each new day:
   - prioritized next actions
 - Extended `POST /api/investigation/solana-bundle` with profile attachment and optional `tvl_usd` context.
 - Extended `POST /api/scan` and `POST /api/scan/stream` done payloads with `solana_security_profile` for eligible scan contexts.
+- Added client-side Solana event instrumentation for dashboard interactions:
+  - card views
+  - role mode changes
+  - primary/secondary CTA clicks
+  - recheck starts
+  - investigation completions
+  - baseline reminder saves
+  - incident summary exports
 
 ### Validation
 - `python3 -m pytest tests/test_scan_diff.py -q` passed (`5 passed`).
@@ -78,6 +90,7 @@ Copy this template for each new day:
 ### Notes
 - Existing unrelated local changes and untracked files were intentionally left untouched.
 - Public docs rollout was completed in `diverg-landing` and linked from Resources.
+- Public docs wording was further aligned to a dashboard-first initiative narrative.
 
 ## 2026-04-06
 

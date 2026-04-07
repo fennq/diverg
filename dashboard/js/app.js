@@ -47,6 +47,11 @@ let lastScanScope = 'full';
 let currentScanFindings = [];
 let currentHistoryWindow = 'all';
 let currentFindingsFilter = 'all';
+let currentSolanaRoleMode = 'protocol';
+let solanaContextCache = { scanner: null, token: null };
+const SOLANA_PROFILE_LOGIC_UPDATED = '2026-04-07';
+const SOLANA_EVENT_KEY = 'dv_solana_events';
+const SOLANA_BASELINE_KEY = 'dv_solana_baseline_reminders';
 const SCOPE_HELP_TEXT = {
   full: 'Recommended: Full — complete assessment across recon, web, API, and high-value flaw checks.',
   quick: 'Quick — fastest baseline pass for rapid triage and smoke checks.',
@@ -57,6 +62,63 @@ const SCOPE_HELP_TEXT = {
   passive: 'Passive — non-invasive checks with low operational impact.',
   attack: 'Attack — deeper exploit-chain style checks that may take longer.',
 };
+
+function getSolanaEvents() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SOLANA_EVENT_KEY) || '[]');
+    return Array.isArray(raw) ? raw : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveSolanaEvents(events) {
+  localStorage.setItem(SOLANA_EVENT_KEY, JSON.stringify((events || []).slice(-500)));
+}
+
+function trackSolanaEvent(eventName, details = {}) {
+  const events = getSolanaEvents();
+  events.push({
+    event: String(eventName || 'unknown'),
+    ts: new Date().toISOString(),
+    details: details && typeof details === 'object' ? details : {},
+  });
+  saveSolanaEvents(events);
+}
+
+function getSolanaKpiWindowEvents(days = 7) {
+  const ms = Number(days || 7) * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  return getSolanaEvents().filter((e) => {
+    const t = new Date(e.ts || '').getTime();
+    return !Number.isNaN(t) && (now - t) <= ms;
+  });
+}
+
+function solanaWhatMeansText(context, roleMode, tier = {}) {
+  const monitoring = tier.monitoring_10m_eligible ? 'Monitoring-eligible at current TVL band.' : 'Below active-monitoring TVL band.';
+  const fv = tier.formal_verification_100m_eligible ? 'Formal-verification priority path applies.' : 'Formal-verification priority not yet triggered.';
+  if (roleMode === 'incident') {
+    return `${context === 'token' ? 'Token investigation' : 'Scanner'} mode is set for incident response: use this profile to assign owner, confirm first-response path, and escalate quickly. ${monitoring} ${fv}`;
+  }
+  return `${context === 'token' ? 'Token investigation' : 'Scanner'} mode is set for protocol hardening: prioritize top actions to reduce exploitability before the next recheck. ${monitoring} ${fv}`;
+}
+
+function bindSolanaRoleModes() {
+  const pills = document.querySelectorAll('#scanSolanaRoleModes .toggle-pill');
+  if (!pills.length) return;
+  pills.forEach((pill) => {
+    pill.addEventListener('click', () => {
+      pills.forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+      currentSolanaRoleMode = pill.dataset.solanaRole || 'protocol';
+      if (solanaContextCache.scanner) {
+        renderSolanaProgramCard(solanaContextCache.scanner);
+      }
+      trackSolanaEvent('solana_role_mode_changed', { role_mode: currentSolanaRoleMode, surface: 'scanner' });
+    });
+  });
+}
 
 // ── Init ─────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -97,6 +159,7 @@ document.addEventListener('DOMContentLoaded', () => {
       updateScopeHelp(pill.dataset.scope || 'full');
     });
   });
+  bindSolanaRoleModes();
 
   document.querySelectorAll('#findingsTabs .toggle-pill').forEach((pill) => {
     pill.addEventListener('click', () => {
@@ -512,15 +575,28 @@ function renderSolanaProgramForToken(data) {
     refs.stride ? `<a href="${escAttr(refs.stride)}" target="_blank" rel="noopener">STRIDE</a>` : '',
     refs.sirn_request_form ? `<a href="${escAttr(refs.sirn_request_form)}" target="_blank" rel="noopener">SIRN request</a>` : '',
   ].filter(Boolean).join(' · ');
+  const whatMeans = solanaWhatMeansText('token', currentSolanaRoleMode, tier);
+  const primaryLabel = currentSolanaRoleMode === 'incident' ? 'Start incident workflow' : 'Run deeper recheck';
   return `
     <div class="token-signals-section">
       <h4 class="token-bundle-h4">Solana Security Program</h4>
       <div class="token-bundle-note">Operational profile aligned to Solana ecosystem security initiatives.</div>
+      <div class="solana-trust-row">
+        <span class="solana-framework-pill">Framework-aligned</span>
+        <span class="solana-last-updated">Profile logic updated: ${SOLANA_PROFILE_LOGIC_UPDATED}</span>
+      </div>
+      <div class="token-spp-what-means">${escHtml(whatMeans)}</div>
       <div class="token-bundle-metrics">
         <div class="token-metric"><span class="token-metric-label">Tier</span><span class="token-metric-val">${escHtml(formatProgramTier(tier.tier_label))}</span></div>
         <div class="token-metric"><span class="token-metric-label">Monitoring 10M+</span><span class="token-metric-val">${tier.monitoring_10m_eligible ? 'Eligible' : 'Not yet'}</span></div>
         <div class="token-metric"><span class="token-metric-label">Formal Verification 100M+</span><span class="token-metric-val">${tier.formal_verification_100m_eligible ? 'Eligible' : 'Not yet'}</span></div>
         <div class="token-metric"><span class="token-metric-label">IR Priority</span><span class="token-metric-val">${escHtml(String(ir.priority_level || 'baseline'))}</span></div>
+      </div>
+      <div class="token-spp-cta-row">
+        <button class="btn btn-primary btn-sm" onclick="solanaRunPrimaryAction('token')">${escHtml(primaryLabel)}</button>
+        <button class="btn btn-ghost btn-sm" onclick="solanaViewFrameworkReference('token')">View framework reference</button>
+        <button class="btn btn-ghost btn-sm" onclick="solanaSaveBaselineReminder('token')">Save baseline + recheck in 24h</button>
+        <button class="btn btn-ghost btn-sm" onclick="solanaExportIncidentSummary('token')">Export incident-ready summary</button>
       </div>
       <div class="analytics-grid-two" style="margin-top:10px;">
         <div><div class="analytics-subtitle">Pillars</div><div class="analytics-list">${renderProgramList(pillarRows, 'No pillar data')}</div></div>
@@ -675,6 +751,10 @@ function renderSimpleList(items, emptyText = 'No data') {
   return items.join('');
 }
 
+function renderKpiAdjustmentsList(notes) {
+  return renderSimpleList(notes, 'No KPI notes yet.');
+}
+
 function formatDiffBaselineTime(rawTs) {
   if (!rawTs) return '';
   const d = new Date(rawTs);
@@ -767,9 +847,84 @@ function recheckLastTarget() {
     alert('Run a first scan so we can establish a baseline for diff tracking.');
     return;
   }
+  trackSolanaEvent('solana_recheck_started', { surface: 'scanner', via: 'scan_diff_or_solana' });
   const scanUrl = document.getElementById('scanUrl');
   if (scanUrl) scanUrl.value = url;
   launchScan();
+}
+
+function solanaRunPrimaryAction(surface) {
+  const s = String(surface || 'scanner');
+  trackSolanaEvent('solana_primary_cta_clicked', { surface: s, role_mode: currentSolanaRoleMode });
+  if (currentSolanaRoleMode === 'incident') {
+    if (s === 'token') {
+      const tokenResult = document.getElementById('tokenResult');
+      if (tokenResult) tokenResult.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      alert('Incident workflow: assign responder, confirm first-response steps, and escalate using SIRN-compatible process.');
+      return;
+    }
+    navigate('scanner');
+    const overviewTab = document.querySelector('#scanResultsTabs .toggle-pill[data-scan-tab="overview"]');
+    if (overviewTab) overviewTab.click();
+    alert('Incident workflow started: prioritize containment actions, then run recheck.');
+    return;
+  }
+  if (s === 'token') {
+    const deep = document.getElementById('tokenDeepScan');
+    if (deep) deep.checked = true;
+    runTokenBundle();
+    return;
+  }
+  recheckLastTarget();
+}
+
+function solanaViewFrameworkReference(surface) {
+  const s = String(surface || 'scanner');
+  const refs = (solanaContextCache[s] && solanaContextCache[s].solana_security_profile && solanaContextCache[s].solana_security_profile.references) || {};
+  const url = refs.program || 'https://solana.com/news/solana-ecosystem-security';
+  trackSolanaEvent('solana_secondary_cta_clicked', { surface: s, url });
+  window.open(url, '_blank', 'noopener');
+}
+
+function solanaSaveBaselineReminder(surface) {
+  const s = String(surface || 'scanner');
+  let list = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(SOLANA_BASELINE_KEY) || '[]');
+    list = Array.isArray(raw) ? raw : [];
+  } catch (_) {
+    list = [];
+  }
+  const at = new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString();
+  list.push({ surface: s, remind_at: at, created_at: new Date().toISOString() });
+  localStorage.setItem(SOLANA_BASELINE_KEY, JSON.stringify(list.slice(-100)));
+  trackSolanaEvent('solana_save_baseline_clicked', { surface: s });
+  alert('Baseline reminder saved for 24h follow-up recheck.');
+}
+
+function solanaExportIncidentSummary(surface) {
+  const s = String(surface || 'scanner');
+  const context = solanaContextCache[s] || {};
+  const profile = context.solana_security_profile || {};
+  const payload = {
+    surface: s,
+    role_mode: currentSolanaRoleMode,
+    exported_at: new Date().toISOString(),
+    target: context.target_url || context.mint || '',
+    tiering: profile.tiering || {},
+    incident_response: profile.incident_response || {},
+    top_actions: Array.isArray(profile.next_actions) ? profile.next_actions.slice(0, 3) : [],
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `solana_incident_summary_${Date.now()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  trackSolanaEvent('solana_export_summary_clicked', { surface: s });
 }
 
 function buildAssessmentModel(report, findings, diagnostics) {
@@ -1025,6 +1180,10 @@ function renderScanAnalytics(report, findings) {
   const pages = Number(metrics.pages_crawled || 0);
   const endpoints = Number(metrics.endpoints_found || 0);
   const assessment = buildAssessmentModel(report, findings, diagnostics);
+  const hasSolanaProfile = !!(report && report.solana_security_profile && typeof report.solana_security_profile === 'object');
+  if (hasSolanaProfile) {
+    trackSolanaEvent('solana_card_viewed', { surface: 'scanner', context: (report.solana_security_profile && report.solana_security_profile.context) || 'unknown' });
+  }
 
   const badge = document.getElementById('scanAssessmentBadge');
   badge.className = `badge ${assessment.badgeClass}`;
@@ -1144,12 +1303,20 @@ function renderSolanaProgramCard(report) {
     return;
   }
   card.style.display = 'block';
+  solanaContextCache.scanner = report;
+  trackSolanaEvent('solana_card_viewed', { surface: 'scanner', context: profile.context || 'unknown' });
   const tier = profile.tiering || {};
   const ir = profile.incident_response || {};
   const pillars = Array.isArray(profile.pillars) ? profile.pillars : [];
   const actions = Array.isArray(profile.next_actions) ? profile.next_actions : [];
   const summary = document.getElementById('scanSolanaProgramSummary');
   if (summary) summary.textContent = 'Solana-oriented operational readiness profile generated from scan context.';
+  const updated = document.getElementById('scanSolanaUpdatedAt');
+  if (updated) updated.textContent = `Profile logic updated: ${SOLANA_PROFILE_LOGIC_UPDATED}`;
+  const whatMeans = document.getElementById('scanSolanaWhatMeans');
+  if (whatMeans) whatMeans.textContent = solanaWhatMeansText('scanner', currentSolanaRoleMode, tier);
+  const primaryCta = document.getElementById('scanSolanaPrimaryCta');
+  if (primaryCta) primaryCta.textContent = currentSolanaRoleMode === 'incident' ? 'Start incident workflow' : 'Run deeper recheck';
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = String(v); };
   set('scanSolanaTier', formatProgramTier(tier.tier_label || 'baseline_program'));
   set('scanSolanaMon', tier.monitoring_10m_eligible ? 'Eligible' : 'Not yet');
@@ -1169,6 +1336,80 @@ function renderSolanaProgramCard(report) {
       'No immediate actions'
     );
   }
+}
+
+function solanaRunPrimaryAction(surface) {
+  const s = String(surface || 'scanner');
+  trackSolanaEvent('solana_primary_cta_clicked', { surface: s, role_mode: currentSolanaRoleMode });
+  if (currentSolanaRoleMode === 'incident') {
+    if (s === 'token') {
+      const tokenResult = document.getElementById('tokenResult');
+      if (tokenResult) tokenResult.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      alert('Incident workflow: assign responder, confirm first-response steps, and escalate using SIRN-compatible process.');
+      return;
+    }
+    navigate('scanner');
+    const overviewTab = document.querySelector('#scanResultsTabs .toggle-pill[data-scan-tab="overview"]');
+    if (overviewTab) overviewTab.click();
+    alert('Incident workflow started: prioritize containment actions, then run recheck.');
+    return;
+  }
+  if (s === 'token') {
+    const deep = document.getElementById('tokenDeepScan');
+    if (deep) deep.checked = true;
+    runTokenBundle();
+    return;
+  }
+  recheckLastTarget();
+}
+
+function solanaViewFrameworkReference(surface) {
+  const s = String(surface || 'scanner');
+  const refs = (solanaContextCache[s] && solanaContextCache[s].solana_security_profile && solanaContextCache[s].solana_security_profile.references) || {};
+  const url = refs.program || 'https://solana.com/news/solana-ecosystem-security';
+  trackSolanaEvent('solana_secondary_cta_clicked', { surface: s, url });
+  window.open(url, '_blank', 'noopener');
+}
+
+function solanaSaveBaselineReminder(surface) {
+  const s = String(surface || 'scanner');
+  let list = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(SOLANA_BASELINE_KEY) || '[]');
+    list = Array.isArray(raw) ? raw : [];
+  } catch (_) {
+    list = [];
+  }
+  const at = new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString();
+  list.push({ surface: s, remind_at: at, created_at: new Date().toISOString() });
+  localStorage.setItem(SOLANA_BASELINE_KEY, JSON.stringify(list.slice(-100)));
+  trackSolanaEvent('solana_save_baseline_clicked', { surface: s });
+  alert('Baseline reminder saved for 24h follow-up recheck.');
+}
+
+function solanaExportIncidentSummary(surface) {
+  const s = String(surface || 'scanner');
+  const context = solanaContextCache[s] || {};
+  const profile = context.solana_security_profile || {};
+  const payload = {
+    surface: s,
+    role_mode: currentSolanaRoleMode,
+    exported_at: new Date().toISOString(),
+    target: context.target_url || context.mint || '',
+    tiering: profile.tiering || {},
+    incident_response: profile.incident_response || {},
+    top_actions: Array.isArray(profile.next_actions) ? profile.next_actions.slice(0, 3) : [],
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `solana_incident_summary_${Date.now()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  trackSolanaEvent('solana_export_summary_clicked', { surface: s });
 }
 
 // ── Scanner (streaming) ─────────────────────────────────────────────────
@@ -1418,6 +1659,8 @@ function runTokenBundle() {
         setInvestigationRaw('token', data);
         return;
       }
+      solanaContextCache.token = data;
+      trackSolanaEvent('solana_investigation_completed', { surface: 'token', verdict: String(data.risk_verdict || 'unknown') });
       renderTokenBundleSuccess(mint, data);
       setInvestigationRaw('token', data);
     })
@@ -1718,6 +1961,27 @@ function updateStats() {
 
 function updateAnalytics() { updateStats(); renderFindingsPage(); }
 
+function updateSolanaKpiReview() {
+  const events = getSolanaKpiWindowEvents(7);
+  const views = events.filter((e) => e.event === 'solana_card_viewed').length;
+  const ctaClicks = events.filter((e) => e.event === 'solana_primary_cta_clicked' || e.event === 'solana_secondary_cta_clicked').length;
+  const rechecks = events.filter((e) => e.event === 'solana_recheck_started').length;
+  const investigations = events.filter((e) => e.event === 'solana_investigation_completed').length;
+  const ctr = views > 0 ? Math.round((ctaClicks / views) * 100) : 0;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = String(v); };
+  set('kpiSolanaViews', views);
+  set('kpiSolanaCtr', `${ctr}%`);
+  set('kpiSolanaRechecks', rechecks);
+  set('kpiSolanaInvestigations', investigations);
+  const notes = [];
+  if (views > 0 && ctr < 15) notes.push('<div class="analytics-item analytics-item-stack"><strong>Improve CTA clarity</strong><span>CTR is below target; tighten action language and emphasize primary outcome.</span></div>');
+  if (views > 0 && rechecks < Math.max(1, Math.round(views * 0.1))) notes.push('<div class="analytics-item analytics-item-stack"><strong>Raise recheck intent</strong><span>Add stronger follow-up prompts after baseline runs.</span></div>');
+  if (investigations === 0) notes.push('<div class="analytics-item analytics-item-stack"><strong>Drive token investigations</strong><span>Promote token scan path from scanner Solana card for deeper context.</span></div>');
+  if (!notes.length) notes.push('<div class="analytics-item analytics-item-stack"><strong>On track</strong><span>Current 7-day Solana interaction metrics are healthy; keep message consistency.</span></div>');
+  const box = document.getElementById('kpiSolanaAdjustments');
+  if (box) box.innerHTML = renderKpiAdjustmentsList(notes);
+}
+
 async function syncDashboardData() {
   const apiUrl = getApiUrl();
   const token = getSessionToken();
@@ -1776,6 +2040,7 @@ async function syncDashboardData() {
   renderHistory();
   renderFindingsPage();
   updateStats();
+  updateSolanaKpiReview();
 }
 
 // ── Rewards ──────────────────────────────────────────────────────────────

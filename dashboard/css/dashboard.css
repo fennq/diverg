@@ -802,6 +802,56 @@ body {
   font-size: 0.75rem;
   color: var(--text-secondary);
 }
+.solana-trust-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.solana-framework-pill {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--accent-light);
+  background: rgba(37, 99, 235, 0.12);
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  border-radius: 999px;
+  padding: 3px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.solana-last-updated {
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+.solana-what-means {
+  margin-bottom: 10px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.solana-role-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.solana-role-label {
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.solana-cta-row,
+.solana-activation-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
 .scan-diff-explainer {
   margin-bottom: 10px;
   font-size: 0.75rem;
@@ -1556,6 +1606,18 @@ body {
 .token-bundle-note code {
   font-family: var(--mono);
   font-size: 0.625rem;
+}
+.token-spp-what-means {
+  margin-top: 10px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.token-spp-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 #scanSolanaProgramCard .mini-stat-value {
