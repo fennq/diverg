@@ -396,49 +396,6 @@
               </div>
             </div>
           </details>
-          <div class="card" id="scanSolanaProgramCard" style="display:none;">
-            <div class="card-header"><span class="card-title">Solana Security Program</span></div>
-            <div class="card-body">
-              <div class="solana-trust-row">
-                <span class="solana-framework-pill">Framework-aligned</span>
-                <span class="solana-last-updated" id="scanSolanaUpdatedAt">Profile logic updated: 2026-04-07</span>
-              </div>
-              <div class="scan-diff-explainer" id="scanSolanaProgramSummary"></div>
-              <div class="solana-what-means" id="scanSolanaWhatMeans"></div>
-              <div class="solana-role-row">
-                <span class="solana-role-label">Role mode</span>
-                <div class="toggle-pills" id="scanSolanaRoleModes">
-                  <div class="toggle-pill active" data-solana-role="protocol">Protocol team</div>
-                  <div class="toggle-pill" data-solana-role="incident">Incident response</div>
-                </div>
-              </div>
-              <div class="solana-cta-row">
-                <button class="btn btn-primary btn-sm" id="scanSolanaPrimaryCta" onclick="solanaRunPrimaryAction('scanner')">Run deeper recheck</button>
-                <button class="btn btn-ghost btn-sm" id="scanSolanaSecondaryCta" onclick="solanaViewFrameworkReference('scanner')">View framework reference</button>
-              </div>
-              <div class="solana-activation-row">
-                <button class="btn btn-ghost btn-sm" onclick="solanaSaveBaselineReminder('scanner')">Save baseline + recheck in 24h</button>
-                <button class="btn btn-ghost btn-sm" onclick="solanaExportIncidentSummary('scanner')">Export incident-ready summary</button>
-              </div>
-              <div class="mini-stat-grid">
-                <div class="mini-stat"><span class="mini-stat-label">Tier</span><span class="mini-stat-value" id="scanSolanaTier">baseline_program</span></div>
-                <div class="mini-stat"><span class="mini-stat-label">Monitoring 10M+</span><span class="mini-stat-value" id="scanSolanaMon">No</span></div>
-                <div class="mini-stat"><span class="mini-stat-label">Formal Verification 100M+</span><span class="mini-stat-value" id="scanSolanaFv">No</span></div>
-                <div class="mini-stat"><span class="mini-stat-label">Incident Priority</span><span class="mini-stat-value" id="scanSolanaIr">baseline</span></div>
-              </div>
-              <div class="analytics-grid-two">
-                <div>
-                  <div class="analytics-subtitle">Pillar Status</div>
-                  <div class="analytics-list" id="scanSolanaPillars"></div>
-                </div>
-                <div>
-                  <div class="analytics-subtitle">Immediate Actions</div>
-                  <div class="analytics-list" id="scanSolanaActions"></div>
-                </div>
-              </div>
-              <div class="solana-incident-workflow" id="scanSolanaIncidentWorkflow"></div>
-            </div>
-          </div>
         </div>
         <div class="scan-tab-panel active" id="scanTab-findings">
           <div class="card">
@@ -508,7 +465,6 @@
           <div class="tool-header"><span class="tool-num">01</span><span class="tool-title">Token scanner</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Analyzes on-chain holder distribution, funding overlap, and cluster patterns for any SPL mint address.</span></span></div>
           <div class="tool-row token-scan-row"><input type="text" class="input input-mono" id="tokenMint" placeholder="SPL mint address" autocomplete="off"><button class="btn btn-primary" id="tokenScanBtn" onclick="runTokenBundle()">Run scan</button></div>
           <label class="token-deep-scan"><input type="checkbox" id="tokenDeepScan"> Deep scan (expanded holder coverage)</label>
-          <div class="scan-scope-help">Use this view to map holder/funding risk and launch incident-oriented action from Solana Security Program guidance.</div>
           <div class="investigation-result token-bundle-wrap" id="tokenResult" style="display:none;margin-top:14px;"></div>
           <details class="investigation-raw" id="tokenRawWrap" style="display:none;"><summary>Raw JSON</summary><pre id="tokenRawJson"></pre></details>
         </div>
@@ -542,19 +498,6 @@
         <div class="bar-row"><span class="bar-label">Medium</span><div class="bar-track"><div class="bar-fill medium" id="barMedium2" style="width:0%"></div></div><span class="bar-value" id="valMedium2">0</span></div>
         <div class="bar-row"><span class="bar-label">Low</span><div class="bar-track"><div class="bar-fill low" id="barLow2" style="width:0%"></div></div><span class="bar-value" id="valLow2">0</span></div>
       </div></div>
-      <div class="card">
-        <div class="card-header"><span class="card-title">Solana 7-Day KPI Review</span></div>
-        <div class="card-body">
-          <div class="mini-stat-grid">
-            <div class="mini-stat"><span class="mini-stat-label">Card Views</span><span class="mini-stat-value" id="kpiSolanaViews">0</span></div>
-            <div class="mini-stat"><span class="mini-stat-label">CTA Click Through</span><span class="mini-stat-value" id="kpiSolanaCtr">0%</span></div>
-            <div class="mini-stat"><span class="mini-stat-label">Recheck Starts</span><span class="mini-stat-value" id="kpiSolanaRechecks">0</span></div>
-            <div class="mini-stat"><span class="mini-stat-label">Investigations</span><span class="mini-stat-value" id="kpiSolanaInvestigations">0</span></div>
-          </div>
-          <div class="analytics-subtitle">Weekly copy/CTA adjustments</div>
-          <div class="analytics-list" id="kpiSolanaAdjustments"></div>
-        </div>
-      </div>
     </div>
 
     <!-- ══════════ HISTORY ══════════ -->
