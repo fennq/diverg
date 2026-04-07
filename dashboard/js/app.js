@@ -474,6 +474,62 @@ function tokenSignalHumanize(sig) {
   return '';
 }
 
+function escAttr(v) {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function formatProgramTier(tier) {
+  const v = String(tier || '').trim();
+  if (!v) return 'baseline_program';
+  return v.replaceAll('_', ' ');
+}
+
+function renderProgramList(rows, emptyText) {
+  if (!Array.isArray(rows) || !rows.length) {
+    return `<div class="analytics-empty">${escHtml(emptyText)}</div>`;
+  }
+  return rows.join('');
+}
+
+function renderSolanaProgramForToken(data) {
+  const profile = (data && data.solana_security_profile && typeof data.solana_security_profile === 'object')
+    ? data.solana_security_profile
+    : null;
+  if (!profile) return '';
+  const tier = profile.tiering || {};
+  const ir = profile.incident_response || {};
+  const pillars = Array.isArray(profile.pillars) ? profile.pillars : [];
+  const actions = Array.isArray(profile.next_actions) ? profile.next_actions : [];
+  const refs = profile.references || {};
+  const pillarRows = pillars.map((p) => `<div class="analytics-item"><span>${escHtml(p.label || p.id || 'Pillar')}</span><span class="analytics-pill">${escHtml(String(p.status || 'unknown'))}</span></div>`);
+  const actionRows = actions.slice(0, 4).map((a) => `<div class="analytics-item analytics-item-stack"><strong>${escHtml(a.action || 'Action')}</strong><span>${escHtml(a.reason || '')}</span></div>`);
+  const refLinks = [
+    refs.program ? `<a href="${escAttr(refs.program)}" target="_blank" rel="noopener">Program</a>` : '',
+    refs.stride ? `<a href="${escAttr(refs.stride)}" target="_blank" rel="noopener">STRIDE</a>` : '',
+    refs.sirn_request_form ? `<a href="${escAttr(refs.sirn_request_form)}" target="_blank" rel="noopener">SIRN request</a>` : '',
+  ].filter(Boolean).join(' · ');
+  return `
+    <div class="token-signals-section">
+      <h4 class="token-bundle-h4">Solana Security Program</h4>
+      <div class="token-bundle-note">Operational profile aligned to Solana ecosystem security initiatives.</div>
+      <div class="token-bundle-metrics">
+        <div class="token-metric"><span class="token-metric-label">Tier</span><span class="token-metric-val">${escHtml(formatProgramTier(tier.tier_label))}</span></div>
+        <div class="token-metric"><span class="token-metric-label">Monitoring 10M+</span><span class="token-metric-val">${tier.monitoring_10m_eligible ? 'Eligible' : 'Not yet'}</span></div>
+        <div class="token-metric"><span class="token-metric-label">Formal Verification 100M+</span><span class="token-metric-val">${tier.formal_verification_100m_eligible ? 'Eligible' : 'Not yet'}</span></div>
+        <div class="token-metric"><span class="token-metric-label">IR Priority</span><span class="token-metric-val">${escHtml(String(ir.priority_level || 'baseline'))}</span></div>
+      </div>
+      <div class="analytics-grid-two" style="margin-top:10px;">
+        <div><div class="analytics-subtitle">Pillars</div><div class="analytics-list">${renderProgramList(pillarRows, 'No pillar data')}</div></div>
+        <div><div class="analytics-subtitle">Next Actions</div><div class="analytics-list">${renderProgramList(actionRows, 'No immediate actions')}</div></div>
+      </div>
+      ${refLinks ? `<p class="token-bundle-note">References: ${refLinks}</p>` : ''}
+    </div>`;
+}
+
 function formatTokenPct(n) {
   if (n === null || n === undefined || n === '') return '—';
   const x = Number(n);
@@ -602,6 +658,7 @@ function renderTokenBundleSuccess(mint, data) {
       ${holdersRows ? `<details class="token-wallet-section"><summary class="token-bundle-h4">Top holders (${holders.length})</summary><div class="token-wallet-table"><table><thead><tr><th class="col-num">#</th><th>Address</th><th>Balance</th><th>% Supply</th><th>Funder</th><th></th></tr></thead><tbody>${holdersRows}</tbody></table></div></details>` : ''}
       ${clusterRows ? `<details class="token-wallet-section"><summary class="token-bundle-h4">Cluster wallets (${clusterWallets.length})</summary><div class="token-wallet-table"><table><thead><tr><th>Address</th><th>Balance</th><th>% Supply</th><th>Funder</th></tr></thead><tbody>${clusterRows}</tbody></table></div></details>` : ''}
       ${crossNote}
+      ${renderSolanaProgramForToken(data)}
     </div>`;
 }
 
@@ -1072,7 +1129,46 @@ function renderScanAnalytics(report, findings) {
     diagnostics.map((d) => `<div class="analytics-item analytics-item-stack"><strong>${escHtml((d.skill || 'scanner') + ' · ' + (d.level || 'info'))}</strong><span>${escHtml(d.message || '')}</span></div>`),
     'No diagnostics'
   );
+  renderSolanaProgramCard(report || {});
   renderScanDiff(report || {});
+}
+
+function renderSolanaProgramCard(report) {
+  const card = document.getElementById('scanSolanaProgramCard');
+  if (!card) return;
+  const profile = (report && report.solana_security_profile && typeof report.solana_security_profile === 'object')
+    ? report.solana_security_profile
+    : null;
+  if (!profile) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = 'block';
+  const tier = profile.tiering || {};
+  const ir = profile.incident_response || {};
+  const pillars = Array.isArray(profile.pillars) ? profile.pillars : [];
+  const actions = Array.isArray(profile.next_actions) ? profile.next_actions : [];
+  const summary = document.getElementById('scanSolanaProgramSummary');
+  if (summary) summary.textContent = 'Solana-oriented operational readiness profile generated from scan context.';
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = String(v); };
+  set('scanSolanaTier', formatProgramTier(tier.tier_label || 'baseline_program'));
+  set('scanSolanaMon', tier.monitoring_10m_eligible ? 'Eligible' : 'Not yet');
+  set('scanSolanaFv', tier.formal_verification_100m_eligible ? 'Eligible' : 'Not yet');
+  set('scanSolanaIr', ir.priority_level || 'baseline');
+  const pillarEl = document.getElementById('scanSolanaPillars');
+  if (pillarEl) {
+    pillarEl.innerHTML = renderSimpleList(
+      pillars.map((p) => `<div class="analytics-item"><span>${escHtml(p.label || p.id || 'Pillar')}</span><span class="analytics-pill">${escHtml(String(p.status || 'unknown'))}</span></div>`),
+      'No pillar data'
+    );
+  }
+  const actEl = document.getElementById('scanSolanaActions');
+  if (actEl) {
+    actEl.innerHTML = renderSimpleList(
+      actions.slice(0, 4).map((a) => `<div class="analytics-item analytics-item-stack"><strong>${escHtml(a.action || 'Action')}</strong><span>${escHtml(a.reason || '')}</span></div>`),
+      'No immediate actions'
+    );
+  }
 }
 
 // ── Scanner (streaming) ─────────────────────────────────────────────────

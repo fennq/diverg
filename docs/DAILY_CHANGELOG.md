@@ -43,7 +43,71 @@ Copy this template for each new day:
 
 ---
 
+## 2026-04-07
+
+### Highlights
+- Rolled out Solana ecosystem security framework integration across API, dashboard investigation, scanner analytics, and public docs.
+- Added a shared `solana_security_profile` model so Solana guidance is consistent between investigation and scan workflows.
+- Published same-day release notes in internal and public changelogs.
+
+### Product & UX
+- Added Solana Security Program rendering in token bundle investigation results with:
+  - tier status
+  - monitoring/formal-verification eligibility context
+  - incident response priority
+  - pillar and action summaries
+- Added Solana Security Program card in scanner analytics for crypto-relevant scans.
+- Kept scanner presentation aligned with existing dashboard cards and analytics list patterns.
+
+### Platform & API
+- Added deterministic Solana profile model generation with:
+  - framework references (program, STRIDE, SIRN)
+  - TVL-based tier mapping (`$10M` monitoring, `$100M` formal verification)
+  - pillar status logic
+  - incident readiness checklist
+  - tooling coverage map
+  - prioritized next actions
+- Extended `POST /api/investigation/solana-bundle` with profile attachment and optional `tvl_usd` context.
+- Extended `POST /api/scan` and `POST /api/scan/stream` done payloads with `solana_security_profile` for eligible scan contexts.
+
+### Validation
+- `python3 -m pytest tests/test_scan_diff.py -q` passed (`5 passed`).
+- `node --check dashboard/js/app.js` passed.
+- Lint diagnostics check reported no issues on edited dashboard/backend files.
+
+### Notes
+- Existing unrelated local changes and untracked files were intentionally left untouched.
+- Public docs rollout was completed in `diverg-landing` and linked from Resources.
+
 ## 2026-04-06
+
+### Solana Security Integration Update
+- Added a shared `solana_security_profile` schema to API outputs so Solana framework guidance is deterministic across products.
+- Integrated profile generation into:
+  - `POST /api/investigation/solana-bundle` (with optional `tvl_usd` support for tiering context)
+  - `POST /api/scan`
+  - `POST /api/scan/stream` (`done` report payload)
+- Added a scanner-side Solana Security Program card that appears when crypto context is detected and renders:
+  - tier label
+  - monitoring/formal-verification eligibility flags
+  - incident priority
+  - pillar and immediate action lists
+- Added investigation rendering in token bundle results for Solana Security Program details, including references to framework sources.
+- Introduced deterministic profile sections:
+  - framework references (program, STRIDE, SIRN)
+  - TVL tiering model (`10M` monitoring / `100M` formal verification)
+  - pillar status model
+  - incident readiness checklist
+  - tooling coverage map (Hypernative, Range, Riverguard, Sec3 X-Ray, AuditWare Radar)
+  - actionable recommendations with priority
+- Updated public docs/resources in `diverg-landing`:
+  - expanded `resources/docs/blockchain.html` with Solana Security Program section
+  - expanded `resources/docs/integrations.html` with framework integration model
+  - added a Solana Security Program card on `resources/index.html`
+
+### Validation (Solana Security Integration)
+- Backend and frontend files updated and sanity-checked for profile propagation and rendering paths.
+- Final validation sweep includes targeted tests/lints after this entry.
 
 ### Highlights
 - Completed major scanner improvements across onboarding, trust UX, and reliability transparency.

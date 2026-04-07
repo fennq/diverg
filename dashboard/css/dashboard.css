@@ -1558,6 +1558,10 @@ body {
   font-size: 0.625rem;
 }
 
+#scanSolanaProgramCard .mini-stat-value {
+  font-size: 0.8rem;
+}
+
 .token-mini-mono {
   margin-top: 10px;
   font-family: var(--mono);

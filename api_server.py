@@ -1125,6 +1125,7 @@ def api_scan():
         _audit_log(g.user["id"], "scan.start", target=url, metadata={"scope": scope, "goal": goal or ""})
         result = run_web_scan(url, scope=scope, goal=goal, auth_context=auth_context)
         result = _attach_scan_diff(result, g.user["id"])
+        result = _attach_solana_security_profile_to_scan_result(result)
         scan_id = str(uuid.uuid4())
         save_scan(scan_id, result, scope, user_id=g.user["id"])
         payload = {
@@ -1153,6 +1154,7 @@ def api_scan():
             "report_provenance": result.get("report_provenance"),
             "scan_fingerprint": result.get("scan_fingerprint"),
             "scan_diff": result.get("scan_diff"),
+            "solana_security_profile": result.get("solana_security_profile"),
         }
         _audit_log(g.user["id"], "scan.complete", target=url, metadata={"scope": scope, "scan_id": scan_id, "findings": len(result.get("findings") or [])})
         return jsonify(payload)
@@ -1192,6 +1194,7 @@ def api_scan_stream():
                 if event.get("event") == "done":
                     report = event.get("report") or {}
                     report = _attach_scan_diff(report, user_id)
+                    report = _attach_solana_security_profile_to_scan_result(report)
                     report["id"] = scan_id
                     accumulated = report
                     event["report"] = report
@@ -1952,6 +1955,201 @@ def _enrich_solana_bundle_payload(raw: dict) -> dict:
     return raw
 
 
+_SOLANA_SECURITY_PROGRAM_URL = "https://solana.com/news/solana-ecosystem-security"
+_SOLANA_STRIDE_URL = "http://blog.asymmetric.re/introducing-stride-a-security-program-for-the-solana-ecosystem"
+_SOLANA_SIRN_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfwHege_H4TyJGI50hYtx-mfOmNukJyT_c9v4oO4KdOEqC1Mg/viewform"
+
+
+def _solana_program_tools() -> list[dict]:
+    return [
+        {"name": "Hypernative", "status": "available", "url": "https://www.hypernative.io/blog/solana-network-and-projects-building-on-it-are-now-secured-by-hypernative"},
+        {"name": "Range Security", "status": "available", "url": "http://docs.range.org/"},
+        {"name": "Riverguard (Neodyme)", "status": "available", "url": "https://neodyme.io/de/blog/riverguard_3_fuzzcases/"},
+        {"name": "Sec3 X-Ray", "status": "available", "url": "https://www.sec3.dev/x-ray"},
+        {"name": "AuditWare Radar", "status": "available", "url": "https://github.com/Auditware/radar?tab=readme-ov-file#-github-action"},
+    ]
+
+
+def _solana_pillars_from_signals(risk_score: float, cluster_pct: float, wallet_count: int, risk_signals: list[str]) -> list[dict]:
+    signals_lower = [str(x).lower() for x in (risk_signals or [])]
+    suspicious_funding = any("bridge_mixer" in s or "mixer" in s for s in signals_lower)
+    same_funder = any("same_" in s or "shared_" in s for s in signals_lower)
+
+    flow_status = "needs_attention" if risk_score >= 60 or suspicious_funding else ("watch" if risk_score >= 35 else "strong")
+    distribution_status = "needs_attention" if cluster_pct >= 25 else ("watch" if cluster_pct >= 12 else "strong")
+    identity_status = "watch" if same_funder or wallet_count >= 4 else "strong"
+    readiness_status = "needs_attention" if risk_score >= 70 else ("watch" if risk_score >= 45 else "strong")
+
+    return [
+        {
+            "id": "funding_integrity",
+            "label": "Funding Integrity",
+            "status": flow_status,
+            "confidence": "high" if risk_signals else "medium",
+            "evidence": [
+                f"Risk score {risk_score:.2f}/100",
+                "Bridge/mixer-linked funding signals detected" if suspicious_funding else "No bridge/mixer escalation detected",
+            ],
+        },
+        {
+            "id": "holder_distribution",
+            "label": "Holder Distribution Resilience",
+            "status": distribution_status,
+            "confidence": "high",
+            "evidence": [
+                f"Cluster supply concentration {cluster_pct:.2f}%",
+                f"{wallet_count} wallets in focus cluster",
+            ],
+        },
+        {
+            "id": "entity_linkage",
+            "label": "Entity and Linkage Traceability",
+            "status": identity_status,
+            "confidence": "medium",
+            "evidence": [
+                "Shared or same-funder linkage signals present" if same_funder else "No strong same-funder concentration detected",
+                "Cross-entity attribution should be reviewed against labels and funding paths",
+            ],
+        },
+        {
+            "id": "incident_readiness",
+            "label": "Incident Readiness",
+            "status": readiness_status,
+            "confidence": "medium",
+            "evidence": [
+                "Escalation runbook recommended for elevated overlap scores",
+                "24/7 monitoring fit should be evaluated for high-TVL protocols",
+            ],
+        },
+    ]
+
+
+def _solana_next_actions(risk_score: float, cluster_pct: float, has_tvl: bool) -> list[dict]:
+    actions = [
+        {
+            "priority": "high" if risk_score >= 60 else "medium",
+            "action": "Run STRIDE-style control review",
+            "reason": "Align protocol controls with Solana ecosystem security standards and publish transparent findings.",
+        },
+        {
+            "priority": "high" if cluster_pct >= 20 else "medium",
+            "action": "Validate concentration and funding cluster assumptions",
+            "reason": "High concentration and shared-funding paths increase exploit and governance risk.",
+        },
+        {
+            "priority": "medium",
+            "action": "Define SIRN-compatible incident response workflow",
+            "reason": "Predefined escalation contacts and response windows reduce blast radius during active incidents.",
+        },
+    ]
+    if not has_tvl:
+        actions.append({
+            "priority": "low",
+            "action": "Provide protocol TVL context",
+            "reason": "TVL enables more accurate tiering for 24/7 monitoring and formal verification recommendations.",
+        })
+    return actions[:5]
+
+
+def _build_solana_security_profile(
+    *,
+    risk_score: float,
+    cluster_pct: float,
+    wallet_count: int,
+    risk_signals: list[str],
+    tvl_usd: float | None,
+    context: str,
+) -> dict:
+    monitoring_eligible = bool(tvl_usd is not None and tvl_usd >= 10_000_000)
+    formal_verification_eligible = bool(tvl_usd is not None and tvl_usd >= 100_000_000)
+    tier_label = (
+        "formal_verification_priority"
+        if formal_verification_eligible
+        else "active_monitoring_priority"
+        if monitoring_eligible
+        else "baseline_program"
+    )
+
+    return {
+        "version": "2026-04",
+        "context": context,
+        "references": {
+            "program": _SOLANA_SECURITY_PROGRAM_URL,
+            "stride": _SOLANA_STRIDE_URL,
+            "sirn_request_form": _SOLANA_SIRN_FORM_URL,
+        },
+        "tiering": {
+            "tvl_usd": tvl_usd,
+            "monitoring_10m_eligible": monitoring_eligible,
+            "formal_verification_100m_eligible": formal_verification_eligible,
+            "tier_label": tier_label,
+        },
+        "pillars": _solana_pillars_from_signals(risk_score, cluster_pct, wallet_count, risk_signals),
+        "incident_response": {
+            "sirn_recommended": True,
+            "priority_level": "high" if risk_score >= 60 else ("medium" if risk_score >= 35 else "baseline"),
+            "checklist": [
+                "Define emergency owner and backup responder",
+                "Define first-15-minute containment actions",
+                "Define exchange and ecosystem escalation contacts",
+                "Run tabletop simulation for exploit and treasury compromise scenarios",
+            ],
+        },
+        "tooling_coverage": _solana_program_tools(),
+        "next_actions": _solana_next_actions(risk_score, cluster_pct, tvl_usd is not None),
+        "disclaimer": "Framework guidance supports protocol decisions; it does not replace protocol-level security responsibility.",
+    }
+
+
+def _attach_solana_security_profile_to_bundle(raw: dict, tvl_usd: float | None = None) -> dict:
+    if not isinstance(raw, dict) or not raw.get("ok"):
+        return raw
+    try:
+        risk_score = float(raw.get("risk_score") or 0.0)
+    except (TypeError, ValueError):
+        risk_score = 0.0
+    try:
+        cluster_pct = float(raw.get("cluster_pct_supply") or 0.0)
+    except (TypeError, ValueError):
+        cluster_pct = 0.0
+    wallet_count = int(raw.get("cluster_wallet_count") or 0)
+    risk_signals = raw.get("risk_signals") if isinstance(raw.get("risk_signals"), list) else []
+    raw["solana_security_profile"] = _build_solana_security_profile(
+        risk_score=max(0.0, min(100.0, risk_score)),
+        cluster_pct=max(0.0, cluster_pct),
+        wallet_count=max(0, wallet_count),
+        risk_signals=[str(x) for x in risk_signals[:25]],
+        tvl_usd=tvl_usd,
+        context="solana_bundle",
+    )
+    return raw
+
+
+def _attach_solana_security_profile_to_scan_result(report: dict) -> dict:
+    if not isinstance(report, dict):
+        return report
+    site_classification = report.get("site_classification") if isinstance(report.get("site_classification"), dict) else {}
+    if not bool(site_classification.get("is_crypto")):
+        return report
+    try:
+        risk_score = float(report.get("risk_score") or 0.0)
+    except (TypeError, ValueError):
+        risk_score = 0.0
+    findings = report.get("findings") if isinstance(report.get("findings"), list) else []
+    crypto_findings = [f for f in findings if isinstance(f, dict) and "solana" in str(f.get("title") or "").lower()]
+    report_signals = report.get("risk_signals")
+    signals = report_signals if isinstance(report_signals, list) else []
+    report["solana_security_profile"] = _build_solana_security_profile(
+        risk_score=max(0.0, min(100.0, risk_score)),
+        cluster_pct=0.0,
+        wallet_count=max(0, len(crypto_findings)),
+        risk_signals=[str(x) for x in signals[:25]],
+        tvl_usd=None,
+        context="scanner_crypto",
+    )
+    return report
+
+
 @app.route("/api/investigation/solana-bundle", methods=["OPTIONS"])
 def investigation_solana_bundle_options():
     return "", 204
@@ -2014,6 +2212,13 @@ def investigation_solana_bundle():
             max_funded_by_lookups = max(5, min(int(mf_raw), 5000))
         except (TypeError, ValueError):
             max_funded_by_lookups = None
+    tvl_usd = None
+    tvl_raw = data.get("tvl_usd")
+    if tvl_raw is not None:
+        try:
+            tvl_usd = max(0.0, float(tvl_raw))
+        except (TypeError, ValueError):
+            tvl_usd = None
 
     inv_dir = ROOT / "investigation"
     inv_path = str(inv_dir)
@@ -2045,6 +2250,7 @@ def investigation_solana_bundle():
     if isinstance(out, dict) and out.get("ok"):
         out = _enrich_solana_bundle_payload(out)
         out = _enrich_solana_bundle_arkham(out)
+        out = _attach_solana_security_profile_to_bundle(out, tvl_usd=tvl_usd)
     payload = out if isinstance(out, dict) else {"ok": False, "error": "Unexpected response"}
     if isinstance(payload, dict) and payload.get("ok"):
         _reward_investigation(g.user["id"], "solana_bundle")
