@@ -61,6 +61,7 @@ Copy this template for each new day:
 - Kept scanner presentation aligned with existing dashboard cards and analytics list patterns.
 - Added a scanner-side “What this means” block, trust row (`Framework-aligned`, profile logic date), role mode switch, and CTA hierarchy.
 - Added token investigation-side initiative actions: deeper recheck trigger, framework reference, baseline reminder, and incident summary export.
+- Added generated Solana incident runbook blocks (severity, owner role, first-15-minute steps, escalation contacts, top actions) in scanner and token program surfaces.
 - Added weekly KPI review panel in Analytics for Solana initiative usage (views, CTR, rechecks, investigations) with copy-adjustment guidance.
 
 ### Platform & API
@@ -81,6 +82,7 @@ Copy this template for each new day:
   - investigation completions
   - baseline reminder saves
   - incident summary exports
+  - incident workflow starts with runbook severity context
 
 ### Validation
 - `python3 -m pytest tests/test_scan_diff.py -q` passed (`5 passed`).

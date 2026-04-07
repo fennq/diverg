@@ -852,6 +852,9 @@ body {
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
+.solana-incident-workflow {
+  margin-top: 10px;
+}
 .scan-diff-explainer {
   margin-bottom: 10px;
   font-size: 0.75rem;
