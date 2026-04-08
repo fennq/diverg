@@ -2353,7 +2353,10 @@ def api_solana_watchlist():
                 )
                 VALUES (?, ?, ?, ?, '', NULL, NULL, ?, ?)
                 ON CONFLICT(user_id, mint) DO UPDATE SET
-                    label = excluded.label,
+                    label = CASE
+                        WHEN TRIM(excluded.label) != '' THEN excluded.label
+                        ELSE solana_watchlist.label
+                    END,
                     tvl_usd = COALESCE(excluded.tvl_usd, solana_watchlist.tvl_usd),
                     updated_at = excluded.updated_at
                 """,

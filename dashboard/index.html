@@ -463,7 +463,7 @@
       <div class="tool-list">
         <div class="tool-card tool-card-token">
           <div class="tool-header"><span class="tool-num">01</span><span class="tool-title">Token scanner</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Analyzes on-chain holder distribution, funding overlap, and cluster patterns for any SPL mint address.</span></span></div>
-          <div class="tool-row token-scan-row"><input type="text" class="input input-mono" id="tokenMint" placeholder="SPL mint address" autocomplete="off"><button class="btn btn-primary" id="tokenScanBtn" onclick="runTokenBundle()">Run scan</button></div>
+          <div class="tool-row token-scan-row"><input type="text" class="input input-mono" id="tokenMint" placeholder="SPL mint address (Enter to scan)" autocomplete="off"><button class="btn btn-primary" id="tokenScanBtn" onclick="runTokenBundle()">Run scan</button></div>
           <label class="token-deep-scan"><input type="checkbox" id="tokenDeepScan"> Deep scan (expanded holder coverage)</label>
           <div class="investigation-result token-bundle-wrap" id="tokenResult" style="display:none;margin-top:14px;"></div>
           <details class="investigation-raw" id="tokenRawWrap" style="display:none;"><summary>Raw JSON</summary><pre id="tokenRawJson"></pre></details>
@@ -474,6 +474,7 @@
           <div class="tool-row token-scan-row token-watchlist-toolbar">
             <button type="button" class="btn btn-ghost btn-sm" onclick="solanaWatchlistAddCurrentMint()">Add current mint</button>
             <input type="text" class="input input-mono" id="watchlistTvlInput" placeholder="Optional TVL (USD)" autocomplete="off">
+            <span id="tokenWatchlistFlash" class="token-watchlist-flash" aria-live="polite"></span>
           </div>
           <div class="analytics-list token-watchlist-list" id="solanaWatchlistBody">
             <div class="analytics-empty">Switch to this tab to load your watchlist.</div>
