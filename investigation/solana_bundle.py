@@ -169,6 +169,21 @@ def _looks_like_liquidity_pool_identity(ident: Optional[dict]) -> bool:
     return False
 
 
+def holder_supply_cluster_key(wallet: str, funder_chain: list[str]) -> str:
+    """
+    Cluster holders by shared *direct* first funder (first inbound hop), not the multi-hop terminal.
+
+    Using chain[-1] over-merges holders who only share a distant CEX/mixer and mislabels focus
+    clusters versus common 'same funder' holder tooling; direct funder matches token-holder triage.
+    """
+    ch = funder_chain if isinstance(funder_chain, list) else []
+    if len(ch) >= 2:
+        direct = ch[1]
+        if isinstance(direct, str) and direct and direct != wallet and _ADDR_RE.match(direct):
+            return f"funder:{direct}"
+    return f"singleton:{wallet}"
+
+
 def _cluster_key_sources(
     wallet: str,
     funded: Optional[dict],
@@ -605,17 +620,17 @@ def run_bundle_snapshot(
     hop_funded_by: dict[str, Optional[dict]] = {k: v for k, v in all_funded_by.items() if k not in funded_by}
     hop_transfers_by: dict[str, Any] = {k: v for k, v in all_transfers_by.items() if k not in transfers_by}
 
-    # Build clusters using full funder chain terminal
+    # Build holder clusters by direct first funder (see holder_supply_cluster_key)
     cluster_members: dict[str, set[str]] = defaultdict(set)
     for w in lookup_order:
         _ch = funder_chain_by_wallet.get(w, [w])
-        _ck = f"funder:{_ch[-1]}" if len(_ch) >= 2 else f"singleton:{w}"
+        _ck = holder_supply_cluster_key(w, _ch)
         cluster_members[_ck].add(w)
 
     focus_cluster_key: Optional[str] = None
     if sw:
         _sw_ch = funder_chain_by_wallet.get(sw, [sw])
-        focus_cluster_key = f"funder:{_sw_ch[-1]}" if len(_sw_ch) >= 2 else f"singleton:{sw}"
+        focus_cluster_key = holder_supply_cluster_key(sw, _sw_ch)
     else:
         # Largest multi-wallet cluster by supply
         best_key = None
@@ -642,8 +657,7 @@ def run_bundle_snapshot(
             seed_balance_ui = owner_amount.get(sw)
         if focus_cluster_key and sw not in focus_members:
             _swc = funder_chain_by_wallet.get(sw, [sw])
-            _swk = f"funder:{_swc[-1]}" if len(_swc) >= 2 else f"singleton:{sw}"
-            if _swk == focus_cluster_key:
+            if holder_supply_cluster_key(sw, _swc) == focus_cluster_key:
                 focus_members.add(sw)
 
     def supply_pct(amount: float) -> float:
@@ -763,15 +777,16 @@ def run_bundle_snapshot(
             pass
 
     disclaimer = (
-        f"Heuristic only: clusters prefer a shared ultimate funder traced up to {max_hops} hops when Helius "
-        "returns funding data for intermediaries (otherwise direct first inbound SOL / funded-by). "
-        "Coordination signals sample more transfers and enhanced txs by default (slower, deeper). Not financial advice."
+        "Heuristic only: the \"focus cluster\" and per-holder cluster flag group wallets by the same "
+        "*direct* first inbound SOL funder (first hop from Helius transfers / funded-by). "
+        f"Deeper funder walks (up to {max_hops} hops) still run for coordination scoring and chain fields only. "
+        "Coordination signals may sample more transfers by default (slower). Not financial advice."
     )
 
     focus_note: Optional[str] = None
     if not focus_cluster_key and not sw:
         focus_note = (
-            "No multi-wallet cluster with a shared ultimate funder in this sample. "
+            "No multi-wallet cluster with a shared direct funder in this sample. "
             "Optional: enter a wallet to focus that address’s funder-linked group."
         )
 
