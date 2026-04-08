@@ -19,6 +19,8 @@ Investigation (console):
   POST /api/investigation/blockchain   Solana via Helius + EVM via public RPC; requires server ARKHAM_API_KEY (Intel summary)
   POST /api/investigation/blockchain-full  Full blockchain_investigation skill (crime_report, flow_graph; server API keys incl. ARKHAM_API_KEY)
   POST /api/investigation/solana-bundle  Token mint: holders, cluster %, coordination / risk score; requires server ARKHAM_API_KEY
+  GET/POST/PATCH /api/solana/watchlist   Per-user SPL mint watchlist (Phase 2 hooks)
+  DELETE /api/solana/watchlist/<id>      Remove one watchlist row
   POST /api/investigation/domain       OSINT + recon + headers (full skill JSON)
   POST /api/investigation/reputation   OSINT context + entity reputation
 
@@ -379,6 +381,22 @@ CREATE TABLE IF NOT EXISTS audit_log (
     ip          TEXT DEFAULT '',
     created_at  TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS solana_watchlist (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id          TEXT NOT NULL,
+    mint             TEXT NOT NULL,
+    label            TEXT DEFAULT '',
+    tvl_usd          REAL,
+    last_verdict     TEXT DEFAULT '',
+    last_risk_score  REAL,
+    last_checked_at  TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    UNIQUE(user_id, mint)
+);
+
+CREATE INDEX IF NOT EXISTS idx_solana_watchlist_user ON solana_watchlist(user_id);
 """
 
 
@@ -2261,6 +2279,143 @@ def investigation_solana_bundle():
             json.dumps(payload, default=str),
             mimetype="application/json",
         )
+
+
+_SOLANA_WATCHLIST_MAX = 100
+
+
+@app.route("/api/solana/watchlist", methods=["GET", "POST", "PATCH", "OPTIONS"])
+@require_auth
+def api_solana_watchlist():
+    """Per-user SPL mint watchlist for repeat checks and snapshot hooks (Solana Phase 2)."""
+    if request.method == "OPTIONS":
+        return "", 204
+    uid = g.user["id"]
+    now = datetime.now(timezone.utc).isoformat()
+
+    if request.method == "GET":
+        with _db() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, mint, label, tvl_usd, last_verdict, last_risk_score, last_checked_at, created_at, updated_at
+                FROM solana_watchlist
+                WHERE user_id = ?
+                ORDER BY updated_at DESC
+                """,
+                (uid,),
+            ).fetchall()
+        return jsonify({"ok": True, "items": [dict(r) for r in rows]})
+
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json(silent=True) or {}
+
+    if request.method == "POST":
+        mint = sanitize_text(data.get("mint") or "", 128).strip()
+        if not mint or len(mint) < 20:
+            return jsonify({"error": "Invalid mint"}), 400
+        label = sanitize_text(data.get("label") or "", 200)
+        tvl_usd = None
+        if data.get("tvl_usd") is not None:
+            try:
+                tvl_usd = max(0.0, float(data.get("tvl_usd")))
+            except (TypeError, ValueError):
+                tvl_usd = None
+        with _db() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM solana_watchlist WHERE user_id = ? AND mint = ?",
+                (uid, mint),
+            ).fetchone()
+            if not exists:
+                n = conn.execute(
+                    "SELECT COUNT(*) FROM solana_watchlist WHERE user_id = ?",
+                    (uid,),
+                ).fetchone()[0]
+                if int(n or 0) >= _SOLANA_WATCHLIST_MAX:
+                    return jsonify({"error": "Watchlist limit reached", "max": _SOLANA_WATCHLIST_MAX}), 400
+            conn.execute(
+                """
+                INSERT INTO solana_watchlist (
+                    user_id, mint, label, tvl_usd, last_verdict, last_risk_score, last_checked_at, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, '', NULL, NULL, ?, ?)
+                ON CONFLICT(user_id, mint) DO UPDATE SET
+                    label = excluded.label,
+                    tvl_usd = COALESCE(excluded.tvl_usd, solana_watchlist.tvl_usd),
+                    updated_at = excluded.updated_at
+                """,
+                (uid, mint, label, tvl_usd, now, now),
+            )
+            row = conn.execute(
+                """
+                SELECT id, mint, label, tvl_usd, last_verdict, last_risk_score, last_checked_at, created_at, updated_at
+                FROM solana_watchlist WHERE user_id = ? AND mint = ?
+                """,
+                (uid, mint),
+            ).fetchone()
+        return jsonify({"ok": True, "item": dict(row) if row else None})
+
+    if request.method == "PATCH":
+        mint = sanitize_text(data.get("mint") or "", 128).strip()
+        if not mint:
+            return jsonify({"error": "Missing mint"}), 400
+        verdict = sanitize_text(
+            data.get("last_verdict") or data.get("risk_verdict") or "",
+            64,
+        ).strip()
+        score_raw = data.get("last_risk_score")
+        if score_raw is None:
+            score_raw = data.get("risk_score")
+        rs = None
+        if score_raw is not None:
+            try:
+                rs = float(score_raw)
+            except (TypeError, ValueError):
+                rs = None
+        with _db() as conn:
+            row0 = conn.execute(
+                "SELECT id FROM solana_watchlist WHERE user_id = ? AND mint = ?",
+                (uid, mint),
+            ).fetchone()
+            if not row0:
+                return jsonify({"error": "Mint not on watchlist"}), 404
+            conn.execute(
+                """
+                UPDATE solana_watchlist SET
+                    last_verdict = ?,
+                    last_risk_score = ?,
+                    last_checked_at = ?,
+                    updated_at = ?
+                WHERE user_id = ? AND mint = ?
+                """,
+                (verdict or "", rs, now, now, uid, mint),
+            )
+            row = conn.execute(
+                """
+                SELECT id, mint, label, tvl_usd, last_verdict, last_risk_score, last_checked_at, created_at, updated_at
+                FROM solana_watchlist WHERE user_id = ? AND mint = ?
+                """,
+                (uid, mint),
+            ).fetchone()
+        return jsonify({"ok": True, "item": dict(row) if row else None})
+
+    return jsonify({"error": "Method not allowed"}), 405
+
+
+@app.route("/api/solana/watchlist/<int:watch_id>", methods=["DELETE", "OPTIONS"])
+@require_auth
+def api_solana_watchlist_delete(watch_id: int):
+    if request.method == "OPTIONS":
+        return "", 204
+    uid = g.user["id"]
+    with _db() as conn:
+        cur = conn.execute(
+            "DELETE FROM solana_watchlist WHERE id = ? AND user_id = ?",
+            (watch_id, uid),
+        )
+        if cur.rowcount == 0:
+            return jsonify({"error": "Not found"}), 404
+    return jsonify({"ok": True})
 
 
 # ── Shared API helpers (history, rewards) ───────────────────────────────────

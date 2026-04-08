@@ -1347,6 +1347,53 @@ body {
   margin-bottom: 8px;
 }
 
+.token-bundle-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.token-watchlist-hint {
+  margin: 0 0 10px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.token-watchlist-toolbar {
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.token-watchlist-toolbar .input {
+  flex: 1;
+  min-width: 140px;
+  max-width: 200px;
+}
+
+.token-watchlist-list {
+  margin-top: 4px;
+}
+
+.token-watchlist-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+}
+
+.token-watchlist-actions-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
 .token-bundle-h3 {
   margin: 0;
   font-size: 0.9375rem;

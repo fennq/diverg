@@ -468,6 +468,17 @@
           <div class="investigation-result token-bundle-wrap" id="tokenResult" style="display:none;margin-top:14px;"></div>
           <details class="investigation-raw" id="tokenRawWrap" style="display:none;"><summary>Raw JSON</summary><pre id="tokenRawJson"></pre></details>
         </div>
+        <div class="tool-card tool-card-token token-watchlist-tool">
+          <div class="tool-header"><span class="tool-num">02</span><span class="tool-title">Mint watchlist</span><span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Save SPL mints for quick load and re-scan. Optional TVL (USD) is sent with bundle scans for tier context. Last verdict and score update when you re-run a watched mint.</span></span></div>
+          <p class="token-watchlist-hint">Server-backed list tied to your account. Use Load / Run scan to triage saved mints in one click.</p>
+          <div class="tool-row token-scan-row token-watchlist-toolbar">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="solanaWatchlistAddCurrentMint()">Add current mint</button>
+            <input type="text" class="input input-mono" id="watchlistTvlInput" placeholder="Optional TVL (USD)" autocomplete="off">
+          </div>
+          <div class="analytics-list token-watchlist-list" id="solanaWatchlistBody">
+            <div class="analytics-empty">Switch to this tab to load your watchlist.</div>
+          </div>
+        </div>
       </div>
     </div>
 

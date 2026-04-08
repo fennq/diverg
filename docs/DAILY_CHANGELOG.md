@@ -43,6 +43,25 @@ Copy this template for each new day:
 
 ---
 
+## 2026-04-08
+
+### Highlights
+- Shipped Solana Phase 2 mint watchlist: per-user server persistence, dashboard Tokens UI, and automatic snapshot refresh after bundle scans.
+
+### Product & UX
+- Added Mint watchlist card on the Tokens page with add-from-field, optional TVL (USD) for tier context, load/run-scan/remove actions, and inline last verdict and score display.
+- Added “Add to watchlist” on successful token bundle results for one-click save.
+
+### Platform & API
+- Added `solana_watchlist` SQLite table with unique `(user_id, mint)` and capped list size per user.
+- Added authenticated endpoints: `GET/POST/PATCH /api/solana/watchlist`, `DELETE /api/solana/watchlist/<id>` for list, upsert, snapshot patch, and delete.
+
+### Validation
+- `python3 -m py_compile api_server.py` and `node --check dashboard/js/app.js` completed successfully.
+
+### Notes
+- Public integrations docs updated to describe live mint watchlist behavior and dashboard entry path.
+
 ## 2026-04-07
 
 ### Highlights
@@ -50,6 +69,7 @@ Copy this template for each new day:
 - Added a shared `solana_security_profile` model so Solana guidance is consistent between investigation and scan workflows.
 - Published same-day release notes in internal and public changelogs.
 - Added dashboard-first initiative push pass with role-based CTAs, activation hooks, and KPI review tracking for Solana Security Program adoption.
+- Added a product-direction scanner focus pass that keeps scan experiences centered on core findings and diff interpretation.
 
 ### Product & UX
 - Added Solana Security Program rendering in token bundle investigation results with:
@@ -63,6 +83,9 @@ Copy this template for each new day:
 - Added token investigation-side initiative actions: deeper recheck trigger, framework reference, baseline reminder, and incident summary export.
 - Added generated Solana incident runbook blocks (severity, owner role, first-15-minute steps, escalation contacts, top actions) in scanner and token program surfaces.
 - Added weekly KPI review panel in Analytics for Solana initiative usage (views, CTR, rechecks, investigations) with copy-adjustment guidance.
+- Added a streamlined scanner presentation pass to reduce non-core overlays and keep triage paths concise.
+- Added a streamlined token investigation presentation pass to keep the holder/funding analysis flow clear and direct.
+- Added analytics surface cleanup so dashboard telemetry panels stay aligned with core scan workflows.
 
 ### Platform & API
 - Added deterministic Solana profile model generation with:
@@ -88,11 +111,13 @@ Copy this template for each new day:
 - `python3 -m pytest tests/test_scan_diff.py -q` passed (`5 passed`).
 - `node --check dashboard/js/app.js` passed.
 - Lint diagnostics check reported no issues on edited dashboard/backend files.
+- Post-update syntax check passed for `dashboard/js/app.js` and no linter issues were reported on edited dashboard files.
 
 ### Notes
 - Existing unrelated local changes and untracked files were intentionally left untouched.
 - Public docs rollout was completed in `diverg-landing` and linked from Resources.
 - Public docs wording was further aligned to a dashboard-first initiative narrative.
+- Update scope was limited to dashboard surfaces (`index.html`, `app.js`, `dashboard.css`) and did not touch unrelated local work.
 
 ## 2026-04-06
 

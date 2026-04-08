@@ -22,6 +22,7 @@ function navigate(page) {
   if (page === 'rewards') loadRewards();
   if (page === 'history') renderHistory();
   if (page === 'analytics') updateAnalytics();
+  if (page === 'investigation') loadSolanaWatchlist();
 }
 
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
@@ -332,6 +333,128 @@ async function apiJson(path, body) {
   return data;
 }
 
+async function apiAuth(method, path, body) {
+  const opts = {
+    method,
+    headers: { Authorization: 'Bearer ' + getSessionToken() },
+  };
+  if (body != null && method !== 'GET' && method !== 'DELETE') {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(getApiUrl() + path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || ('HTTP ' + res.status));
+  }
+  return data;
+}
+
+let lastTokenBundleMint = '';
+
+async function loadSolanaWatchlist() {
+  const el = document.getElementById('solanaWatchlistBody');
+  if (!el) return;
+  try {
+    const data = await apiAuth('GET', '/api/solana/watchlist');
+    const items = Array.isArray(data.items) ? data.items : [];
+    if (!items.length) {
+      el.innerHTML = '<div class="analytics-empty">No mints saved yet. Add the current mint or use “Add to watchlist” after a scan.</div>';
+      return;
+    }
+    el.innerHTML = items.map((row) => {
+      const mv = row.mint || '';
+      const v = row.last_verdict ? escHtml(row.last_verdict) : '—';
+      const s = row.last_risk_score != null && row.last_risk_score !== '' ? escHtml(String(row.last_risk_score)) : '—';
+      return `<div class="analytics-item analytics-item-stack token-watchlist-row">
+        <div><strong class="token-mono-clip" title="${escAttr(mv)}">${escHtml(mv)}</strong></div>
+        <div class="token-watchlist-meta"><span>Last verdict: ${v}</span><span>Score: ${s}</span></div>
+        <div class="token-watchlist-actions-inline">
+          <button type="button" class="btn btn-ghost btn-sm" data-watch-load="${escAttr(mv)}">Load</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-watch-scan="${escAttr(mv)}">Run scan</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-watch-del="${row.id}">Remove</button>
+        </div>
+      </div>`;
+    }).join('');
+    el.querySelectorAll('[data-watch-load]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const m = b.getAttribute('data-watch-load') || '';
+        const input = document.getElementById('tokenMint');
+        if (input) input.value = m;
+      });
+    });
+    el.querySelectorAll('[data-watch-scan]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const m = b.getAttribute('data-watch-scan') || '';
+        const input = document.getElementById('tokenMint');
+        if (input) input.value = m;
+        runTokenBundle();
+      });
+    });
+    el.querySelectorAll('[data-watch-del]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        const id = parseInt(b.getAttribute('data-watch-del'), 10);
+        if (!id) return;
+        try {
+          await apiAuth('DELETE', '/api/solana/watchlist/' + id);
+          await loadSolanaWatchlist();
+        } catch (err) {
+          alert(String(err.message || err));
+        }
+      });
+    });
+  } catch (err) {
+    el.innerHTML = `<div class="analytics-empty">${escHtml(String(err.message || err))}</div>`;
+  }
+}
+
+async function solanaWatchlistAddCurrentMint() {
+  const mint = String(document.getElementById('tokenMint')?.value || '').trim();
+  if (!mint) {
+    alert('Enter a mint address first.');
+    return;
+  }
+  await solanaWatchlistUpsertMint(mint);
+}
+
+async function solanaWatchlistAddFromResult() {
+  const mint = String(lastTokenBundleMint || document.getElementById('tokenMint')?.value || '').trim();
+  if (!mint) {
+    alert('No mint to add.');
+    return;
+  }
+  await solanaWatchlistUpsertMint(mint);
+}
+
+async function solanaWatchlistUpsertMint(mint) {
+  const tvlEl = document.getElementById('watchlistTvlInput');
+  const body = { mint };
+  if (tvlEl && tvlEl.value.trim()) {
+    const x = parseFloat(String(tvlEl.value).replace(/,/g, ''));
+    if (!Number.isNaN(x) && x >= 0) body.tvl_usd = x;
+  }
+  try {
+    await apiAuth('POST', '/api/solana/watchlist', body);
+    await loadSolanaWatchlist();
+    alert('Saved to watchlist.');
+  } catch (err) {
+    alert(String(err.message || err));
+  }
+}
+
+function syncSolanaWatchlistSnapshot(mint, data) {
+  if (!mint || !data || data.error) return;
+  const verdict = String(data.risk_verdict || '').trim();
+  const score = typeof data.risk_score === 'number' ? data.risk_score : null;
+  apiAuth('PATCH', '/api/solana/watchlist', {
+    mint,
+    last_verdict: verdict,
+    last_risk_score: score,
+  })
+    .then(() => loadSolanaWatchlist())
+    .catch(() => {});
+}
+
 function withProgress(out, label, promiseFactory) {
   const started = Date.now();
   let tick = 0;
@@ -540,6 +663,7 @@ function truncAddr(addr) {
 function renderTokenBundleSuccess(mint, data) {
   const box = document.getElementById('tokenResult');
   if (!box) return;
+  lastTokenBundleMint = String(mint || '').trim();
   box.style.display = 'block';
   const verdict = data.risk_verdict || 'Unknown';
   const badge = tokenVerdictBadge(verdict);
@@ -592,7 +716,10 @@ function renderTokenBundleSuccess(mint, data) {
         <div>
           <h3 class="token-bundle-h3">Scan results</h3>
         </div>
-        <span class="badge ${badge.cls}">${escHtml(badge.text)}</span>
+        <div class="token-bundle-header-actions">
+          <span class="badge ${badge.cls}">${escHtml(badge.text)}</span>
+          <button type="button" class="btn btn-ghost btn-sm" id="tokenBundleWatchlistBtn">Add to watchlist</button>
+        </div>
       </div>
       <div class="token-bundle-scores">
         <div class="token-score-block">
@@ -624,6 +751,8 @@ function renderTokenBundleSuccess(mint, data) {
       ${clusterRows ? `<details class="token-wallet-section"><summary class="token-bundle-h4">Cluster wallets (${clusterWallets.length})</summary><div class="token-wallet-table"><table><thead><tr><th>Address</th><th>Balance</th><th>% Supply</th><th>Funder</th></tr></thead><tbody>${clusterRows}</tbody></table></div></details>` : ''}
       ${crossNote}
     </div>`;
+  const wlBtn = document.getElementById('tokenBundleWatchlistBtn');
+  if (wlBtn) wlBtn.addEventListener('click', () => { solanaWatchlistAddFromResult(); });
 }
 
 function getFindingsPageList() {
@@ -1347,6 +1476,7 @@ function runTokenBundle() {
         return;
       }
       renderTokenBundleSuccess(mint, data);
+      syncSolanaWatchlistSnapshot(mint, data);
       setInvestigationRaw('token', data);
     })
     .catch((err) => {
