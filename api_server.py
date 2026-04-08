@@ -1981,7 +1981,8 @@ _SOLANA_MINT_BASE58_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
 
 def _normalize_solana_mint(m: str) -> str:
-    return (m or "").strip()
+    """Collapse whitespace (line breaks / accidental spaces in pasted mints)."""
+    return re.sub(r"\s+", "", (m or "").strip())
 
 
 def _is_plausible_solana_mint(m: str) -> bool:
@@ -2194,7 +2195,7 @@ def investigation_solana_bundle():
     if not request.is_json:
         return jsonify({"error": "JSON required"}), 400
     data = request.get_json(silent=True) or {}
-    mint = _normalize_solana_mint(sanitize_text(data.get("mint") or "", 128))
+    mint = _normalize_solana_mint(str(data.get("mint") or ""))[:128]
     wallet = sanitize_text(data.get("wallet") or "", 128).strip() or None
     env_key = (os.environ.get("HELIUS_API_KEY") or "").strip()
     body_key = sanitize_text(data.get("helius_api_key") or "", 256).strip()
@@ -2324,7 +2325,7 @@ def api_solana_watchlist():
     data = request.get_json(silent=True) or {}
 
     if request.method == "POST":
-        mint = _normalize_solana_mint(sanitize_text(data.get("mint") or "", 128))
+        mint = _normalize_solana_mint(str(data.get("mint") or ""))[:128]
         if not _is_plausible_solana_mint(mint):
             return jsonify({"error": "Invalid Solana mint (expected base58, typically 32–44 characters)."}), 400
         label = sanitize_text(data.get("label") or "", 200)
@@ -2372,7 +2373,7 @@ def api_solana_watchlist():
         return jsonify({"ok": True, "item": dict(row) if row else None})
 
     if request.method == "PATCH":
-        mint = _normalize_solana_mint(sanitize_text(data.get("mint") or "", 128))
+        mint = _normalize_solana_mint(str(data.get("mint") or ""))[:128]
         if not mint:
             return jsonify({"error": "Missing mint"}), 400
         if not _is_plausible_solana_mint(mint):

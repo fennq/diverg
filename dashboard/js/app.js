@@ -368,7 +368,7 @@ let lastTokenBundleMint = '';
 let solanaWatchlistCache = [];
 
 function normalizeSolanaMint(raw) {
-  return String(raw || '').trim();
+  return String(raw || '').replace(/\s+/g, '').trim();
 }
 
 function isValidSolanaMintString(m) {
@@ -1627,6 +1627,8 @@ async function runTokenBundle() {
       let detail = String(err.message || 'Unknown error');
       if (/authentication required/i.test(detail)) {
         detail = 'Not signed in, or this tab’s token does not match the API (wrong API URL in Settings, or stale session). Log out, confirm Settings → API URL matches this server, then sign in again.';
+      } else if (/\b524\b|gateway time-?out|timeout/i.test(detail)) {
+        detail = 'Gateway timeout (524): this scan took longer than the CDN/proxy waited—common with Deep scan. Try again with Deep scan off, or raise the proxy read timeout for /api/investigation/solana-bundle on your host.';
       }
       renderTokenBundleError(mint, 'Request failed', detail);
       setInvestigationRaw('token', { error: detail });

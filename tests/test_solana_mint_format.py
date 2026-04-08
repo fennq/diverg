@@ -18,6 +18,13 @@ class TestSolanaMintFormat(unittest.TestCase):
         self.assertTrue(_is_plausible_solana_mint("So11111111111111111111111111111111111111112"))
         self.assertTrue(_is_plausible_solana_mint("  So11111111111111111111111111111111111111112  "))
 
+    def test_interior_whitespace_removed_for_validation(self):
+        base = "So11111111111111111111111111111111111111112"
+        spaced = base[:10] + " " + base[10:]
+        collapsed = re.sub(r"\s+", "", spaced.strip())
+        self.assertEqual(collapsed, base)
+        self.assertTrue(_is_plausible_solana_mint(collapsed))
+
     def test_rejects_short_and_invalid_chars(self):
         self.assertFalse(_is_plausible_solana_mint(""))
         self.assertFalse(_is_plausible_solana_mint("short"))
