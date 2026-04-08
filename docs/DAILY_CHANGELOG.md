@@ -43,6 +43,23 @@ Copy this template for each new day:
 
 ---
 
+## 2026-04-09
+
+### Highlights
+- Tightened Solana mint watchlist and bundle accuracy: validated mints, merged saved TVL into bundle requests, and clarified snapshot semantics in the UI.
+
+### Product & UX
+- Bundle scans now send `tvl_usd` from the watchlist row when the current mint is saved with TVL; results show a short banner when that value was applied.
+- Watchlist rows show **last scan** time (from `last_checked_at`), self-reported TVL line, and explicit copy that verdict/score are bundle heuristics—not a protocol audit.
+- Token scanner rejects invalid mint strings client-side before calling the API.
+
+### Platform & API
+- Shared base58 mint checks (`32–44` charset) for `POST/PATCH /api/solana/watchlist` and `POST /api/investigation/solana-bundle`.
+- Added `tests/test_solana_mint_format.py` for mint validation rules.
+
+### Validation
+- `pytest tests/test_solana_mint_format.py -q` passed; `py_compile` / `node --check` on touched files passed.
+
 ## 2026-04-08
 
 ### Highlights

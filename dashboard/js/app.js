@@ -351,6 +351,41 @@ async function apiAuth(method, path, body) {
 }
 
 let lastTokenBundleMint = '';
+let solanaWatchlistCache = [];
+
+function normalizeSolanaMint(raw) {
+  return String(raw || '').trim();
+}
+
+function isValidSolanaMintString(m) {
+  const s = normalizeSolanaMint(m);
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s);
+}
+
+function tvlUsdFromWatchlist(mint) {
+  const m = normalizeSolanaMint(mint);
+  for (let i = 0; i < solanaWatchlistCache.length; i += 1) {
+    const row = solanaWatchlistCache[i];
+    if (normalizeSolanaMint(row.mint) === m && row.tvl_usd != null && row.tvl_usd !== '') {
+      const t = Number(row.tvl_usd);
+      if (!Number.isNaN(t) && t >= 0) return t;
+    }
+  }
+  return null;
+}
+
+function formatWatchlistCheckedAt(rawTs) {
+  if (!rawTs) return '';
+  const d = new Date(rawTs);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
 
 async function loadSolanaWatchlist() {
   const el = document.getElementById('solanaWatchlistBody');
@@ -358,6 +393,7 @@ async function loadSolanaWatchlist() {
   try {
     const data = await apiAuth('GET', '/api/solana/watchlist');
     const items = Array.isArray(data.items) ? data.items : [];
+    solanaWatchlistCache = items;
     if (!items.length) {
       el.innerHTML = '<div class="analytics-empty">No mints saved yet. Add the current mint or use “Add to watchlist” after a scan.</div>';
       return;
@@ -366,9 +402,19 @@ async function loadSolanaWatchlist() {
       const mv = row.mint || '';
       const v = row.last_verdict ? escHtml(row.last_verdict) : '—';
       const s = row.last_risk_score != null && row.last_risk_score !== '' ? escHtml(String(row.last_risk_score)) : '—';
+      const checked = formatWatchlistCheckedAt(row.last_checked_at);
+      const checkedHtml = checked
+        ? `<span title="From your last successful bundle scan for this mint">Last scan: ${escHtml(checked)}</span>`
+        : '<span>Last scan: —</span>';
+      const tvlN = row.tvl_usd != null && row.tvl_usd !== '' ? Number(row.tvl_usd) : NaN;
+      const tvlLine = !Number.isNaN(tvlN) && tvlN >= 0
+        ? `<div class="token-watchlist-tvl">Saved TVL (self-reported): $${escHtml(tvlN.toLocaleString(undefined, { maximumFractionDigits: 0 }))} — sent with bundle scans for tier context.</div>`
+        : '';
       return `<div class="analytics-item analytics-item-stack token-watchlist-row">
         <div><strong class="token-mono-clip" title="${escAttr(mv)}">${escHtml(mv)}</strong></div>
-        <div class="token-watchlist-meta"><span>Last verdict: ${v}</span><span>Score: ${s}</span></div>
+        <div class="token-watchlist-meta"><span>Last verdict: ${v}</span><span>Score: ${s}</span>${checkedHtml}</div>
+        <p class="token-watchlist-snapshot-note">Verdict and score reflect bundle heuristics (sampled holders, funding overlap)—not a full protocol audit.</p>
+        ${tvlLine}
         <div class="token-watchlist-actions-inline">
           <button type="button" class="btn btn-ghost btn-sm" data-watch-load="${escAttr(mv)}">Load</button>
           <button type="button" class="btn btn-ghost btn-sm" data-watch-scan="${escAttr(mv)}">Run scan</button>
@@ -404,23 +450,32 @@ async function loadSolanaWatchlist() {
       });
     });
   } catch (err) {
+    solanaWatchlistCache = [];
     el.innerHTML = `<div class="analytics-empty">${escHtml(String(err.message || err))}</div>`;
   }
 }
 
 async function solanaWatchlistAddCurrentMint() {
-  const mint = String(document.getElementById('tokenMint')?.value || '').trim();
+  const mint = normalizeSolanaMint(document.getElementById('tokenMint')?.value || '');
   if (!mint) {
     alert('Enter a mint address first.');
+    return;
+  }
+  if (!isValidSolanaMintString(mint)) {
+    alert('Enter a valid Solana mint address (base58, typically 32–44 characters).');
     return;
   }
   await solanaWatchlistUpsertMint(mint);
 }
 
 async function solanaWatchlistAddFromResult() {
-  const mint = String(lastTokenBundleMint || document.getElementById('tokenMint')?.value || '').trim();
+  const mint = normalizeSolanaMint(lastTokenBundleMint || document.getElementById('tokenMint')?.value || '');
   if (!mint) {
     alert('No mint to add.');
+    return;
+  }
+  if (!isValidSolanaMintString(mint)) {
+    alert('Mint on this result does not look like a valid Solana address.');
     return;
   }
   await solanaWatchlistUpsertMint(mint);
@@ -428,7 +483,7 @@ async function solanaWatchlistAddFromResult() {
 
 async function solanaWatchlistUpsertMint(mint) {
   const tvlEl = document.getElementById('watchlistTvlInput');
-  const body = { mint };
+  const body = { mint: normalizeSolanaMint(mint) };
   if (tvlEl && tvlEl.value.trim()) {
     const x = parseFloat(String(tvlEl.value).replace(/,/g, ''));
     if (!Number.isNaN(x) && x >= 0) body.tvl_usd = x;
@@ -444,10 +499,12 @@ async function solanaWatchlistUpsertMint(mint) {
 
 function syncSolanaWatchlistSnapshot(mint, data) {
   if (!mint || !data || data.error) return;
+  const m = normalizeSolanaMint(mint);
+  if (!isValidSolanaMintString(m)) return;
   const verdict = String(data.risk_verdict || '').trim();
   const score = typeof data.risk_score === 'number' ? data.risk_score : null;
   apiAuth('PATCH', '/api/solana/watchlist', {
-    mint,
+    mint: m,
     last_verdict: verdict,
     last_risk_score: score,
   })
@@ -660,10 +717,11 @@ function truncAddr(addr) {
   return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a;
 }
 
-function renderTokenBundleSuccess(mint, data) {
+function renderTokenBundleSuccess(mint, data, opts) {
   const box = document.getElementById('tokenResult');
   if (!box) return;
-  lastTokenBundleMint = String(mint || '').trim();
+  const o = opts && typeof opts === 'object' ? opts : {};
+  lastTokenBundleMint = normalizeSolanaMint(mint);
   box.style.display = 'block';
   const verdict = data.risk_verdict || 'Unknown';
   const badge = tokenVerdictBadge(verdict);
@@ -687,6 +745,11 @@ function renderTokenBundleSuccess(mint, data) {
   const cross = data.cross_chain_bundle && typeof data.cross_chain_bundle === 'object' && data.cross_chain_bundle.combined_escalation;
   const crossNote = cross
     ? '<p class="token-bundle-note">Cross-chain bridge and mixer funding signals detected across linked tokens.</p>'
+    : '';
+
+  const wlTvl = o.watchlistTvlUsd;
+  const watchlistTvlNote = (wlTvl != null && !Number.isNaN(Number(wlTvl)))
+    ? `<div class="token-bundle-verdict-hint">Using <strong>saved watchlist TVL</strong> (self-reported): $${escHtml(Number(wlTvl).toLocaleString(undefined, { maximumFractionDigits: 0 }))} — included in this request for security-profile tier context.</div>`
     : '';
 
   const holders = Array.isArray(data.top_holders) ? data.top_holders : [];
@@ -721,6 +784,7 @@ function renderTokenBundleSuccess(mint, data) {
           <button type="button" class="btn btn-ghost btn-sm" id="tokenBundleWatchlistBtn">Add to watchlist</button>
         </div>
       </div>
+      ${watchlistTvlNote}
       <div class="token-bundle-scores">
         <div class="token-score-block">
           <div class="token-score-head">
@@ -1453,9 +1517,17 @@ function clearScan() {
 }
 
 // ── Investigation (SPL token scanner only) ───────────────────────────────
+let lastBundleWatchlistTvlUsd = null;
+
 function runTokenBundle() {
-  const mint = document.getElementById('tokenMint').value.trim();
+  const mint = normalizeSolanaMint(document.getElementById('tokenMint').value);
   if (!mint) return;
+  if (!isValidSolanaMintString(mint)) {
+    alert('Enter a valid Solana mint address (base58, typically 32–44 characters).');
+    return;
+  }
+  const mintInput = document.getElementById('tokenMint');
+  if (mintInput && mintInput.value !== mint) mintInput.value = mint;
   const deep = !!(document.getElementById('tokenDeepScan') && document.getElementById('tokenDeepScan').checked);
   const btn = document.getElementById('tokenScanBtn');
   if (btn) btn.disabled = true;
@@ -1467,19 +1539,24 @@ function runTokenBundle() {
     max_funded_by_lookups: deep ? 1200 : 350,
     include_x_intel: deep,
   };
+  const tvlWl = tvlUsdFromWatchlist(mint);
+  lastBundleWatchlistTvlUsd = tvlWl;
+  if (tvlWl !== null) payload.tvl_usd = tvlWl;
   if (heliusApiKey) payload.helius_api_key = heliusApiKey;
   apiJson('/api/investigation/solana-bundle', payload)
     .then((data) => {
       if (data.error) {
+        lastBundleWatchlistTvlUsd = null;
         renderTokenBundleError(mint, 'Scan did not complete', String(data.error));
         setInvestigationRaw('token', data);
         return;
       }
-      renderTokenBundleSuccess(mint, data);
+      renderTokenBundleSuccess(mint, data, { watchlistTvlUsd: lastBundleWatchlistTvlUsd });
       syncSolanaWatchlistSnapshot(mint, data);
       setInvestigationRaw('token', data);
     })
     .catch((err) => {
+      lastBundleWatchlistTvlUsd = null;
       let detail = String(err.message || 'Unknown error');
       if (/authentication required/i.test(detail)) {
         detail = 'Not signed in, or this tab’s token does not match the API (wrong API URL in Settings, or stale session). Log out, confirm Settings → API URL matches this server, then sign in again.';
