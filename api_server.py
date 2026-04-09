@@ -379,12 +379,26 @@ def _decode_wallet_signature_bytes(
             return bytes.fromhex(signature_hex)
         except Exception:
             pass
-    if signature_b58 and base58 is not None:
+    if signature_b58:
         try:
-            return base58.b58decode(signature_b58)
+            return _base58_decode_fallback(signature_b58)
         except Exception:
             pass
     return None
+
+
+def _base58_decode_fallback(s: str) -> bytes:
+    """Decode base58 string, using the base58 lib if available or a pure-Python fallback."""
+    if base58 is not None:
+        return base58.b58decode(s)
+    alphabet = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    result = 0
+    for c in s.encode():
+        result = result * 58 + alphabet.index(c)
+    n_bytes = (result.bit_length() + 7) // 8
+    decoded = result.to_bytes(max(n_bytes, 1), "big")
+    pad = len(s) - len(s.lstrip("1"))
+    return b"\x00" * pad + decoded
 
 
 def _verify_wallet_signature(
@@ -398,10 +412,8 @@ def _verify_wallet_signature(
 ) -> bool:
     if not wallet_address or not message:
         return False
-    if base58 is None or VerifyKey is None:
-        return False
     try:
-        pub_bytes = base58.b58decode(wallet_address)
+        pub_bytes = _base58_decode_fallback(wallet_address)
         sig_bytes = _decode_wallet_signature_bytes(
             signature_b58=signature_b58,
             signature_base64=signature_base64,
@@ -410,10 +422,20 @@ def _verify_wallet_signature(
         )
         if not sig_bytes:
             return False
-        vk = VerifyKey(pub_bytes)
-        vk.verify(message.encode("utf-8"), sig_bytes)
+        msg_bytes = message.encode("utf-8")
+
+        # Path 1: PyNaCl (preferred)
+        if VerifyKey is not None:
+            vk = VerifyKey(pub_bytes)
+            vk.verify(msg_bytes, sig_bytes)
+            return True
+
+        # Path 2: cryptography library (fallback, always available)
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        pk = Ed25519PublicKey.from_public_bytes(pub_bytes)
+        pk.verify(sig_bytes, msg_bytes)
         return True
-    except (ValueError, BadSignatureError, TypeError):
+    except Exception:
         return False
 
 
