@@ -1212,7 +1212,16 @@ def _security_headers(resp):
         resp.headers["Cross-Origin-Resource-Policy"] = "same-site"
     resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
 
-    connect_src = "'self' https://mainnet.helius-rpc.com https://auth.privy.io https://api.privy.io"
+    # Privy SDK may call multiple subdomains and websocket endpoints.
+    connect_src = (
+        "'self' "
+        "https://mainnet.helius-rpc.com "
+        "https://auth.privy.io https://api.privy.io https://*.privy.io "
+        "wss://auth.privy.io wss://api.privy.io wss://*.privy.io"
+    )
+    extra_connect = (os.environ.get("DIVERG_EXTRA_CONNECT_SRC") or "").strip()
+    if extra_connect:
+        connect_src += f" {extra_connect}"
     if not IS_PRODUCTION:
         connect_src += " http://127.0.0.1:*"
     # Cloudflare Web Analytics injects beacon on proxied pages; allow or browser console shows CSP noise.
