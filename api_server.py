@@ -1049,8 +1049,16 @@ def _verify_privy_access_token(access_token: str) -> dict | None:
     if client is None:
         return None
     try:
-        claims = client.users.verify_access_token(access_token)  # type: ignore[attr-defined]
-    except Exception:
+        claims = None
+        users_api = getattr(client, "users", None)
+        if users_api is not None and hasattr(users_api, "verify_access_token"):
+            claims = users_api.verify_access_token(access_token)  # type: ignore[attr-defined]
+        elif hasattr(client, "verify_access_token"):
+            claims = client.verify_access_token(access_token)  # type: ignore[attr-defined]
+    except Exception as e:
+        logging.getLogger("diverg.api").warning("privy access token verification failed: %s", e)
+        return None
+    if claims is None:
         return None
     c = _obj_to_dict(claims)
     did = (
@@ -1461,7 +1469,16 @@ def auth_privy():
     if not request.is_json:
         return jsonify({"error": "JSON required"}), 400
     data = request.get_json(silent=True) or {}
-    access_token = sanitize_text(data.get("access_token") or "", 4096).strip()
+    token_raw = data.get("access_token")
+    if token_raw is None:
+        token_raw = data.get("token")
+    if isinstance(token_raw, dict):
+        token_raw = token_raw.get("access_token") or token_raw.get("token") or ""
+    access_token = str(token_raw or "").strip()
+    if access_token.lower().startswith("bearer "):
+        access_token = access_token[7:].strip()
+    if len(access_token) > 16384:
+        access_token = access_token[:16384]
     auth_mode = sanitize_text(data.get("mode") or "login", 24).strip().lower()
     if auth_mode not in ("login", "register"):
         auth_mode = "login"

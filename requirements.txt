@@ -19,4 +19,4 @@ pypdf>=3.0.0
 bcrypt>=4.1.0
 PyJWT>=2.8.0
 waitress>=3.0.0
-privy>=0.2.0
+privy-client>=0.2.0
