@@ -349,6 +349,10 @@ async function apiJson(path, body) {
       const avail = Number(data.available || 0);
       throw new Error(`Insufficient credits: need ${req}, available ${avail}.`);
     }
+    if (data && data.code === 'rate_limited') {
+      const retry = Number(data.retry_after || 0);
+      throw new Error(`Rate limited. Please wait ${retry > 60 ? Math.ceil(retry / 60) + ' minutes' : retry + ' seconds'} before trying again.`);
+    }
     throw new Error(data.error || ('HTTP ' + res.status));
   }
   return data;

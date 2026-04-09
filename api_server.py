@@ -318,6 +318,8 @@ auth_limiter = RateLimiter(max_attempts=10, window_seconds=300, lockout_seconds=
 register_limiter = RateLimiter(max_attempts=5, window_seconds=3600, lockout_seconds=1800)
 # Authenticated reads only; stops leaderboard/ledger scraping.
 rewards_read_limiter = RateLimiter(max_attempts=90, window_seconds=60, lockout_seconds=120)
+# Per-user scan/investigation throttle: 30 scans per 5 minutes, lockout 5 min.
+scan_limiter = RateLimiter(max_attempts=30, window_seconds=300, lockout_seconds=300)
 
 # ── Credits config/helpers ───────────────────────────────────────────────────
 
@@ -336,6 +338,25 @@ def _credits_module():
 
 def _credit_cost(scan_kind: str) -> float:
     return float(_credits_module().scan_cost(scan_kind))
+
+
+def _check_scan_rate_limit() -> tuple[bool, int]:
+    """Enforce per-user scan rate limit. Returns (allowed, retry_after)."""
+    uid = getattr(g, "user", {}).get("id", "")
+    if not uid:
+        return True, 0
+    ok, retry = scan_limiter.check(uid)
+    if ok:
+        scan_limiter.record(uid)
+    return ok, retry
+
+
+def _scan_rate_limit_response(retry_after: int):
+    return jsonify({
+        "error": "Too many scans. Please wait before trying again.",
+        "code": "rate_limited",
+        "retry_after": retry_after,
+    }), 429
 
 
 def _credits_insufficient_response(state: dict, required: float):
@@ -1807,6 +1828,9 @@ def api_scan_options():
 def api_scan():
     if not SCANNER_AVAILABLE:
         return jsonify({"error": "Scanner engine not available on this instance"}), 503
+    rl_ok, rl_retry = _check_scan_rate_limit()
+    if not rl_ok:
+        return _scan_rate_limit_response(rl_retry)
     url, goal, scope, auth_context, err = _parse_scan_body()
     if err:
         return err
@@ -1891,6 +1915,9 @@ def api_scan_stream_options():
 def api_scan_stream():
     if not SCANNER_AVAILABLE:
         return jsonify({"error": "Scanner engine not available on this instance"}), 503
+    rl_ok, rl_retry = _check_scan_rate_limit()
+    if not rl_ok:
+        return _scan_rate_limit_response(rl_retry)
     url, goal, scope, auth_context, err = _parse_scan_body()
     if err:
         return err
@@ -1991,12 +2018,25 @@ def poc_simulate():
         return jsonify({"error": "Scanner engine not available on this instance"}), 503
     if not request.is_json:
         return jsonify({"error": "Content-Type must be application/json"}), 400
+    rl_ok, rl_retry = _check_scan_rate_limit()
+    if not rl_ok:
+        return _scan_rate_limit_response(rl_retry)
+    user_id = g.user["id"]
+    cost = _credit_cost("poc")
+    scan_ref_id = f"poc:{secrets.token_hex(8)}"
+    ok_reserve, st_reserve, _ = _reserve_scan_credits(
+        user_id, amount=cost, reason="poc_charge",
+        ref_type="poc", ref_id=scan_ref_id,
+    )
+    if not ok_reserve:
+        return _credits_insufficient_response(st_reserve, cost)
     data = request.get_json(silent=True) or {}
     verbose = bool(data.get("verbose"))
     pv_lim = 20000 if verbose else None
     if data.get("finding"):
         finding = data["finding"]
         if not isinstance(finding, dict):
+            _release_scan_credits(user_id, ref_type="poc", ref_id=scan_ref_id)
             return jsonify({"error": "finding must be an object"}), 400
         try:
             result = run_poc_for_finding(
@@ -2007,13 +2047,16 @@ def poc_simulate():
                 max_body_preview=pv_lim,
             )
         except Exception as e:
+            _release_scan_credits(user_id, ref_type="poc", ref_id=scan_ref_id)
             return jsonify({"success": False, "error": str(e), "conclusion": ""}), 200
     else:
         poc_type = sanitize_text(data.get("type") or "", 20).lower()
         url = sanitize_text(data.get("url") or "", 2048)
         if not url:
+            _release_scan_credits(user_id, ref_type="poc", ref_id=scan_ref_id)
             return jsonify({"error": "Missing url (or provide finding)"}), 400
         if poc_type not in ("idor", "unauthenticated"):
+            _release_scan_credits(user_id, ref_type="poc", ref_id=scan_ref_id)
             return jsonify({"error": "type must be 'idor' or 'unauthenticated'"}), 400
         if poc_type == "idor":
             result = run_idor_poc(url=url, method=data.get("method") or "GET",
@@ -2026,8 +2069,9 @@ def poc_simulate():
                                     headers=data.get("headers"), cookies=data.get("cookies"),
                                     max_body_preview=pv_lim)
 
+    _finalize_scan_credits(user_id, reason="poc_charge", ref_type="poc", ref_id=scan_ref_id)
     if result.success:
-        _reward_poc(g.user["id"])
+        _reward_poc(user_id)
     _audit_log(
         g.user["id"],
         "poc.simulate",
@@ -2388,6 +2432,18 @@ def investigation_blockchain():
         return jsonify({"error": "requests library unavailable"}), 503
     if not request.is_json:
         return jsonify({"error": "JSON required"}), 400
+    rl_ok, rl_retry = _check_scan_rate_limit()
+    if not rl_ok:
+        return _scan_rate_limit_response(rl_retry)
+    user_id = g.user["id"]
+    cost = _credit_cost("blockchain")
+    scan_ref_id = f"blockchain:{secrets.token_hex(8)}"
+    ok_reserve, st_reserve, _ = _reserve_scan_credits(
+        user_id, amount=cost, reason="blockchain_charge",
+        ref_type="investigation", ref_id=scan_ref_id,
+    )
+    if not ok_reserve:
+        return _credits_insufficient_response(st_reserve, cost)
     data = request.get_json(silent=True) or {}
     addr = sanitize_text(data.get("address") or "", 128).strip()
     if not addr:
@@ -2432,11 +2488,13 @@ def investigation_blockchain():
             _attach_arkham_capabilities(err_out, required=False)
             return jsonify(err_out), 200
         _attach_arkham_intel_block(out, addr)
-        _reward_investigation(g.user["id"], "blockchain")
+        _finalize_scan_credits(user_id, reason="blockchain_charge", ref_type="investigation", ref_id=scan_ref_id)
+        _reward_investigation(user_id, "blockchain")
         return jsonify(out)
 
     # Solana-style (base58)
     if not api_key:
+        _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
         return jsonify({
             "error": "Helius API key required for Solana lookups. Add it in Settings or set HELIUS_API_KEY on the server.",
             "address": addr,
@@ -2455,6 +2513,7 @@ def investigation_blockchain():
             network, api_key, "getSignaturesForAddress", [addr, {"limit": 35}],
         )
     except Exception as e:
+        _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
         err_out = {"error": str(e), "address": addr, "chain": "solana", "raw": raw}
         _attach_arkham_capabilities(err_out, required=False)
         return jsonify(err_out), 200
@@ -2474,7 +2533,8 @@ def investigation_blockchain():
     out["raw"] = raw
     out["summary"] = _summarize_chain_solana(raw)
     _attach_arkham_intel_block(out, addr)
-    _reward_investigation(g.user["id"], "blockchain")
+    _finalize_scan_credits(user_id, reason="blockchain_charge", ref_type="investigation", ref_id=scan_ref_id)
+    _reward_investigation(user_id, "blockchain")
     return jsonify(out)
 
 
@@ -2492,6 +2552,9 @@ def investigation_blockchain_full():
     """
     if not request.is_json:
         return jsonify({"error": "JSON required"}), 400
+    rl_ok, rl_retry = _check_scan_rate_limit()
+    if not rl_ok:
+        return _scan_rate_limit_response(rl_retry)
     data = request.get_json(silent=True) or {}
     deployer = sanitize_text(data.get("deployer_address") or data.get("address") or "", 128).strip()
 
@@ -2513,8 +2576,19 @@ def investigation_blockchain_full():
     if not deployer and not token_addresses:
         return jsonify({"error": "Provide address, deployer_address, or token_addresses"}), 400
 
+    user_id = g.user["id"]
+    cost = _credit_cost("blockchain_full")
+    scan_ref_id = f"blockchain_full:{secrets.token_hex(8)}"
+    ok_reserve, st_reserve, _ = _reserve_scan_credits(
+        user_id, amount=cost, reason="blockchain_full_charge",
+        ref_type="investigation", ref_id=scan_ref_id,
+    )
+    if not ok_reserve:
+        return _credits_insufficient_response(st_reserve, cost)
+
     ark_miss = _arkham_env_error_response("full blockchain investigation")
     if ark_miss is not None:
+        _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
         return ark_miss
 
     target_url = sanitize_text(data.get("target_url") or "", 2048).strip()
@@ -2557,23 +2631,28 @@ def investigation_blockchain_full():
                 raw_json = fut.result(timeout=float(BLOCKCHAIN_FULL_HTTP_TIMEOUT_SEC))
     except concurrent.futures.TimeoutError:
         log.warning("blockchain_full timeout user_id=%s", g.user.get("id"))
+        _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
         return jsonify({"error": "Full investigation timed out; try flow_depth=full or a narrower target."}), 504
     except Exception as e:
         log.exception("blockchain_full failed: %s", e)
+        _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
         return jsonify({"error": str(e)}), 500
 
     try:
         payload = json.loads(raw_json)
     except json.JSONDecodeError:
+        _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
         return jsonify({"error": "Invalid investigation output"}), 500
 
     if not isinstance(payload, dict):
+        _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
         return jsonify({"error": "Unexpected investigation shape"}), 500
 
     payload = _truncate_blockchain_full_payload(payload)
     if isinstance(payload, dict):
         _attach_arkham_capabilities(payload, required=True)
-    _reward_investigation(g.user["id"], "blockchain_full")
+    _finalize_scan_credits(user_id, reason="blockchain_full_charge", ref_type="investigation", ref_id=scan_ref_id)
+    _reward_investigation(user_id, "blockchain_full")
     try:
         return jsonify(payload)
     except TypeError:
@@ -2592,9 +2671,22 @@ def investigation_domain():
         return jsonify({"error": "Scanner engine not available"}), 503
     if not request.is_json:
         return jsonify({"error": "JSON required"}), 400
+    rl_ok, rl_retry = _check_scan_rate_limit()
+    if not rl_ok:
+        return _scan_rate_limit_response(rl_retry)
+    user_id = g.user["id"]
+    cost = _credit_cost("domain")
+    scan_ref_id = f"domain:{secrets.token_hex(8)}"
+    ok_reserve, st_reserve, _ = _reserve_scan_credits(
+        user_id, amount=cost, reason="domain_charge",
+        ref_type="investigation", ref_id=scan_ref_id,
+    )
+    if not ok_reserve:
+        return _credits_insufficient_response(st_reserve, cost)
     data = request.get_json(silent=True) or {}
     domain = sanitize_text(data.get("domain") or "", 253).strip().lower()
     if not domain:
+        _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
         return jsonify({"error": "Missing domain"}), 400
     domain = domain.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
     target_url = "https://" + domain
@@ -2609,7 +2701,8 @@ def investigation_domain():
             headers_ssl = f_hd.result(timeout=120)
         combined = {"osint": osint, "recon": recon, "headers_ssl": headers_ssl}
         findings = aggregate_findings(combined)
-        _reward_investigation(g.user["id"], "domain")
+        _finalize_scan_credits(user_id, reason="domain_charge", ref_type="investigation", ref_id=scan_ref_id)
+        _reward_investigation(user_id, "domain")
         return jsonify({
             "domain": domain,
             "target_url": target_url,
@@ -2618,6 +2711,7 @@ def investigation_domain():
             "skills": combined,
         })
     except Exception as e:
+        _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
         return jsonify({"error": str(e), "domain": domain}), 500
 
 
@@ -2633,9 +2727,22 @@ def investigation_reputation():
         return jsonify({"error": "Scanner engine not available"}), 503
     if not request.is_json:
         return jsonify({"error": "JSON required"}), 400
+    rl_ok, rl_retry = _check_scan_rate_limit()
+    if not rl_ok:
+        return _scan_rate_limit_response(rl_retry)
+    user_id = g.user["id"]
+    cost = _credit_cost("reputation")
+    scan_ref_id = f"reputation:{secrets.token_hex(8)}"
+    ok_reserve, st_reserve, _ = _reserve_scan_credits(
+        user_id, amount=cost, reason="reputation_charge",
+        ref_type="investigation", ref_id=scan_ref_id,
+    )
+    if not ok_reserve:
+        return _credits_insufficient_response(st_reserve, cost)
     data = request.get_json(silent=True) or {}
     target = sanitize_text(data.get("target") or "", 512).strip()
     if not target:
+        _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
         return jsonify({"error": "Missing target"}), 400
     domain = target.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0].lower()
     target_url = "https://" + domain
@@ -2646,7 +2753,8 @@ def investigation_reputation():
         if isinstance(osint, dict) and "error" not in osint:
             ctx["osint_json"] = json.dumps(osint)
         rep = run_skill("entity_reputation", domain, target_url, ctx, scan_type="full")
-        _reward_investigation(g.user["id"], "reputation")
+        _finalize_scan_credits(user_id, reason="reputation_charge", ref_type="investigation", ref_id=scan_ref_id)
+        _reward_investigation(user_id, "reputation")
         return jsonify({
             "domain": domain,
             "target_url": target_url,
@@ -2654,6 +2762,7 @@ def investigation_reputation():
             "entity_reputation": rep,
         })
     except Exception as e:
+        _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
         return jsonify({"error": str(e), "domain": domain}), 500
 
 
@@ -2923,6 +3032,9 @@ def investigation_solana_bundle():
     user_id = g.user["id"]
     if not request.is_json:
         return jsonify({"error": "JSON required"}), 400
+    rl_ok, rl_retry = _check_scan_rate_limit()
+    if not rl_ok:
+        return _scan_rate_limit_response(rl_retry)
     data = request.get_json(silent=True) or {}
     mint = _normalize_solana_mint(str(data.get("mint") or ""))[:128]
     wallet = sanitize_text(data.get("wallet") or "", 128).strip() or None
@@ -3342,6 +3454,11 @@ def credits_me():
             "web_scan": cm.scan_cost("web_scan"),
             "token_scan": cm.scan_cost("token_scan"),
             "token_deep_scan": cm.scan_cost("token_deep_scan"),
+            "blockchain": cm.scan_cost("blockchain"),
+            "blockchain_full": cm.scan_cost("blockchain_full"),
+            "domain": cm.scan_cost("domain"),
+            "reputation": cm.scan_cost("reputation"),
+            "poc": cm.scan_cost("poc"),
         },
         "state": state,
         "next_daily_grant_total": next_grant,
@@ -3940,17 +4057,16 @@ def health():
                 arkham_status["runtime_error"] = str(probe.get("error"))
         except Exception:
             pass
-    return jsonify({
+    resp_data: dict = {
         "status": "ok",
         "service": "diverg-console",
         "version": "2.3",
-        "db_path": str(DB_PATH) if not IS_PRODUCTION else "",
-        "db_exists": DB_PATH.exists(),
-        "users": user_count if not IS_PRODUCTION else None,
-        "program_strategy": {"option": "C", "enterprise_weight": 70, "offensive_weight": 30},
-        "audit_retention_days": DIVERG_AUDIT_LOG_RETENTION_DAYS,
-        "arkham": arkham_status,
-    })
+    }
+    if not IS_PRODUCTION:
+        resp_data["db_exists"] = DB_PATH.exists()
+        resp_data["users"] = user_count
+    resp_data["arkham"] = arkham_status
+    return jsonify(resp_data)
 
 
 # ── Catch-all redirect to login ──────────────────────────────────────────────

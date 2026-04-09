@@ -26,6 +26,11 @@ DEFAULT_CREDITS_PER_STEP = 20.0
 SCAN_COST_WEB = 2.0
 SCAN_COST_TOKEN = 2.0
 SCAN_COST_TOKEN_DEEP = 3.5
+SCAN_COST_BLOCKCHAIN = 2.0
+SCAN_COST_BLOCKCHAIN_FULL = 3.5
+SCAN_COST_DOMAIN = 2.0
+SCAN_COST_REPUTATION = 2.0
+SCAN_COST_POC = 1.0
 
 
 def _float_env(name: str, default: float) -> float:
@@ -62,11 +67,16 @@ def daily_grant_total(token_balance_ui: float) -> float:
 
 def scan_cost(scan_kind: str) -> float:
     kind = (scan_kind or "").strip().lower()
-    if kind == "token_deep_scan":
-        return SCAN_COST_TOKEN_DEEP
-    if kind == "token_scan":
-        return SCAN_COST_TOKEN
-    return SCAN_COST_WEB
+    costs = {
+        "token_deep_scan": SCAN_COST_TOKEN_DEEP,
+        "token_scan": SCAN_COST_TOKEN,
+        "blockchain": SCAN_COST_BLOCKCHAIN,
+        "blockchain_full": SCAN_COST_BLOCKCHAIN_FULL,
+        "domain": SCAN_COST_DOMAIN,
+        "reputation": SCAN_COST_REPUTATION,
+        "poc": SCAN_COST_POC,
+    }
+    return costs.get(kind, SCAN_COST_WEB)
 
 
 def utc_day_string(now: datetime | None = None) -> str:
@@ -284,7 +294,8 @@ def reserve_credits(
         INSERT INTO credit_holds (user_id, ref_type, ref_id, amount, reason, meta_json, nonce, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (user_id, ref_type_s, ref_id_s, amount, reason_s, meta_json[:1000], nonce, datetime.now(timezone.utc).isoformat()),
+        (user_id, ref_type_s, ref_id_s, amount, reason_s,
+         meta_json[:1000], nonce, datetime.now(timezone.utc).isoformat()),
     )
     st = ensure_daily_credit_state(conn, user_id)
     return True, st, None
