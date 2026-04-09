@@ -170,6 +170,11 @@ DIVERG_ENABLE_STRICT_PROOF_API = (os.environ.get("DIVERG_ENABLE_STRICT_PROOF_API
 # Default off so deploy healthchecks succeed; set DIVERG_REQUIRE_ARKHAM=1 when ARKHAM_API_KEY is always in env.
 DIVERG_REQUIRE_ARKHAM = (os.environ.get("DIVERG_REQUIRE_ARKHAM", "0").strip().lower() in ("1", "true", "yes"))
 DIVERG_HEALTH_ARKHAM_PROBE = (os.environ.get("DIVERG_HEALTH_ARKHAM_PROBE", "0").strip().lower() in ("1", "true", "yes"))
+PRIVY_APP_ID = (os.environ.get("PRIVY_APP_ID") or "").strip()
+PRIVY_CLIENT_ID = (os.environ.get("PRIVY_CLIENT_ID") or "").strip()
+PRIVY_APP_SECRET = (os.environ.get("PRIVY_APP_SECRET") or "").strip()
+DIVERG_ENABLE_PRIVY = (os.environ.get("DIVERG_ENABLE_PRIVY", "1").strip().lower() in ("1", "true", "yes"))
+PRIVY_ENABLED = bool(DIVERG_ENABLE_PRIVY and PRIVY_APP_ID and PRIVY_APP_SECRET)
 
 _INVESTIGATION_DIR = str(ROOT / "investigation")
 if _INVESTIGATION_DIR not in sys.path:
@@ -349,14 +354,62 @@ def _sanitize_wallet_address(raw: str) -> str:
     return sanitize_text(raw or "", 128).strip()
 
 
-def _verify_wallet_signature(wallet_address: str, message: str, signature_b58: str) -> bool:
-    if not wallet_address or not message or not signature_b58:
+def _decode_wallet_signature_bytes(
+    signature_b58: str | None = None,
+    signature_base64: str | None = None,
+    signature_hex: str | None = None,
+    signature_bytes: list[int] | None = None,
+) -> bytes | None:
+    if signature_bytes and isinstance(signature_bytes, list):
+        try:
+            vals = [int(x) for x in signature_bytes]
+            if vals and all(0 <= v <= 255 for v in vals):
+                return bytes(vals)
+        except (TypeError, ValueError):
+            pass
+    if signature_base64:
+        try:
+            import base64
+
+            return base64.b64decode(signature_base64, validate=True)
+        except Exception:
+            pass
+    if signature_hex:
+        try:
+            return bytes.fromhex(signature_hex)
+        except Exception:
+            pass
+    if signature_b58 and base58 is not None:
+        try:
+            return base58.b58decode(signature_b58)
+        except Exception:
+            pass
+    return None
+
+
+def _verify_wallet_signature(
+    wallet_address: str,
+    message: str,
+    *,
+    signature_b58: str | None = None,
+    signature_base64: str | None = None,
+    signature_hex: str | None = None,
+    signature_bytes: list[int] | None = None,
+) -> bool:
+    if not wallet_address or not message:
         return False
     if base58 is None or VerifyKey is None:
         return False
     try:
         pub_bytes = base58.b58decode(wallet_address)
-        sig_bytes = base58.b58decode(signature_b58)
+        sig_bytes = _decode_wallet_signature_bytes(
+            signature_b58=signature_b58,
+            signature_base64=signature_base64,
+            signature_hex=signature_hex,
+            signature_bytes=signature_bytes,
+        )
+        if not sig_bytes:
+            return False
         vk = VerifyKey(pub_bytes)
         vk.verify(message.encode("utf-8"), sig_bytes)
         return True
@@ -940,27 +993,146 @@ def _get_client_ip() -> str:
     return request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
 
 
-def get_current_user():
+def _bearer_token_from_request() -> str:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
-        token = auth_header[7:]
-    else:
+        return auth_header[7:].strip()
+    return ""
+
+
+def _obj_to_dict(obj) -> dict:
+    if isinstance(obj, dict):
+        return dict(obj)
+    if obj is None:
+        return {}
+    out = {}
+    for key in dir(obj):
+        if key.startswith("_"):
+            continue
+        try:
+            val = getattr(obj, key)
+        except Exception:
+            continue
+        if callable(val):
+            continue
+        out[key] = val
+    return out
+
+
+_privy_client_singleton = None
+
+
+def _privy_client():
+    global _privy_client_singleton
+    if not PRIVY_ENABLED:
         return None
+    if _privy_client_singleton is not None:
+        return _privy_client_singleton
+    try:
+        from privy import PrivyAPI  # type: ignore
+    except Exception as e:
+        logging.getLogger("diverg.api").warning("privy sdk import failed: %s", e)
+        return None
+    try:
+        _privy_client_singleton = PrivyAPI(app_id=PRIVY_APP_ID, app_secret=PRIVY_APP_SECRET)
+        return _privy_client_singleton
+    except Exception as e:
+        logging.getLogger("diverg.api").warning("privy client init failed: %s", e)
+        return None
+
+
+def _verify_privy_access_token(access_token: str) -> dict | None:
+    if not access_token or not PRIVY_ENABLED:
+        return None
+    client = _privy_client()
+    if client is None:
+        return None
+    try:
+        claims = client.users.verify_access_token(access_token)  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    c = _obj_to_dict(claims)
+    did = (
+        c.get("user_id")
+        or c.get("userId")
+        or c.get("sub")
+        or c.get("did")
+    )
+    if not isinstance(did, str) or not did.strip():
+        return None
+    c["did"] = did.strip()
+    return c
+
+
+def _get_or_create_privy_user(claims: dict, *, referral_code: str = "") -> dict | None:
+    did = str(claims.get("did") or "").strip()
+    if not did:
+        return None
+    email_local = re.sub(r"[^a-zA-Z0-9_.-]+", "_", did)[:120]
+    default_email = f"{email_local}@privy.local"
+    now = datetime.now(timezone.utc).isoformat()
+    with _db() as conn:
+        row = conn.execute(
+            "SELECT id, email, name, role, org_id, provider, avatar_url, created_at FROM users WHERE id = ?",
+            (did,),
+        ).fetchone()
+        if not row:
+            conn.execute(
+                """
+                INSERT INTO users (id, email, name, role, org_id, password, provider, avatar_url, created_at)
+                VALUES (?, ?, ?, 'analyst', '', NULL, 'privy', '', ?)
+                """,
+                (did, default_email, "Privy User", now),
+            )
+            try:
+                from dashboard_points import apply_referral_on_register
+
+                apply_referral_on_register(conn, did, referral_code or "")
+            except Exception:
+                pass
+        else:
+            if (row["provider"] or "") != "privy":
+                conn.execute("UPDATE users SET provider = 'privy' WHERE id = ?", (did,))
+        try:
+            from dashboard_points import ensure_user_points_row
+
+            ensure_user_points_row(conn, did)
+            _credits_module().ensure_user_credits_row(conn, did)
+        except Exception:
+            pass
+        row2 = conn.execute(
+            "SELECT id, email, name, role, org_id, provider, avatar_url, created_at FROM users WHERE id = ?",
+            (did,),
+        ).fetchone()
+    return dict(row2) if row2 else None
+
+
+def get_current_user():
+    token = _bearer_token_from_request()
     if not token or len(token) > 4096:
         return None
     payload = decode_token(token)
-    if not payload:
+    if payload:
+        try:
+            with _db() as conn:
+                row = conn.execute(
+                    "SELECT id, email, name, role, org_id, provider, avatar_url, created_at FROM users WHERE id = ?",
+                    (payload["sub"],),
+                ).fetchone()
+            user = dict(row) if row else None
+            if user:
+                user["_auth_source"] = "diverg_jwt"
+            return user
+        except sqlite3.Error as e:
+            logging.getLogger("diverg.api").warning("get_current_user db error: %s", e)
+            return None
+    privy_claims = _verify_privy_access_token(token)
+    if not privy_claims:
         return None
-    try:
-        with _db() as conn:
-            row = conn.execute(
-                "SELECT id, email, name, role, org_id, provider, avatar_url, created_at FROM users WHERE id = ?",
-                (payload["sub"],),
-            ).fetchone()
-        return dict(row) if row else None
-    except sqlite3.Error as e:
-        logging.getLogger("diverg.api").warning("get_current_user db error: %s", e)
-        return None
+    user = _get_or_create_privy_user(privy_claims)
+    if user:
+        user["_auth_source"] = "privy_access_token"
+    return user
 
 
 def require_auth(f):
@@ -1040,11 +1212,11 @@ def _security_headers(resp):
         resp.headers["Cross-Origin-Resource-Policy"] = "same-site"
     resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
 
-    connect_src = "'self' https://mainnet.helius-rpc.com"
+    connect_src = "'self' https://mainnet.helius-rpc.com https://auth.privy.io https://api.privy.io"
     if not IS_PRODUCTION:
         connect_src += " http://127.0.0.1:*"
     # Cloudflare Web Analytics injects beacon on proxied pages; allow or browser console shows CSP noise.
-    script_src = "'self' 'unsafe-inline' https://cdn.jsdelivr.net"
+    script_src = "'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com"
     if IS_PRODUCTION:
         script_src += " https://static.cloudflareinsights.com"
     csp = (
@@ -1267,6 +1439,55 @@ def auth_google():
 def auth_me():
     _audit_log(g.user["id"], "auth.me")
     return jsonify({"user": g.user})
+
+
+@app.route("/api/auth/privy", methods=["POST", "OPTIONS"])
+def auth_privy():
+    if request.method == "OPTIONS":
+        return "", 204
+    if not PRIVY_ENABLED:
+        return jsonify({"error": "Privy authentication is not enabled on this server."}), 503
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json(silent=True) or {}
+    access_token = sanitize_text(data.get("access_token") or "", 4096).strip()
+    auth_mode = sanitize_text(data.get("mode") or "login", 24).strip().lower()
+    if auth_mode not in ("login", "register"):
+        auth_mode = "login"
+    referral_code = sanitize_text(data.get("referral_code") or "", 64).strip().upper()
+    if not access_token:
+        return jsonify({"error": "Missing access_token"}), 400
+    claims = _verify_privy_access_token(access_token)
+    if not claims:
+        return jsonify({"error": "Invalid Privy access token"}), 401
+    user = _get_or_create_privy_user(claims, referral_code=referral_code if auth_mode == "register" else "")
+    if not user:
+        return jsonify({"error": "Could not resolve Privy user"}), 500
+    token = create_token(user["id"], user["email"])
+    _audit_log(user["id"], "auth.privy", metadata={"auth_source": "privy_access_token"})
+    return jsonify({
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "email": user.get("email", ""),
+            "name": user.get("name", "Privy User"),
+            "provider": "privy",
+            "avatar_url": user.get("avatar_url", ""),
+            "role": user.get("role", "analyst"),
+            "org_id": user.get("org_id", ""),
+        },
+    })
+
+
+@app.route("/api/auth/privy/config", methods=["GET", "OPTIONS"])
+def auth_privy_config():
+    if request.method == "OPTIONS":
+        return "", 204
+    return jsonify({
+        "enabled": bool(PRIVY_ENABLED),
+        "app_id": PRIVY_APP_ID if PRIVY_ENABLED else "",
+        "client_id": PRIVY_CLIENT_ID if PRIVY_ENABLED else "",
+    })
 
 
 # ── Dashboard static files ───────────────────────────────────────────────────
@@ -2934,10 +3155,15 @@ def credits_wallet_link():
     wallet = _sanitize_wallet_address(str(data.get("wallet_address") or ""))
     nonce = sanitize_text(str(data.get("nonce") or ""), 128).strip()
     signature = sanitize_text(str(data.get("signature") or ""), 1024).strip()
+    signature_base64 = sanitize_text(str(data.get("signature_base64") or ""), 4096).strip()
+    signature_hex = sanitize_text(str(data.get("signature_hex") or ""), 4096).strip()
+    signature_bytes = data.get("signature_bytes")
+    if not isinstance(signature_bytes, list):
+        signature_bytes = None
     cm = _credits_module()
     if not cm.validate_wallet_address(wallet):
         return jsonify({"error": "Invalid Solana wallet address"}), 400
-    if not nonce or not signature:
+    if not nonce or not (signature or signature_base64 or signature_hex or signature_bytes):
         return jsonify({"error": "Missing nonce/signature"}), 400
     with _db() as conn:
         ch = conn.execute(
@@ -2957,7 +3183,14 @@ def credits_wallet_link():
     if expires < datetime.now(timezone.utc):
         return jsonify({"error": "Challenge expired. Request a new challenge."}), 400
     msg = str(ch["message"] or "")
-    if not _verify_wallet_signature(wallet, msg, signature):
+    if not _verify_wallet_signature(
+        wallet,
+        msg,
+        signature_b58=signature or None,
+        signature_base64=signature_base64 or None,
+        signature_hex=signature_hex or None,
+        signature_bytes=signature_bytes,
+    ):
         return jsonify({"error": "Invalid wallet signature"}), 401
 
     env_key = (os.environ.get("HELIUS_API_KEY") or "").strip()

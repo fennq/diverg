@@ -2128,7 +2128,10 @@ async function connectPhantomAndLinkWallet() {
   if (btn) btn.disabled = true;
   try {
     const resp = await provider.connect();
-    const walletAddress = String((resp && resp.publicKey) || (provider.publicKey || ''));
+    const pk = (resp && resp.publicKey) || provider.publicKey || null;
+    const walletAddress = pk && typeof pk.toBase58 === 'function'
+      ? pk.toBase58()
+      : String(pk || '');
     if (!walletAddress) {
       throw new Error('Could not read Phantom wallet address');
     }
@@ -2137,14 +2140,22 @@ async function connectPhantomAndLinkWallet() {
     if (!msg) throw new Error('Missing wallet challenge message');
     const encoded = new TextEncoder().encode(msg);
     const signed = await provider.signMessage(encoded, 'utf8');
-    const sigBytes = (signed && signed.signature) || [];
+    const sigRaw = signed && signed.signature ? signed.signature : signed;
+    const sigBytes = sigRaw instanceof Uint8Array
+      ? sigRaw
+      : Array.isArray(sigRaw)
+        ? Uint8Array.from(sigRaw)
+        : [];
     const signature = base58Encode(sigBytes);
+    const signatureBase64 = sigBytes.length ? btoa(String.fromCharCode(...sigBytes)) : '';
     if (!signature) throw new Error('Wallet signature failed');
     const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
     const out = await apiJson('/api/credits/wallet/link', {
       wallet_address: walletAddress,
       nonce: challenge.nonce,
       signature,
+      signature_base64: signatureBase64,
+      signature_bytes: Array.from(sigBytes),
       helius_api_key: heliusApiKey,
     });
     applyCreditsUI({

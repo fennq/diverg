@@ -4,6 +4,7 @@
 
   const API = window.location.origin;
   let isRegister = false;
+  window.__divergAuthMode = 'login';
 
   if (localStorage.getItem('diverg_token') || localStorage.getItem('dv_session')) {
     window.location.href = '/dashboard/';
@@ -48,8 +49,11 @@
     document.getElementById('toggleLink').textContent = isRegister ? 'Sign in' : 'Create one';
     document.getElementById('nameField').classList.toggle('show', isRegister);
     document.getElementById('referralField').classList.toggle('show', isRegister);
+    var privyBtnText = document.querySelector('#privyBtn .btn-text');
+    if (privyBtnText) privyBtnText.textContent = isRegister ? 'Create account with Privy' : 'Sign in with Privy';
     document.getElementById('authPassword').autocomplete = isRegister ? 'new-password' : 'current-password';
     document.getElementById('authPassword').placeholder = isRegister ? 'Create a password' : 'Min 8 characters';
+    window.__divergAuthMode = isRegister ? 'register' : 'login';
     if (isRegister) syncRefInputFromStorage();
     hideError();
   }
@@ -123,7 +127,15 @@
     }
   }
 
+  async function handlePrivyAuth() {
+    if (typeof window.startPrivyAuthFlow === 'function') {
+      return window.startPrivyAuthFlow();
+    }
+    showError('Privy sign-in is loading. Please try again in a moment.');
+  }
+
   document.getElementById('toggleLink').addEventListener('click', toggleMode);
   document.getElementById('pwToggle').addEventListener('click', togglePw);
   document.getElementById('authForm').addEventListener('submit', handleAuth);
+  window.handlePrivyAuthClick = handlePrivyAuth;
 })();
