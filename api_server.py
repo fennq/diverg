@@ -112,6 +112,15 @@ try:
 except ImportError:
     requests = None
 
+try:
+    import base58
+    from nacl.exceptions import BadSignatureError
+    from nacl.signing import VerifyKey
+except ImportError:
+    base58 = None
+    BadSignatureError = Exception  # type: ignore[assignment]
+    VerifyKey = None  # type: ignore[assignment]
+
 # ── Config ────────────────────────────────────────────────────────────────
 
 IS_PRODUCTION = bool(os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("DIVERG_PRODUCTION"))
@@ -305,6 +314,143 @@ register_limiter = RateLimiter(max_attempts=5, window_seconds=3600, lockout_seco
 # Authenticated reads only; stops leaderboard/ledger scraping.
 rewards_read_limiter = RateLimiter(max_attempts=90, window_seconds=60, lockout_seconds=120)
 
+# ── Credits config/helpers ───────────────────────────────────────────────────
+
+DIVERG_HOLDER_MINT = (os.environ.get("DIVERG_HOLDER_MINT") or "F1JxPbcYDwbvvQjsznEtcDcusnguNoFt1qt4CpsvBAGS").strip()
+DIVERG_CREDITS_SOLANA_NETWORK = (os.environ.get("DIVERG_CREDITS_SOLANA_NETWORK") or "mainnet").strip().lower()
+if DIVERG_CREDITS_SOLANA_NETWORK not in ("mainnet", "devnet"):
+    DIVERG_CREDITS_SOLANA_NETWORK = "mainnet"
+DIVERG_WALLET_CHALLENGE_TTL_SEC = max(60, min(int(os.environ.get("DIVERG_WALLET_CHALLENGE_TTL_SEC", "600") or "600"), 3600))
+
+
+def _credits_module():
+    import credits as c
+
+    return c
+
+
+def _credit_cost(scan_kind: str) -> float:
+    return float(_credits_module().scan_cost(scan_kind))
+
+
+def _credits_insufficient_response(state: dict, required: float):
+    available = float((state or {}).get("credits_available") or 0.0)
+    payload = {
+        "error": "Insufficient credits",
+        "code": "insufficient_credits",
+        "required": round(float(required), 6),
+        "available": round(available, 6),
+        "credits": state or {},
+    }
+    return jsonify(payload), 402
+
+
+def _sanitize_wallet_address(raw: str) -> str:
+    return sanitize_text(raw or "", 128).strip()
+
+
+def _verify_wallet_signature(wallet_address: str, message: str, signature_b58: str) -> bool:
+    if not wallet_address or not message or not signature_b58:
+        return False
+    if base58 is None or VerifyKey is None:
+        return False
+    try:
+        pub_bytes = base58.b58decode(wallet_address)
+        sig_bytes = base58.b58decode(signature_b58)
+        vk = VerifyKey(pub_bytes)
+        vk.verify(message.encode("utf-8"), sig_bytes)
+        return True
+    except (ValueError, BadSignatureError, TypeError):
+        return False
+
+
+def _sum_token_balance_from_rpc_result(result: dict) -> float:
+    rows = ((result or {}).get("result") or {}).get("value")
+    if not isinstance(rows, list):
+        return 0.0
+    total = 0.0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        acct = row.get("account")
+        parsed = (((acct or {}).get("data") or {}).get("parsed") or {}).get("info") if isinstance(acct, dict) else {}
+        token_amt = (parsed or {}).get("tokenAmount") if isinstance(parsed, dict) else {}
+        ui = token_amt.get("uiAmount") if isinstance(token_amt, dict) else None
+        ui_s = token_amt.get("uiAmountString") if isinstance(token_amt, dict) else None
+        try:
+            if ui is not None:
+                total += float(ui)
+            elif ui_s is not None:
+                total += float(str(ui_s))
+        except (TypeError, ValueError):
+            continue
+    return max(0.0, total)
+
+
+def _fetch_diverg_holder_balance(wallet_address: str, api_key: str) -> tuple[float, str | None]:
+    if not wallet_address:
+        return 0.0, "missing_wallet_address"
+    if not api_key:
+        return 0.0, "missing_helius_api_key"
+    try:
+        raw = _helius_solana_rpc(
+            DIVERG_CREDITS_SOLANA_NETWORK,
+            api_key,
+            "getTokenAccountsByOwner",
+            [
+                wallet_address,
+                {"mint": DIVERG_HOLDER_MINT},
+                {"encoding": "jsonParsed", "commitment": "confirmed"},
+            ],
+        )
+    except Exception as e:
+        return 0.0, str(e)
+    if not isinstance(raw, dict):
+        return 0.0, "unexpected_rpc_response"
+    err = raw.get("error")
+    if err:
+        if isinstance(err, dict):
+            return 0.0, str(err.get("message") or "rpc_error")
+        return 0.0, str(err)
+    return _sum_token_balance_from_rpc_result(raw), None
+
+
+def _reserve_scan_credits(user_id: str, *, amount: float, reason: str, ref_type: str, ref_id: str, meta: dict | None = None):
+    meta_s = json.dumps(meta or {}, default=str)[:1000]
+    with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        ok, state, err = _credits_module().reserve_credits(
+            conn,
+            user_id,
+            amount,
+            reason=reason,
+            ref_type=ref_type,
+            ref_id=ref_id,
+            meta_json=meta_s,
+        )
+    return ok, state, err
+
+
+def _finalize_scan_credits(user_id: str, *, reason: str, ref_type: str, ref_id: str, meta: dict | None = None):
+    meta_s = json.dumps(meta or {}, default=str)[:1000]
+    with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        ok, state, err = _credits_module().finalize_reserved_credits(
+            conn,
+            user_id,
+            reason=reason,
+            ref_type=ref_type,
+            ref_id=ref_id,
+            meta_json=meta_s,
+        )
+    return ok, state, err
+
+
+def _release_scan_credits(user_id: str, *, ref_type: str, ref_id: str):
+    with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        return _credits_module().release_reserved_credits(conn, user_id, ref_type=ref_type, ref_id=ref_id)
+
 # ── Database ────────────────────────────────────────────────────────────────
 
 DB_PATH = Path(os.environ.get("DIVERG_DB_PATH", str(ROOT / "data" / "dashboard.db")).strip().lstrip("="))
@@ -369,6 +515,52 @@ CREATE TABLE IF NOT EXISTS referral_events (
     credited_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS user_credits (
+    user_id             TEXT PRIMARY KEY,
+    wallet_address      TEXT DEFAULT '',
+    wallet_verified_at  TEXT DEFAULT '',
+    daily_bucket_date   TEXT NOT NULL,
+    daily_grant_total   REAL NOT NULL DEFAULT 0,
+    credits_remaining   REAL NOT NULL DEFAULT 0,
+    credits_locked      REAL NOT NULL DEFAULT 0,
+    credits_spent_today REAL NOT NULL DEFAULT 0,
+    token_balance_ui    REAL NOT NULL DEFAULT 0,
+    updated_at          TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS credit_ledger (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT NOT NULL,
+    delta      REAL NOT NULL,
+    reason     TEXT NOT NULL,
+    ref_type   TEXT,
+    ref_id     TEXT,
+    meta_json  TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS credit_holds (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    TEXT NOT NULL,
+    ref_type   TEXT NOT NULL,
+    ref_id     TEXT NOT NULL,
+    amount     REAL NOT NULL,
+    reason     TEXT NOT NULL,
+    meta_json  TEXT DEFAULT '{}',
+    nonce      TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE(user_id, ref_type, ref_id)
+);
+
+CREATE TABLE IF NOT EXISTS wallet_link_challenges (
+    user_id       TEXT PRIMARY KEY,
+    wallet_address TEXT NOT NULL,
+    nonce         TEXT NOT NULL,
+    message       TEXT NOT NULL,
+    expires_at    TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id     TEXT,
@@ -428,6 +620,13 @@ def init_db():
                ON points_ledger (user_id, reason, IFNULL(ref_type,''), ref_id)
                WHERE ref_id IS NOT NULL"""
         )
+        conn.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_ledger_idem
+               ON credit_ledger (user_id, reason, IFNULL(ref_type,''), ref_id)
+               WHERE ref_id IS NOT NULL"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_credit_ledger_user_created ON credit_ledger(user_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_credit_holds_user_created ON credit_holds(user_id, created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_user_action ON audit_log(user_id, action)")
 
@@ -914,6 +1113,7 @@ def auth_register():
         from dashboard_points import apply_referral_on_register, ensure_user_points_row
 
         ensure_user_points_row(conn, user_id)
+        _credits_module().ensure_user_credits_row(conn, user_id)
         apply_referral_on_register(conn, user_id, referral_raw)
 
     token = create_token(user_id, email)
@@ -976,6 +1176,7 @@ def auth_login():
         from dashboard_points import ensure_user_points_row
 
         ensure_user_points_row(conn, user["id"])
+        _credits_module().ensure_user_credits_row(conn, user["id"])
     token = create_token(user["id"], user["email"])
     _audit_log(user["id"], "auth.login", target=email, metadata={"role": user.get("role", "analyst")})
     return jsonify({
@@ -1039,6 +1240,7 @@ def auth_google():
             user = dict(existing)
             conn.execute("UPDATE users SET avatar_url = ? WHERE id = ?", (avatar, user["id"]))
             ensure_user_points_row(conn, user["id"])
+            _credits_module().ensure_user_credits_row(conn, user["id"])
         else:
             user_id = str(uuid.uuid4())
             conn.execute(
@@ -1046,6 +1248,7 @@ def auth_google():
                 (user_id, email, name, "analyst", "", None, "google", avatar, datetime.now(timezone.utc).isoformat()),
             )
             ensure_user_points_row(conn, user_id)
+            _credits_module().ensure_user_credits_row(conn, user_id)
             apply_referral_on_register(conn, user_id, referral_raw)
             user = {"id": user_id, "email": email, "name": name, "role": "analyst", "org_id": "", "provider": "google", "avatar_url": avatar}
 
@@ -1139,13 +1342,36 @@ def api_scan():
     url, goal, scope, auth_context, err = _parse_scan_body()
     if err:
         return err
+    user_id = g.user["id"]
+    scan_id = str(uuid.uuid4())
+    cost = _credit_cost("web_scan")
+    ok_reserve, st_reserve, _ = _reserve_scan_credits(
+        user_id,
+        amount=cost,
+        reason="web_scan_charge",
+        ref_type="scan",
+        ref_id=scan_id,
+        meta={"scope": scope, "target": url},
+    )
+    if not ok_reserve:
+        return _credits_insufficient_response(st_reserve, cost)
     try:
-        _audit_log(g.user["id"], "scan.start", target=url, metadata={"scope": scope, "goal": goal or ""})
+        _audit_log(user_id, "scan.start", target=url, metadata={"scope": scope, "goal": goal or "", "scan_id": scan_id})
         result = run_web_scan(url, scope=scope, goal=goal, auth_context=auth_context)
-        result = _attach_scan_diff(result, g.user["id"])
+        result = _attach_scan_diff(result, user_id)
         result = _attach_solana_security_profile_to_scan_result(result)
-        scan_id = str(uuid.uuid4())
-        save_scan(scan_id, result, scope, user_id=g.user["id"])
+        save_scan(scan_id, result, scope, user_id=user_id)
+        ok_finalize, st_final, err_final = _finalize_scan_credits(
+            user_id,
+            reason="web_scan_charge",
+            ref_type="scan",
+            ref_id=scan_id,
+            meta={"scope": scope, "target": url},
+        )
+        if not ok_finalize:
+            if err_final == "hold_not_found":
+                return _credits_insufficient_response(st_final, cost)
+            raise RuntimeError(f"credit_finalize_failed:{err_final or 'unknown'}")
         payload = {
             "id": scan_id,
             "target_url": result["target_url"],
@@ -1173,11 +1399,17 @@ def api_scan():
             "scan_fingerprint": result.get("scan_fingerprint"),
             "scan_diff": result.get("scan_diff"),
             "solana_security_profile": result.get("solana_security_profile"),
+            "credits": st_final,
+            "credits_charged": cost,
         }
-        _audit_log(g.user["id"], "scan.complete", target=url, metadata={"scope": scope, "scan_id": scan_id, "findings": len(result.get("findings") or [])})
+        _audit_log(user_id, "scan.complete", target=url, metadata={"scope": scope, "scan_id": scan_id, "findings": len(result.get("findings") or []), "credits_charged": cost})
         return jsonify(payload)
     except Exception as e:
-        _audit_log(g.user["id"], "scan.complete", status="failed", target=url, metadata={"scope": scope, "error": str(e)})
+        try:
+            _release_scan_credits(user_id, ref_type="scan", ref_id=scan_id)
+        except Exception:
+            pass
+        _audit_log(user_id, "scan.complete", status="failed", target=url, metadata={"scope": scope, "scan_id": scan_id, "error": str(e)})
         return jsonify({"error": str(e)}), 500
 
 
@@ -1197,6 +1429,17 @@ def api_scan_stream():
 
     scan_id = str(uuid.uuid4())
     user_id = g.user["id"]
+    cost = _credit_cost("web_scan")
+    ok_reserve, st_reserve, _ = _reserve_scan_credits(
+        user_id,
+        amount=cost,
+        reason="web_scan_charge",
+        ref_type="scan",
+        ref_id=scan_id,
+        meta={"scope": scope, "target": url, "streaming": True},
+    )
+    if not ok_reserve:
+        return _credits_insufficient_response(st_reserve, cost)
     _log = logging.getLogger("diverg.api")
 
     def _ndjson(obj: dict) -> str:
@@ -1230,12 +1473,29 @@ def api_scan_stream():
             if accumulated:
                 try:
                     save_scan(scan_id, accumulated, scope, user_id=user_id)
+                    ok_finalize, _st, _err = _finalize_scan_credits(
+                        user_id,
+                        reason="web_scan_charge",
+                        ref_type="scan",
+                        ref_id=scan_id,
+                        meta={"scope": scope, "target": url, "streaming": True},
+                    )
+                    if not ok_finalize:
+                        raise RuntimeError(f"credit_finalize_failed:{_err or 'unknown'}")
                     _audit_log(
                         user_id,
                         "scan.complete",
                         target=url,
-                        metadata={"scope": scope, "scan_id": scan_id, "streaming": True, "findings": len(accumulated.get("findings") or [])},
+                        metadata={"scope": scope, "scan_id": scan_id, "streaming": True, "findings": len(accumulated.get("findings") or []), "credits_charged": cost},
                     )
+                except Exception:
+                    try:
+                        _release_scan_credits(user_id, ref_type="scan", ref_id=scan_id)
+                    except Exception:
+                        pass
+            else:
+                try:
+                    _release_scan_credits(user_id, ref_type="scan", ref_id=scan_id)
                 except Exception:
                     pass
 
@@ -2192,6 +2452,7 @@ def investigation_solana_bundle():
     Solana SPL token bundle snapshot — same logic as extension/solana_bundle.js +
     investigation/solana_bundle.py (holders, same-funder cluster %, coordination score).
     """
+    user_id = g.user["id"]
     if not request.is_json:
         return jsonify({"error": "JSON required"}), 400
     data = request.get_json(silent=True) or {}
@@ -2236,7 +2497,6 @@ def investigation_solana_bundle():
         scan_all_holders = all_raw.strip().lower() in ("true", "1", "yes", "on")
     else:
         scan_all_holders = False
-
     max_funded_by_lookups = None
     mf_raw = data.get("max_funded_by_lookups")
     if mf_raw is not None:
@@ -2263,21 +2523,43 @@ def investigation_solana_bundle():
     except ImportError as e:
         return jsonify({"error": f"Solana bundle module unavailable: {e}"}), 503
 
-    with _bundle_api_lock:
-        old_key = getattr(oc, "HELIUS_KEY", "") or ""
+    scan_ref_id = str(uuid.uuid4())
+    scan_kind = "token_deep_scan" if scan_all_holders else "token_scan"
+    cost = _credit_cost(scan_kind)
+    ok_reserve, st_reserve, _ = _reserve_scan_credits(
+        user_id,
+        amount=cost,
+        reason="token_scan_charge",
+        ref_type="investigation",
+        ref_id=scan_ref_id,
+        meta={"scan_kind": scan_kind, "mint": mint, "scan_all_holders": bool(scan_all_holders)},
+    )
+    if not ok_reserve:
+        return _credits_insufficient_response(st_reserve, cost)
+
+    out = None
+    try:
+        with _bundle_api_lock:
+            old_key = getattr(oc, "HELIUS_KEY", "") or ""
+            try:
+                oc.HELIUS_KEY = api_key.strip()
+                out = sb.run_bundle_snapshot(
+                    mint,
+                    wallet,
+                    max_holders=120,
+                    max_funded_by_lookups=max_funded_by_lookups if max_funded_by_lookups is not None else 120,
+                    scan_all_holders=scan_all_holders,
+                    exclude_wallets=exclude_wallets,
+                    include_x_intel=include_x_intel,
+                )
+            finally:
+                oc.HELIUS_KEY = old_key
+    except Exception as e:
         try:
-            oc.HELIUS_KEY = api_key.strip()
-            out = sb.run_bundle_snapshot(
-                mint,
-                wallet,
-                max_holders=120,
-                max_funded_by_lookups=max_funded_by_lookups if max_funded_by_lookups is not None else 120,
-                scan_all_holders=scan_all_holders,
-                exclude_wallets=exclude_wallets,
-                include_x_intel=include_x_intel,
-            )
-        finally:
-            oc.HELIUS_KEY = old_key
+            _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
+        except Exception:
+            pass
+        return jsonify({"error": str(e)}), 500
 
     if isinstance(out, dict) and out.get("ok"):
         out = _enrich_solana_bundle_payload(out)
@@ -2285,7 +2567,30 @@ def investigation_solana_bundle():
         out = _attach_solana_security_profile_to_bundle(out, tvl_usd=tvl_usd)
     payload = out if isinstance(out, dict) else {"ok": False, "error": "Unexpected response"}
     if isinstance(payload, dict) and payload.get("ok"):
-        _reward_investigation(g.user["id"], "solana_bundle")
+        ok_finalize, st_final, err_final = _finalize_scan_credits(
+            user_id,
+            reason="token_scan_charge",
+            ref_type="investigation",
+            ref_id=scan_ref_id,
+            meta={"scan_kind": scan_kind, "mint": mint, "scan_all_holders": bool(scan_all_holders)},
+        )
+        if not ok_finalize:
+            try:
+                _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
+            except Exception:
+                pass
+            if err_final == "hold_not_found":
+                return _credits_insufficient_response(st_final, cost)
+            return jsonify({"error": f"credit_finalize_failed:{err_final or 'unknown'}"}), 500
+        payload["credits"] = st_final
+        payload["credits_charged"] = cost
+        payload["credits_scan_kind"] = scan_kind
+        _reward_investigation(user_id, "solana_bundle")
+    else:
+        try:
+            _release_scan_credits(user_id, ref_type="investigation", ref_id=scan_ref_id)
+        except Exception:
+            pass
     try:
         return jsonify(payload)
     except TypeError:
@@ -2541,6 +2846,194 @@ def rewards_leaderboard():
             "points": int(r["pts"]),
         })
     return jsonify({"window": window, "leaderboard": board})
+
+
+# ── Credits ───────────────────────────────────────────────────────────────────
+
+
+@app.route("/api/credits/me", methods=["GET", "OPTIONS"])
+@require_auth
+def credits_me():
+    if request.method == "OPTIONS":
+        return "", 204
+    uid = g.user["id"]
+    with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        cm = _credits_module()
+        cm.ensure_user_credits_row(conn, uid)
+        state = cm.ensure_daily_credit_state(conn, uid)
+        ledger = cm.recent_credit_ledger(conn, uid, limit=20)
+        token_bal = float(state.get("token_balance_ui") or 0.0)
+        next_grant = cm.daily_grant_total(token_bal)
+    return jsonify({
+        "mint": DIVERG_HOLDER_MINT,
+        "base_daily_credits": cm.base_daily_credits(),
+        "tokens_per_step": cm.tokens_per_step(),
+        "credits_per_step": cm.credits_per_step(),
+        "costs": {
+            "web_scan": cm.scan_cost("web_scan"),
+            "token_scan": cm.scan_cost("token_scan"),
+            "token_deep_scan": cm.scan_cost("token_deep_scan"),
+        },
+        "state": state,
+        "next_daily_grant_total": next_grant,
+        "next_reset_at": cm.next_reset_iso(),
+        "recent_ledger": ledger,
+    })
+
+
+@app.route("/api/credits/wallet/challenge", methods=["POST", "OPTIONS"])
+@require_auth
+def credits_wallet_challenge():
+    if request.method == "OPTIONS":
+        return "", 204
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json(silent=True) or {}
+    wallet = _sanitize_wallet_address(str(data.get("wallet_address") or ""))
+    cm = _credits_module()
+    if not cm.validate_wallet_address(wallet):
+        return jsonify({"error": "Invalid Solana wallet address"}), 400
+    uid = g.user["id"]
+    now = datetime.now(timezone.utc)
+    nonce = secrets.token_hex(16)
+    msg = (
+        "Diverg wallet link\n"
+        f"User: {uid}\n"
+        f"Wallet: {wallet}\n"
+        f"Nonce: {nonce}\n"
+        f"IssuedAt: {now.isoformat()}"
+    )
+    expires_at = (now + timedelta(seconds=DIVERG_WALLET_CHALLENGE_TTL_SEC)).isoformat()
+    with _db() as conn:
+        conn.execute(
+            """
+            INSERT INTO wallet_link_challenges (user_id, wallet_address, nonce, message, expires_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                wallet_address = excluded.wallet_address,
+                nonce = excluded.nonce,
+                message = excluded.message,
+                expires_at = excluded.expires_at,
+                created_at = excluded.created_at
+            """,
+            (uid, wallet, nonce, msg, expires_at, now.isoformat()),
+        )
+    return jsonify({"wallet_address": wallet, "nonce": nonce, "message": msg, "expires_at": expires_at})
+
+
+@app.route("/api/credits/wallet/link", methods=["POST", "OPTIONS"])
+@require_auth
+def credits_wallet_link():
+    if request.method == "OPTIONS":
+        return "", 204
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json(silent=True) or {}
+    uid = g.user["id"]
+    wallet = _sanitize_wallet_address(str(data.get("wallet_address") or ""))
+    nonce = sanitize_text(str(data.get("nonce") or ""), 128).strip()
+    signature = sanitize_text(str(data.get("signature") or ""), 1024).strip()
+    cm = _credits_module()
+    if not cm.validate_wallet_address(wallet):
+        return jsonify({"error": "Invalid Solana wallet address"}), 400
+    if not nonce or not signature:
+        return jsonify({"error": "Missing nonce/signature"}), 400
+    with _db() as conn:
+        ch = conn.execute(
+            "SELECT wallet_address, nonce, message, expires_at FROM wallet_link_challenges WHERE user_id = ?",
+            (uid,),
+        ).fetchone()
+    if not ch:
+        return jsonify({"error": "Challenge not found. Request a new challenge."}), 400
+    if str(ch["wallet_address"] or "") != wallet or str(ch["nonce"] or "") != nonce:
+        return jsonify({"error": "Challenge mismatch"}), 400
+    try:
+        expires = datetime.fromisoformat(str(ch["expires_at"]))
+    except Exception:
+        expires = datetime.now(timezone.utc) - timedelta(seconds=1)
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires < datetime.now(timezone.utc):
+        return jsonify({"error": "Challenge expired. Request a new challenge."}), 400
+    msg = str(ch["message"] or "")
+    if not _verify_wallet_signature(wallet, msg, signature):
+        return jsonify({"error": "Invalid wallet signature"}), 401
+
+    env_key = (os.environ.get("HELIUS_API_KEY") or "").strip()
+    body_key = sanitize_text(data.get("helius_api_key") or "", 256).strip()
+    api_key = body_key or env_key
+    if not api_key:
+        return jsonify({"error": "Helius API key required to verify token holdings."}), 400
+    balance_ui, bal_err = _fetch_diverg_holder_balance(wallet, api_key)
+    if bal_err:
+        return jsonify({"error": f"Failed to fetch token balance: {bal_err}"}), 502
+
+    with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        cm.ensure_user_credits_row(conn, uid)
+        state = cm.refresh_wallet_and_grant(
+            conn,
+            uid,
+            wallet_address=wallet,
+            token_balance_ui=balance_ui,
+            mark_verified=True,
+        )
+        conn.execute("DELETE FROM wallet_link_challenges WHERE user_id = ?", (uid,))
+        ledger = cm.recent_credit_ledger(conn, uid, limit=20)
+    return jsonify({
+        "ok": True,
+        "mint": DIVERG_HOLDER_MINT,
+        "token_balance_ui": balance_ui,
+        "state": state,
+        "next_daily_grant_total": cm.daily_grant_total(balance_ui),
+        "next_reset_at": cm.next_reset_iso(),
+        "recent_ledger": ledger,
+    })
+
+
+@app.route("/api/credits/wallet/refresh", methods=["POST", "OPTIONS"])
+@require_auth
+def credits_wallet_refresh():
+    if request.method == "OPTIONS":
+        return "", 204
+    uid = g.user["id"]
+    env_key = (os.environ.get("HELIUS_API_KEY") or "").strip()
+    body_key = ""
+    if request.is_json:
+        body = request.get_json(silent=True) or {}
+        body_key = sanitize_text(body.get("helius_api_key") or "", 256).strip()
+    api_key = body_key or env_key
+    if not api_key:
+        return jsonify({"error": "Helius API key required to refresh token holdings."}), 400
+    with _db() as conn:
+        row = conn.execute("SELECT wallet_address FROM user_credits WHERE user_id = ?", (uid,)).fetchone()
+    wallet = str((row["wallet_address"] if row else "") or "").strip()
+    if not wallet:
+        return jsonify({"error": "No wallet linked"}), 400
+    balance_ui, bal_err = _fetch_diverg_holder_balance(wallet, api_key)
+    if bal_err:
+        return jsonify({"error": f"Failed to fetch token balance: {bal_err}"}), 502
+    cm = _credits_module()
+    with _db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        state = cm.refresh_wallet_and_grant(
+            conn,
+            uid,
+            wallet_address=wallet,
+            token_balance_ui=balance_ui,
+            mark_verified=False,
+        )
+        ledger = cm.recent_credit_ledger(conn, uid, limit=20)
+    return jsonify({
+        "ok": True,
+        "mint": DIVERG_HOLDER_MINT,
+        "token_balance_ui": balance_ui,
+        "state": state,
+        "next_daily_grant_total": cm.daily_grant_total(balance_ui),
+        "next_reset_at": cm.next_reset_iso(),
+        "recent_ledger": ledger,
+    })
 
 
 # ── History endpoints ─────────────────────────────────────────────────────────

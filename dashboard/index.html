@@ -56,6 +56,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
           Rewards
         </div>
+        <div class="nav-item" data-page="credits">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2.5" y="6.5" width="19" height="11" rx="2"/><line x1="2.5" y1="11" x2="21.5" y2="11"/><circle cx="17" cy="14" r="1"/></svg>
+          Credits
+        </div>
         <div class="nav-item" data-page="settings">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           Settings
@@ -163,6 +167,7 @@
         <div class="tab-bar-item" data-page="history">History</div>
         <div class="tab-bar-item" data-page="analytics">Analysis</div>
         <div class="tab-bar-item" data-page="rewards">Rewards</div>
+        <div class="tab-bar-item" data-page="credits">Credits</div>
         <div class="tab-bar-item" data-page="settings">Settings</div>
       </div>
 
@@ -532,6 +537,46 @@
       </div></div></div>
       <div class="card"><div class="card-header"><span class="card-title">Recent Activity</span></div><div class="card-body flush"><div class="data-table"><table><thead><tr><th>Action</th><th>Points</th><th>Date</th></tr></thead><tbody id="ledgerBody"><tr><td colspan="3"><div class="empty" style="padding:20px;"><div class="empty-title">No activity yet</div></div></td></tr></tbody></table></div></div></div>
       <div class="card"><div class="card-header"><span class="card-title">Leaderboard</span><div class="toggle-pills" id="leaderboardTabs"><div class="toggle-pill active" data-window="all">All Time</div><div class="toggle-pill" data-window="30d">30D</div><div class="toggle-pill" data-window="7d">7D</div></div></div><div class="card-body flush"><div class="data-table"><table><thead><tr><th class="col-num">Rank</th><th>User</th><th>Points</th></tr></thead><tbody id="leaderboardBody"><tr><td colspan="3"><div class="empty" style="padding:20px;"><div class="empty-title">No data</div></div></td></tr></tbody></table></div></div></div>
+    </div>
+
+    <!-- ══════════ CREDITS ══════════ -->
+    <div class="page" id="page-credits">
+      <div class="topbar"><div style="flex:1;"><h1 style="font-size:1.15rem;font-weight:700;">Credits</h1><p style="font-size:0.6875rem;color:var(--text-dim);margin-top:2px;">Daily free credits and token-holder allocation</p></div></div>
+      <div class="stats-grid" style="margin-bottom:14px;">
+        <div class="stat-card"><div class="stat-value" id="creditsRemaining">0</div><div class="stat-label">Credits Left Today</div></div>
+        <div class="stat-card"><div class="stat-value" id="creditsDailyGrant">0</div><div class="stat-label">Daily Grant (Current)</div></div>
+        <div class="stat-card"><div class="stat-value" id="creditsTokenBalance">0</div><div class="stat-label">DIVERG Tokens Held</div></div>
+        <div class="stat-card"><div class="stat-value" id="creditsNextGrant">0</div><div class="stat-label">Next Daily Grant</div></div>
+      </div>
+      <div class="tool-list">
+        <div class="tool-card">
+          <div class="tool-header"><span class="tool-num">&gt;</span><span class="tool-title">Wallet (Phantom)</span></div>
+          <div style="font-size:0.6875rem;color:var(--text-secondary);margin-bottom:8px;">Linked wallet: <span id="creditsWalletAddress" class="mono">&mdash;</span></div>
+          <div style="font-size:0.6875rem;color:var(--text-secondary);margin-bottom:10px;">Daily reset (UTC): <span id="creditsResetAt" class="mono">&mdash;</span></div>
+          <div class="tool-row">
+            <button class="btn btn-primary" id="creditsConnectBtn" onclick="connectPhantomAndLinkWallet()">Connect Phantom</button>
+            <button class="btn btn-ghost" onclick="refreshCreditsWallet()">Refresh Balance</button>
+          </div>
+          <p style="font-size:0.625rem;color:var(--text-dim);margin-top:8px;">We verify ownership with a signed nonce challenge before linking the wallet.</p>
+        </div>
+        <div class="tool-card">
+          <div class="tool-header"><span class="tool-num">&gt;</span><span class="tool-title">Credit Costs</span></div>
+          <div class="earn-list">
+            <div class="earn-item"><span class="earn-action">Website Security Scan</span><span class="earn-pts" id="costWebScan">2</span></div>
+            <div class="earn-item"><span class="earn-action">Token Scan</span><span class="earn-pts" id="costTokenScan">2</span></div>
+            <div class="earn-item"><span class="earn-action">Token Deep Analysis</span><span class="earn-pts" id="costTokenDeep">3.5</span></div>
+          </div>
+        </div>
+        <div class="tool-card">
+          <div class="tool-header"><span class="tool-num">&gt;</span><span class="tool-title">Grant Rules</span></div>
+          <div style="display:flex;flex-direction:column;gap:8px;font-size:0.6875rem;color:var(--text-secondary);">
+            <div>Base daily credits: <span id="creditsBaseDaily" class="mono">5</span></div>
+            <div>Token step: <span id="creditsTokensPerStep" class="mono">100000</span> DIVERG</div>
+            <div>Bonus per step: <span id="creditsPerStep" class="mono">20</span> credits</div>
+            <div>Mint tracked: <span id="creditsMint" class="mono">F1JxPbcYDwbvvQjsznEtcDcusnguNoFt1qt4CpsvBAGS</span></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ══════════ SETTINGS ══════════ -->

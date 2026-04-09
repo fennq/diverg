@@ -20,6 +20,7 @@ function navigate(page) {
   document.getElementById('sidebar').classList.remove('open');
 
   if (page === 'rewards') loadRewards();
+  if (page === 'credits') loadCredits();
   if (page === 'history') renderHistory();
   if (page === 'analytics') updateAnalytics();
   if (page === 'investigation') void loadSolanaWatchlist({ silent: true });
@@ -166,6 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
   ensureDefaultScope();
   updateScopeHelp('full');
   syncDashboardData();
+  loadCredits();
 
   const tokenMintInput = document.getElementById('tokenMint');
   if (tokenMintInput) {
@@ -342,6 +344,11 @@ async function apiJson(path, body) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (data && data.code === 'insufficient_credits') {
+      const req = Number(data.required || 0);
+      const avail = Number(data.available || 0);
+      throw new Error(`Insufficient credits: need ${req}, available ${avail}.`);
+    }
     throw new Error(data.error || ('HTTP ' + res.status));
   }
   return data;
@@ -1458,6 +1465,7 @@ async function launchScan() {
 
     progressBox.classList.remove('show');
     showScanResults(url, scope, findings, attackPaths, report);
+    loadCredits();
     const autoNav = document.getElementById('prefAutoNav');
     if (!autoNav || autoNav.checked) {
       setActiveScanTab('findings');
@@ -1621,6 +1629,7 @@ async function runTokenBundle() {
       renderTokenBundleSuccess(mint, data, { watchlistTvlUsd: lastBundleWatchlistTvlUsd });
       syncSolanaWatchlistSnapshot(mint, data);
       setInvestigationRaw('token', data);
+      loadCredits();
     })
     .catch((err) => {
       lastBundleWatchlistTvlUsd = null;
@@ -2042,6 +2051,133 @@ function copyReferral() {
     btn.textContent = 'Copied!';
     setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
   });
+}
+
+// ── Credits ──────────────────────────────────────────────────────────────
+let creditsState = null;
+
+function formatCreditsNumber(v) {
+  const n = Number(v || 0);
+  if (!Number.isFinite(n)) return '0';
+  return (Math.round(n * 100) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function setElText(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = String(value);
+}
+
+function base58Encode(bytes) {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  if (!bytes || !bytes.length) return '';
+  let digits = [0];
+  for (let i = 0; i < bytes.length; i += 1) {
+    let carry = bytes[i];
+    for (let j = 0; j < digits.length; j += 1) {
+      const x = digits[j] * 256 + carry;
+      digits[j] = x % 58;
+      carry = Math.floor(x / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  let out = '';
+  for (let i = 0; i < bytes.length && bytes[i] === 0; i += 1) out += alphabet[0];
+  for (let i = digits.length - 1; i >= 0; i -= 1) out += alphabet[digits[i]];
+  return out;
+}
+
+function applyCreditsUI(data) {
+  const state = (data && data.state) || {};
+  creditsState = state;
+  setElText('creditsRemaining', formatCreditsNumber(state.credits_available));
+  setElText('creditsDailyGrant', formatCreditsNumber(state.daily_grant_total));
+  setElText('creditsTokenBalance', formatCreditsNumber(state.token_balance_ui));
+  setElText('creditsNextGrant', formatCreditsNumber(data.next_daily_grant_total));
+  setElText('creditsWalletAddress', state.wallet_address || 'Not linked');
+  setElText('creditsResetAt', data.next_reset_at || '—');
+  setElText('creditsBaseDaily', formatCreditsNumber(data.base_daily_credits));
+  setElText('creditsTokensPerStep', formatCreditsNumber(data.tokens_per_step));
+  setElText('creditsPerStep', formatCreditsNumber(data.credits_per_step));
+  setElText('creditsMint', data.mint || '');
+  const costs = data.costs || {};
+  setElText('costWebScan', formatCreditsNumber(costs.web_scan != null ? costs.web_scan : 2));
+  setElText('costTokenScan', formatCreditsNumber(costs.token_scan != null ? costs.token_scan : 2));
+  setElText('costTokenDeep', formatCreditsNumber(costs.token_deep_scan != null ? costs.token_deep_scan : 3.5));
+}
+
+async function loadCredits() {
+  try {
+    const data = await apiAuth('GET', '/api/credits/me');
+    applyCreditsUI(data || {});
+  } catch (_) {
+    // Keep existing UI values.
+  }
+}
+
+async function connectPhantomAndLinkWallet() {
+  const provider = window.solana;
+  if (!provider || !provider.isPhantom) {
+    alert('Phantom wallet not detected. Install Phantom and refresh.');
+    return;
+  }
+  const btn = document.getElementById('creditsConnectBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const resp = await provider.connect();
+    const walletAddress = String((resp && resp.publicKey) || (provider.publicKey || ''));
+    if (!walletAddress) {
+      throw new Error('Could not read Phantom wallet address');
+    }
+    const challenge = await apiJson('/api/credits/wallet/challenge', { wallet_address: walletAddress });
+    const msg = String(challenge.message || '');
+    if (!msg) throw new Error('Missing wallet challenge message');
+    const encoded = new TextEncoder().encode(msg);
+    const signed = await provider.signMessage(encoded, 'utf8');
+    const sigBytes = (signed && signed.signature) || [];
+    const signature = base58Encode(sigBytes);
+    if (!signature) throw new Error('Wallet signature failed');
+    const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
+    const out = await apiJson('/api/credits/wallet/link', {
+      wallet_address: walletAddress,
+      nonce: challenge.nonce,
+      signature,
+      helius_api_key: heliusApiKey,
+    });
+    applyCreditsUI({
+      mint: out.mint,
+      state: out.state,
+      next_daily_grant_total: out.next_daily_grant_total,
+      next_reset_at: out.next_reset_at,
+      base_daily_credits: 5,
+      tokens_per_step: 100000,
+      credits_per_step: 20,
+      costs: {
+        web_scan: 2,
+        token_scan: 2,
+        token_deep_scan: 3.5,
+      },
+    });
+    await loadCredits();
+    alert('Wallet linked and credits refreshed.');
+  } catch (err) {
+    alert(String((err && err.message) || err || 'Wallet link failed'));
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function refreshCreditsWallet() {
+  try {
+    const heliusApiKey = (document.getElementById('heliusKey') || {}).value || localStorage.getItem('dv_helius_key') || '';
+    await apiJson('/api/credits/wallet/refresh', { helius_api_key: heliusApiKey });
+    await loadCredits();
+  } catch (err) {
+    alert(String((err && err.message) || err || 'Refresh failed'));
+  }
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────
