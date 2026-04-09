@@ -43,6 +43,43 @@ Copy this template for each new day:
 
 ---
 
+## 2026-04-09
+
+### Highlights
+- Integrated Privy wallet authentication (SIWS) as a primary sign-in/signup path alongside existing email/password flow.
+- Shipped daily scan credit system with token-holder bonus grants, wallet-verified DIVERG balance lookup, and live countdown timer.
+- Wallet connection now persists across sessions and auto-links on Privy signup.
+
+### Product & UX
+- Added "Create account with Privy (Wallet)" button on login/signup page with hybrid mode (wallet + email fallback).
+- New Privy users are prompted to choose a username before entering the dashboard (no more "Privy User" defaults).
+- Credits page redesigned: connected/disconnected wallet state with green status dot, live token balance display, and a ticking HH:MM:SS countdown until daily credit reset.
+- "Connect Phantom" button toggles to "Change Wallet" when a wallet is already linked; "Refresh Balance" only appears when connected.
+- Email/password users can connect a wallet from the Credits page via Phantom challenge-sign flow.
+- Frontend now surfaces specific Privy error codes and hints in the login UI for faster self-diagnosis.
+
+### Platform & API
+- Added `PATCH /api/auth/profile` endpoint for authenticated users to update their display name.
+- `/api/auth/privy` now accepts `wallet_address` and auto-links it to the user's credit account on signup.
+- Privy access token verification uses a two-path strategy: `privy-client` SDK first, then a PyJWT + JWKS fallback that fetches the ES256 verification key from `auth.privy.io`. No hard dependency on `privy-client` for token verification.
+- Wallet signature verification now has a `cryptography` Ed25519 fallback and pure-Python base58 decoder, so it works even if `PyNaCl`/`base58` packages are missing.
+- Added `PyNaCl>=1.5.0`, `base58>=2.1.0`, and `privy-client>=0.2.0` to `requirements.txt`.
+- CSP headers updated to allow Privy SDK domains (auth, API, CDN, WSS).
+- Privy verification error responses now return structured `code` and `hint` fields (503 for server misconfiguration, 401 for invalid tokens).
+- Solana bundle holder clustering fixed: wallets are now grouped by direct first funder instead of multi-hop terminal address.
+
+### Validation
+- All existing test suites pass: `test_privy_auth_bridge`, `test_wallet_signature_verify`, `test_credits_system`, `test_solana_bundle_holder_cluster`.
+- Manual verification of PyNaCl, cryptography-fallback, and base58-fallback signature paths.
+- Flake8 lint clean on `api_server.py` and `orchestrator.py`.
+
+### Notes
+- Privy SIWS flow requires Phantom wallet extension; Google OAuth via Privy is disabled in the Privy dashboard and not used.
+- `HELIUS_API_KEY` must be set on the server for automatic DIVERG token balance lookup during wallet auto-link; without it, balance defaults to 0 and users can refresh manually.
+- Server env vars required for Privy: `DIVERG_ENABLE_PRIVY=1`, `PRIVY_APP_ID`, `PRIVY_APP_SECRET`.
+
+---
+
 ## 2026-04-08
 
 ### Highlights
