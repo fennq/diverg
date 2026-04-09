@@ -19,6 +19,12 @@
       "title_contains": "batch-like endpoint responds to get",
       "category_contains": "chain / batch validation",
       "source_equals": "chain_validation_abuse"
+    },
+    {
+      "active": true,
+      "title_contains": "http header: server \u2014 present",
+      "category_contains": "transport and browser security",
+      "source_equals": "header_analysis"
     }
   ]
 }
