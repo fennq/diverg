@@ -1,5 +1,5 @@
 /* Diverg — Privy seamless login (hybrid fallback compatible) */
-import Privy, { LocalStorage } from "https://unpkg.com/@privy-io/js-sdk-core@0.60.5/dist/esm/index.mjs";
+import Privy, { LocalStorage } from "https://cdn.jsdelivr.net/npm/@privy-io/js-sdk-core@0.60.5/+esm";
 
 const API = window.location.origin;
 
