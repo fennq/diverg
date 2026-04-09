@@ -504,6 +504,7 @@ def _release_scan_credits(user_id: str, *, ref_type: str, ref_id: str):
         conn.execute("BEGIN IMMEDIATE")
         return _credits_module().release_reserved_credits(conn, user_id, ref_type=ref_type, ref_id=ref_id)
 
+
 # ── Database ────────────────────────────────────────────────────────────────
 
 DB_PATH = Path(os.environ.get("DIVERG_DB_PATH", str(ROOT / "data" / "dashboard.db")).strip().lstrip("="))
