@@ -1021,33 +1021,39 @@ def _obj_to_dict(obj) -> dict:
 
 
 _privy_client_singleton = None
+_privy_client_error = ""
 
 
 def _privy_client():
-    global _privy_client_singleton
+    global _privy_client_singleton, _privy_client_error
     if not PRIVY_ENABLED:
+        _privy_client_error = "privy_disabled"
         return None
     if _privy_client_singleton is not None:
+        _privy_client_error = ""
         return _privy_client_singleton
     try:
         from privy import PrivyAPI  # type: ignore
     except Exception as e:
+        _privy_client_error = "privy_sdk_import_failed"
         logging.getLogger("diverg.api").warning("privy sdk import failed: %s", e)
         return None
     try:
         _privy_client_singleton = PrivyAPI(app_id=PRIVY_APP_ID, app_secret=PRIVY_APP_SECRET)
+        _privy_client_error = ""
         return _privy_client_singleton
     except Exception as e:
+        _privy_client_error = "privy_client_init_failed"
         logging.getLogger("diverg.api").warning("privy client init failed: %s", e)
         return None
 
 
-def _verify_privy_access_token(access_token: str) -> dict | None:
+def _verify_privy_access_token_with_reason(access_token: str) -> tuple[dict | None, str]:
     if not access_token or not PRIVY_ENABLED:
-        return None
+        return None, "missing_or_disabled"
     client = _privy_client()
     if client is None:
-        return None
+        return None, (_privy_client_error or "privy_client_unavailable")
     try:
         claims = None
         users_api = getattr(client, "users", None)
@@ -1057,9 +1063,9 @@ def _verify_privy_access_token(access_token: str) -> dict | None:
             claims = client.verify_access_token(access_token)  # type: ignore[attr-defined]
     except Exception as e:
         logging.getLogger("diverg.api").warning("privy access token verification failed: %s", e)
-        return None
+        return None, "privy_verify_failed"
     if claims is None:
-        return None
+        return None, "privy_no_claims"
     c = _obj_to_dict(claims)
     did = (
         c.get("user_id")
@@ -1068,9 +1074,14 @@ def _verify_privy_access_token(access_token: str) -> dict | None:
         or c.get("did")
     )
     if not isinstance(did, str) or not did.strip():
-        return None
+        return None, "privy_missing_did"
     c["did"] = did.strip()
-    return c
+    return c, ""
+
+
+def _verify_privy_access_token(access_token: str) -> dict | None:
+    claims, _ = _verify_privy_access_token_with_reason(access_token)
+    return claims
 
 
 def _get_or_create_privy_user(claims: dict, *, referral_code: str = "") -> dict | None:
@@ -1485,9 +1496,21 @@ def auth_privy():
     referral_code = sanitize_text(data.get("referral_code") or "", 64).strip().upper()
     if not access_token:
         return jsonify({"error": "Missing access_token"}), 400
-    claims = _verify_privy_access_token(access_token)
+    claims, verify_err = _verify_privy_access_token_with_reason(access_token)
     if not claims:
-        return jsonify({"error": "Invalid Privy access token"}), 401
+        if verify_err in ("privy_sdk_import_failed", "privy_client_init_failed", "privy_client_unavailable"):
+            return jsonify({
+                "error": "Privy backend verification unavailable",
+                "code": verify_err,
+                "hint": "Check PRIVY_APP_ID/PRIVY_APP_SECRET and ensure privy-client is installed on the server.",
+            }), 503
+        if verify_err == "missing_or_disabled":
+            return jsonify({"error": "Privy authentication is not enabled on this server.", "code": verify_err}), 503
+        return jsonify({
+            "error": "Invalid Privy access token",
+            "code": verify_err or "privy_verify_failed",
+            "hint": "Token may be expired, from a different Privy app, or signed with mismatched app credentials.",
+        }), 401
     user = _get_or_create_privy_user(claims, referral_code=referral_code if auth_mode == "register" else "")
     if not user:
         return jsonify({"error": "Could not resolve Privy user"}), 500
