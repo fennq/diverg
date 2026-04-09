@@ -2055,6 +2055,37 @@ function copyReferral() {
 
 // ── Credits ──────────────────────────────────────────────────────────────
 let creditsState = null;
+let _creditsResetTarget = null;
+let _creditsCountdownTimer = null;
+
+function _startCreditCountdown(resetIso) {
+  if (_creditsCountdownTimer) clearInterval(_creditsCountdownTimer);
+  _creditsCountdownTimer = null;
+  if (!resetIso) return;
+  const target = new Date(resetIso).getTime();
+  if (isNaN(target)) return;
+  _creditsResetTarget = target;
+
+  function tick() {
+    const diff = Math.max(0, _creditsResetTarget - Date.now());
+    const h = Math.floor(diff / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    const s = Math.floor((diff % 60000) / 1000);
+    const pad = (n) => String(n).padStart(2, '0');
+    const display = pad(h) + ':' + pad(m) + ':' + pad(s);
+    setElText('creditsResetCountdown', display);
+    setElText('creditsResetAt', display);
+    if (diff <= 0) {
+      clearInterval(_creditsCountdownTimer);
+      _creditsCountdownTimer = null;
+      setElText('creditsResetCountdown', '00:00:00');
+      setTimeout(() => loadCredits(), 2000);
+    }
+  }
+
+  tick();
+  _creditsCountdownTimer = setInterval(tick, 1000);
+}
 
 function formatCreditsNumber(v) {
   const n = Number(v || 0);
@@ -2096,8 +2127,7 @@ function applyCreditsUI(data) {
   setElText('creditsRemaining', formatCreditsNumber(state.credits_available));
   setElText('creditsDailyGrant', formatCreditsNumber(state.daily_grant_total));
   setElText('creditsTokenBalance', formatCreditsNumber(state.token_balance_ui));
-  setElText('creditsNextGrant', formatCreditsNumber(data.next_daily_grant_total));
-  setElText('creditsResetAt', data.next_reset_at || '—');
+  _startCreditCountdown(data.next_reset_at);
   setElText('creditsBaseDaily', formatCreditsNumber(data.base_daily_credits));
   setElText('creditsTokensPerStep', formatCreditsNumber(data.tokens_per_step));
   setElText('creditsPerStep', formatCreditsNumber(data.credits_per_step));
