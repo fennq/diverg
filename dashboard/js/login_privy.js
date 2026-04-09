@@ -105,7 +105,9 @@ async function exchangePrivyToken(accessToken) {
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
-    throw new Error(j.error || "Privy sign-in failed");
+    const detail = j.code ? ` [${j.code}]` : "";
+    const hint = j.hint ? `\n${j.hint}` : "";
+    throw new Error((j.error || "Privy sign-in failed") + detail + hint);
   }
   localStorage.setItem("diverg_token", j.token);
   localStorage.setItem("dv_session", j.token);

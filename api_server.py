@@ -1048,35 +1048,143 @@ def _privy_client():
         return None
 
 
+_privy_jwks_cache: dict = {"keys": None, "fetched_at": 0.0}
+_PRIVY_JWKS_CACHE_TTL = 3600
+
+
+def _fetch_privy_jwks():
+    """Fetch JWKS from Privy's public endpoint and cache for 1 hour."""
+    import base64 as _b64
+    now = time.time()
+    if _privy_jwks_cache["keys"] and (now - _privy_jwks_cache["fetched_at"]) < _PRIVY_JWKS_CACHE_TTL:
+        return _privy_jwks_cache["keys"]
+    log = logging.getLogger("diverg.api")
+    url = f"https://auth.privy.io/api/v1/apps/{PRIVY_APP_ID}/jwks.json"
+    auth_str = _b64.b64encode(f"{PRIVY_APP_ID}:{PRIVY_APP_SECRET}".encode()).decode()
+    headers = {"Authorization": f"Basic {auth_str}", "privy-app-id": PRIVY_APP_ID}
+    try:
+        import requests as _req
+        resp = _req.get(url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            log.warning("privy jwks fetch HTTP %s: %s", resp.status_code, resp.text[:300])
+            return None
+        data = resp.json()
+        keys = data.get("keys")
+        if keys:
+            _privy_jwks_cache["keys"] = keys
+            _privy_jwks_cache["fetched_at"] = now
+            return keys
+        log.warning("privy jwks response has no keys: %s", str(data)[:300])
+    except Exception as e:
+        log.warning("privy jwks fetch error: %s", e)
+    return None
+
+
+def _verify_privy_jwt_manual(access_token: str) -> tuple[dict | None, str]:
+    """Verify Privy ES256 JWT using PyJWT + JWKS (no privy-client needed)."""
+    log = logging.getLogger("diverg.api")
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ec import (
+            EllipticCurvePublicNumbers,
+            SECP256R1,
+        )
+        from cryptography.hazmat.backends import default_backend
+        import base64 as _b64
+    except ImportError as e:
+        log.warning("privy manual verify missing cryptography: %s", e)
+        return None, "privy_crypto_missing"
+
+    jwks = _fetch_privy_jwks()
+    if not jwks:
+        return None, "privy_jwks_fetch_failed"
+
+    unverified_header = jwt.get_unverified_header(access_token)
+    kid = unverified_header.get("kid")
+    alg = unverified_header.get("alg", "ES256")
+
+    matching_key = None
+    for k in jwks:
+        if kid and k.get("kid") == kid:
+            matching_key = k
+            break
+    if not matching_key and jwks:
+        matching_key = jwks[0]
+    if not matching_key:
+        return None, "privy_jwks_no_key"
+
+    def _b64url_decode(s):
+        s = str(s)
+        s += "=" * (4 - len(s) % 4)
+        return _b64.urlsafe_b64decode(s)
+
+    try:
+        x = _b64url_decode(matching_key["x"])
+        y = _b64url_decode(matching_key["y"])
+        pub_numbers = EllipticCurvePublicNumbers(
+            x=int.from_bytes(x, "big"),
+            y=int.from_bytes(y, "big"),
+            curve=SECP256R1(),
+        )
+        pub_key = pub_numbers.public_key(default_backend())
+    except Exception as e:
+        log.warning("privy jwks key parse failed: %s", e)
+        return None, "privy_jwks_key_parse_failed"
+
+    try:
+        payload = jwt.decode(
+            access_token,
+            pub_key,
+            algorithms=[alg, "ES256"],
+            issuer="privy.io",
+            audience=PRIVY_APP_ID,
+            leeway=30,
+        )
+        return payload, ""
+    except jwt.ExpiredSignatureError:
+        return None, "privy_token_expired"
+    except jwt.InvalidAudienceError:
+        return None, "privy_token_wrong_audience"
+    except jwt.InvalidIssuerError:
+        return None, "privy_token_wrong_issuer"
+    except Exception as e:
+        log.warning("privy manual jwt verify failed: %s", e)
+        return None, "privy_jwt_verify_failed"
+
+
 def _verify_privy_access_token_with_reason(access_token: str) -> tuple[dict | None, str]:
     if not access_token or not PRIVY_ENABLED:
         return None, "missing_or_disabled"
+    log = logging.getLogger("diverg.api")
+
+    # Path 1: try privy-client SDK
     client = _privy_client()
-    if client is None:
-        return None, (_privy_client_error or "privy_client_unavailable")
-    try:
-        claims = None
-        users_api = getattr(client, "users", None)
-        if users_api is not None and hasattr(users_api, "verify_access_token"):
-            claims = users_api.verify_access_token(access_token)  # type: ignore[attr-defined]
-        elif hasattr(client, "verify_access_token"):
-            claims = client.verify_access_token(access_token)  # type: ignore[attr-defined]
-    except Exception as e:
-        logging.getLogger("diverg.api").warning("privy access token verification failed: %s", e)
-        return None, "privy_verify_failed"
-    if claims is None:
-        return None, "privy_no_claims"
-    c = _obj_to_dict(claims)
-    did = (
-        c.get("user_id")
-        or c.get("userId")
-        or c.get("sub")
-        or c.get("did")
-    )
+    if client is not None:
+        try:
+            claims = None
+            users_api = getattr(client, "users", None)
+            if users_api is not None and hasattr(users_api, "verify_access_token"):
+                claims = users_api.verify_access_token(access_token)
+            elif hasattr(client, "verify_access_token"):
+                claims = client.verify_access_token(access_token)
+            if claims is not None:
+                c = _obj_to_dict(claims)
+                did = c.get("user_id") or c.get("userId") or c.get("sub") or c.get("did")
+                if isinstance(did, str) and did.strip():
+                    c["did"] = did.strip()
+                    return c, ""
+                return None, "privy_missing_did"
+        except Exception as e:
+            log.warning("privy sdk verify failed (falling back to manual): %s", e)
+
+    # Path 2: manual PyJWT + JWKS verification (no SDK needed)
+    payload, reason = _verify_privy_jwt_manual(access_token)
+    if payload is None:
+        return None, reason
+    did = payload.get("sub") or payload.get("user_id") or payload.get("userId")
     if not isinstance(did, str) or not did.strip():
         return None, "privy_missing_did"
-    c["did"] = did.strip()
-    return c, ""
+    payload["did"] = did.strip()
+    return payload, ""
 
 
 def _verify_privy_access_token(access_token: str) -> dict | None:
