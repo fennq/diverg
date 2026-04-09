@@ -1216,6 +1216,7 @@ def _security_headers(resp):
     connect_src = (
         "'self' "
         "https://mainnet.helius-rpc.com "
+        "https://cdn.jsdelivr.net https://unpkg.com "
         "https://auth.privy.io https://api.privy.io https://*.privy.io "
         "wss://auth.privy.io wss://api.privy.io wss://*.privy.io"
     )
