@@ -112,7 +112,76 @@ async function exchangePrivyToken(accessToken) {
   localStorage.setItem("diverg_token", j.token);
   localStorage.setItem("dv_session", j.token);
   localStorage.setItem("diverg_user", JSON.stringify(j.user || {}));
-  window.location.href = "/dashboard/";
+
+  if (j.needs_username) {
+    await promptForUsername(j.token);
+  } else {
+    window.location.href = "/dashboard/";
+  }
+}
+
+function promptForUsername(token) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("usernameOverlay");
+    const input = document.getElementById("privyUsername");
+    const btn = document.getElementById("privyUsernameBtn");
+    const errEl = document.getElementById("usernameError");
+    if (!overlay || !input || !btn) {
+      window.location.href = "/dashboard/";
+      return resolve();
+    }
+    overlay.classList.add("show");
+    setTimeout(() => input.focus(), 100);
+
+    function showErr(msg) {
+      if (errEl) { errEl.textContent = msg; errEl.style.display = "block"; }
+    }
+    function clearErr() {
+      if (errEl) { errEl.style.display = "none"; }
+    }
+
+    async function submit() {
+      clearErr();
+      const name = (input.value || "").trim();
+      if (!name || name.length < 2) {
+        showErr("Username must be at least 2 characters.");
+        return;
+      }
+      btn.disabled = true;
+      btn.classList.add("loading");
+      try {
+        const r = await fetch(API + "/api/auth/profile", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + token,
+          },
+          body: JSON.stringify({ name }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          showErr(j.error || "Could not save username");
+          btn.disabled = false;
+          btn.classList.remove("loading");
+          return;
+        }
+        if (j.user) {
+          localStorage.setItem("diverg_user", JSON.stringify(j.user));
+        }
+        window.location.href = "/dashboard/";
+        resolve();
+      } catch (e) {
+        showErr(String(e.message || e));
+        btn.disabled = false;
+        btn.classList.remove("loading");
+      }
+    }
+
+    window._submitPrivyUsername = submit;
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); submit(); }
+    });
+  });
 }
 
 async function handlePrivyCallback(privy) {

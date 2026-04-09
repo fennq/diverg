@@ -1579,6 +1579,31 @@ def auth_me():
     return jsonify({"user": g.user})
 
 
+@app.route("/api/auth/profile", methods=["PATCH", "OPTIONS"])
+@require_auth
+def auth_profile_update():
+    if request.method == "OPTIONS":
+        return "", 204
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json(silent=True) or {}
+    uid = g.user["id"]
+    new_name = sanitize_text(data.get("name") or "", 120).strip()
+    if not new_name or len(new_name) < 2:
+        return jsonify({"error": "Name must be at least 2 characters"}), 400
+    with _db() as conn:
+        conn.execute("UPDATE users SET name = ? WHERE id = ?", (new_name, uid))
+        row = conn.execute(
+            "SELECT id, email, name, role, org_id, provider, avatar_url, created_at FROM users WHERE id = ?",
+            (uid,),
+        ).fetchone()
+    if not row:
+        return jsonify({"error": "User not found"}), 404
+    user = dict(row)
+    _audit_log(uid, "profile.update", metadata={"name": new_name})
+    return jsonify({"ok": True, "user": user})
+
+
 @app.route("/api/auth/privy", methods=["POST", "OPTIONS"])
 def auth_privy():
     if request.method == "OPTIONS":
@@ -1624,12 +1649,15 @@ def auth_privy():
         return jsonify({"error": "Could not resolve Privy user"}), 500
     token = create_token(user["id"], user["email"])
     _audit_log(user["id"], "auth.privy", metadata={"auth_source": "privy_access_token"})
+    user_name = user.get("name", "Privy User")
+    needs_username = (user_name in ("Privy User", "") or user_name.startswith("Privy User"))
     return jsonify({
         "token": token,
+        "needs_username": needs_username,
         "user": {
             "id": user["id"],
             "email": user.get("email", ""),
-            "name": user.get("name", "Privy User"),
+            "name": user_name,
             "provider": "privy",
             "avatar_url": user.get("avatar_url", ""),
             "role": user.get("role", "analyst"),

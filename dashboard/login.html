@@ -87,6 +87,25 @@
     </div>
   </div>
 
+  <div class="username-overlay" id="usernameOverlay">
+    <div class="username-card">
+      <div class="auth-brand" style="margin-bottom:1.5rem;">
+        <img src="/dashboard/logo.png" alt="Diverg">
+      </div>
+      <h2 style="font-size:1.1rem;font-weight:500;margin-bottom:0.35rem;letter-spacing:-0.01em;">Choose your username</h2>
+      <p style="font-size:0.75rem;color:var(--dim);margin-bottom:1.25rem;line-height:1.45;">This is how you'll appear on the platform.</p>
+      <div class="auth-field" style="margin-bottom:1rem;">
+        <label for="privyUsername">Username</label>
+        <input type="text" id="privyUsername" placeholder="Your display name" autocomplete="off" minlength="2" maxlength="60" autofocus>
+      </div>
+      <button type="button" class="auth-submit" id="privyUsernameBtn" onclick="window._submitPrivyUsername && window._submitPrivyUsername()">
+        <span class="btn-text">Continue</span>
+        <div class="spinner"></div>
+      </button>
+      <p class="username-error" id="usernameError" style="display:none;font-size:0.75rem;color:var(--red);margin-top:0.5rem;text-align:center;"></p>
+    </div>
+  </div>
+
   <div class="toast-container" id="toastContainer"></div>
 
   <script src="/dashboard/js/login.js"></script>
