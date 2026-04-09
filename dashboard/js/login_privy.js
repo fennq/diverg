@@ -77,6 +77,14 @@ function base58Encode(bytes) {
   return out;
 }
 
+function bytesToBase64(bytes) {
+  if (!bytes || !bytes.length) return "";
+  const src = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+  let binary = "";
+  for (let i = 0; i < src.length; i += 1) binary += String.fromCharCode(src[i]);
+  return btoa(binary);
+}
+
 async function getPrivyConfig() {
   const r = await fetch(API + "/api/auth/privy/config");
   const j = await r.json().catch(() => ({}));
@@ -147,9 +155,11 @@ async function loginWithPhantomViaPrivySiws(privy) {
   const nonce = String((nonceOut && nonceOut.nonce) || "");
   if (!nonce) throw new Error("Privy did not provide a SIWS nonce");
 
+  const nonceOutSafe = nonceOut || {};
+  const fetchedNonce = String(nonceOutSafe.nonce || "").trim();
   const message = createSiwsMessage({
     address,
-    nonce,
+    nonce: fetchedNonce || nonce,
     domain: window.location.host,
     uri: window.location.origin + "/login",
   });
@@ -158,12 +168,15 @@ async function loginWithPhantomViaPrivySiws(privy) {
   const sigRaw = signed && signed.signature ? signed.signature : signed;
   const sigBytes = sigRaw instanceof Uint8Array ? sigRaw : Array.isArray(sigRaw) ? Uint8Array.from(sigRaw) : new Uint8Array();
   if (!sigBytes.length) throw new Error("Wallet signature failed");
-  const signature = base58Encode(sigBytes);
+  const signatureBase58 = base58Encode(sigBytes);
+  const signatureBase64 = bytesToBase64(sigBytes);
+  if (!signatureBase64 && !signatureBase58) throw new Error("Wallet signature encoding failed");
 
   await privy.auth.siws.login({
     mode: oauthLoginMode(),
     message,
-    signature,
+    // Privy SIWS expects base64 signatures in browser flows.
+    signature: signatureBase64 || signatureBase58,
     walletClientType: "phantom",
     connectorType: "injected",
   });
