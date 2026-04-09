@@ -1,5 +1,5 @@
 /* Diverg — Privy seamless login (hybrid fallback compatible) */
-import Privy, { LocalStorage } from "https://cdn.jsdelivr.net/npm/@privy-io/js-sdk-core@0.60.5/+esm";
+import Privy, { LocalStorage, createSiwsMessage } from "https://cdn.jsdelivr.net/npm/@privy-io/js-sdk-core@0.60.5/+esm";
 
 const API = window.location.origin;
 
@@ -13,6 +13,11 @@ function setPrivyBtnLoading(loading) {
     btn.disabled = false;
     btn.classList.remove("loading");
   }
+}
+
+function setPrivyBtnLabel(text) {
+  const el = document.querySelector("#privyBtn .btn-text");
+  if (el) el.textContent = text;
 }
 
 function showAuthError(msg) {
@@ -47,6 +52,29 @@ function referralCodeFromUI() {
     fromSession = "";
   }
   return (fromInput || fromSession).slice(0, 64);
+}
+
+function base58Encode(bytes) {
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  if (!bytes || !bytes.length) return "";
+  const src = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes);
+  let digits = [0];
+  for (let i = 0; i < src.length; i += 1) {
+    let carry = src[i];
+    for (let j = 0; j < digits.length; j += 1) {
+      const x = digits[j] * 256 + carry;
+      digits[j] = x % 58;
+      carry = Math.floor(x / 58);
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  let out = "";
+  for (let i = 0; i < src.length && src[i] === 0; i += 1) out += alphabet[0];
+  for (let i = digits.length - 1; i >= 0; i -= 1) out += alphabet[digits[i]];
+  return out;
 }
 
 async function getPrivyConfig() {
@@ -105,6 +133,46 @@ async function handlePrivyCallback(privy) {
   }
 }
 
+async function loginWithPhantomViaPrivySiws(privy) {
+  const provider = window.solana;
+  if (!provider || !provider.isPhantom) {
+    throw new Error("Phantom wallet is required for Privy wallet sign-in.");
+  }
+  const conn = await provider.connect();
+  const pk = (conn && conn.publicKey) || provider.publicKey || null;
+  const address = pk && typeof pk.toBase58 === "function" ? pk.toBase58() : String(pk || "");
+  if (!address) throw new Error("Could not read Phantom wallet address");
+
+  const nonceOut = await privy.auth.siws.fetchNonce({ address });
+  const nonce = String((nonceOut && nonceOut.nonce) || "");
+  if (!nonce) throw new Error("Privy did not provide a SIWS nonce");
+
+  const message = createSiwsMessage({
+    address,
+    nonce,
+    domain: window.location.host,
+    uri: window.location.origin + "/login",
+  });
+  const encoded = new TextEncoder().encode(message);
+  const signed = await provider.signMessage(encoded, "utf8");
+  const sigRaw = signed && signed.signature ? signed.signature : signed;
+  const sigBytes = sigRaw instanceof Uint8Array ? sigRaw : Array.isArray(sigRaw) ? Uint8Array.from(sigRaw) : new Uint8Array();
+  if (!sigBytes.length) throw new Error("Wallet signature failed");
+  const signature = base58Encode(sigBytes);
+
+  await privy.auth.siws.login({
+    mode: oauthLoginMode(),
+    message,
+    signature,
+    walletClientType: "phantom",
+    connectorType: "injected",
+  });
+
+  const accessToken = await privy.getAccessToken();
+  if (!accessToken) throw new Error("Privy did not return an access token");
+  await exchangePrivyToken(accessToken);
+}
+
 async function main() {
   try {
     const qs = new URLSearchParams(window.location.search);
@@ -129,24 +197,14 @@ async function main() {
       setPrivyBtnLoading(true);
       clearAuthError();
       try {
-        const m = currentAuthMode();
-        const u = new URL(window.location.origin + "/login");
-        u.searchParams.set("mode", m);
-        const ref = referralCodeFromUI();
-        if (ref) u.searchParams.set("ref", ref);
-        try {
-          sessionStorage.setItem("diverg_auth_mode", m);
-        } catch (_) {
-          // ignore
-        }
-        const redirectURI = u.toString();
-        const oauthURL = await privy.auth.oauth.generateURL("google", redirectURI);
-        window.location.assign(oauthURL);
+        // Wallet-first auth path avoids OAuth provider allowlist issues.
+        await loginWithPhantomViaPrivySiws(privy);
       } catch (e) {
-        showAuthError(String((e && e.message) || e || "Privy sign-in failed"));
+        showAuthError(String((e && e.message) || e || "Privy wallet sign-in failed"));
         setPrivyBtnLoading(false);
       }
     };
+    setPrivyBtnLabel(currentAuthMode() === "register" ? "Create account with Privy (Wallet)" : "Sign in with Privy (Wallet)");
 
     const handled = await handlePrivyCallback(privy);
     if (!handled) setPrivyBtnLoading(false);

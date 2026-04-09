@@ -50,7 +50,7 @@
     document.getElementById('nameField').classList.toggle('show', isRegister);
     document.getElementById('referralField').classList.toggle('show', isRegister);
     var privyBtnText = document.querySelector('#privyBtn .btn-text');
-    if (privyBtnText) privyBtnText.textContent = isRegister ? 'Create account with Privy' : 'Sign in with Privy';
+    if (privyBtnText) privyBtnText.textContent = isRegister ? 'Create account with Privy (Wallet)' : 'Sign in with Privy (Wallet)';
     document.getElementById('authPassword').autocomplete = isRegister ? 'new-password' : 'current-password';
     document.getElementById('authPassword').placeholder = isRegister ? 'Create a password' : 'Min 8 characters';
     window.__divergAuthMode = isRegister ? 'register' : 'login';
