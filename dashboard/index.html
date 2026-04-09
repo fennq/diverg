@@ -550,14 +550,27 @@
       </div>
       <div class="tool-list">
         <div class="tool-card">
-          <div class="tool-header"><span class="tool-num">&gt;</span><span class="tool-title">Wallet (Phantom)</span></div>
-          <div style="font-size:0.6875rem;color:var(--text-secondary);margin-bottom:8px;">Linked wallet: <span id="creditsWalletAddress" class="mono">&mdash;</span></div>
-          <div style="font-size:0.6875rem;color:var(--text-secondary);margin-bottom:10px;">Daily reset (UTC): <span id="creditsResetAt" class="mono">&mdash;</span></div>
+          <div class="tool-header"><span class="tool-num">&gt;</span><span class="tool-title">Wallet</span></div>
+          <div id="creditsWalletConnected" style="display:none;margin-bottom:10px;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;"></span>
+              <span style="font-size:0.75rem;font-weight:500;color:#22c55e;">Connected</span>
+            </div>
+            <div style="font-size:0.6875rem;color:var(--text-secondary);margin-bottom:4px;">Address: <span id="creditsWalletAddress" class="mono" style="word-break:break-all;">&mdash;</span></div>
+            <div style="font-size:0.6875rem;color:var(--text-secondary);margin-bottom:4px;">DIVERG held: <span id="creditsWalletTokens" class="mono">0</span></div>
+            <div style="font-size:0.6875rem;color:var(--text-secondary);">Daily reset (UTC): <span id="creditsResetAt" class="mono">&mdash;</span></div>
+          </div>
+          <div id="creditsWalletDisconnected" style="margin-bottom:10px;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-dim);"></span>
+              <span style="font-size:0.75rem;font-weight:500;color:var(--text-dim);">Not connected</span>
+            </div>
+            <p style="font-size:0.6875rem;color:var(--text-secondary);line-height:1.45;">Connect your Phantom wallet to verify DIVERG token holdings and unlock bonus daily credits.</p>
+          </div>
           <div class="tool-row">
             <button class="btn btn-primary" id="creditsConnectBtn" onclick="connectPhantomAndLinkWallet()">Connect Phantom</button>
-            <button class="btn btn-ghost" onclick="refreshCreditsWallet()">Refresh Balance</button>
+            <button class="btn btn-ghost" id="creditsRefreshBtn" onclick="refreshCreditsWallet()" style="display:none;">Refresh Balance</button>
           </div>
-          <p style="font-size:0.625rem;color:var(--text-dim);margin-top:8px;">We verify ownership with a signed nonce challenge before linking the wallet.</p>
         </div>
         <div class="tool-card">
           <div class="tool-header"><span class="tool-num">&gt;</span><span class="tool-title">Credit Costs</span></div>

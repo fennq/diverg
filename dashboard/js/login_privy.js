@@ -98,6 +98,7 @@ async function exchangePrivyToken(accessToken) {
   const referral = referralCodeFromUI();
   const body = { access_token: accessToken, mode: currentAuthMode() };
   if (referral) body.referral_code = referral;
+  if (_lastPrivyWalletAddress) body.wallet_address = _lastPrivyWalletAddress;
   const r = await fetch(API + "/api/auth/privy", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -212,6 +213,8 @@ async function handlePrivyCallback(privy) {
   }
 }
 
+let _lastPrivyWalletAddress = "";
+
 async function loginWithPhantomViaPrivySiws(privy) {
   const provider = window.solana;
   if (!provider || !provider.isPhantom) {
@@ -221,6 +224,7 @@ async function loginWithPhantomViaPrivySiws(privy) {
   const pk = (conn && conn.publicKey) || provider.publicKey || null;
   const address = pk && typeof pk.toBase58 === "function" ? pk.toBase58() : String(pk || "");
   if (!address) throw new Error("Could not read Phantom wallet address");
+  _lastPrivyWalletAddress = address;
 
   const nonceOut = await privy.auth.siws.fetchNonce({ address });
   const nonce = String((nonceOut && nonceOut.nonce) || "");

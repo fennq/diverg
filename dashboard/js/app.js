@@ -2097,7 +2097,6 @@ function applyCreditsUI(data) {
   setElText('creditsDailyGrant', formatCreditsNumber(state.daily_grant_total));
   setElText('creditsTokenBalance', formatCreditsNumber(state.token_balance_ui));
   setElText('creditsNextGrant', formatCreditsNumber(data.next_daily_grant_total));
-  setElText('creditsWalletAddress', state.wallet_address || 'Not linked');
   setElText('creditsResetAt', data.next_reset_at || '—');
   setElText('creditsBaseDaily', formatCreditsNumber(data.base_daily_credits));
   setElText('creditsTokensPerStep', formatCreditsNumber(data.tokens_per_step));
@@ -2107,6 +2106,23 @@ function applyCreditsUI(data) {
   setElText('costWebScan', formatCreditsNumber(costs.web_scan != null ? costs.web_scan : 2));
   setElText('costTokenScan', formatCreditsNumber(costs.token_scan != null ? costs.token_scan : 2));
   setElText('costTokenDeep', formatCreditsNumber(costs.token_deep_scan != null ? costs.token_deep_scan : 3.5));
+
+  const walletAddr = (state.wallet_address || '').trim();
+  const isLinked = walletAddr.length > 0;
+  const connectedEl = document.getElementById('creditsWalletConnected');
+  const disconnectedEl = document.getElementById('creditsWalletDisconnected');
+  const connectBtn = document.getElementById('creditsConnectBtn');
+  const refreshBtn = document.getElementById('creditsRefreshBtn');
+  if (connectedEl) connectedEl.style.display = isLinked ? 'block' : 'none';
+  if (disconnectedEl) disconnectedEl.style.display = isLinked ? 'none' : 'block';
+  if (connectBtn) {
+    connectBtn.textContent = isLinked ? 'Change Wallet' : 'Connect Phantom';
+  }
+  if (refreshBtn) refreshBtn.style.display = isLinked ? '' : 'none';
+  if (isLinked) {
+    setElText('creditsWalletAddress', walletAddr);
+    setElText('creditsWalletTokens', formatCreditsNumber(state.token_balance_ui));
+  }
 }
 
 async function loadCredits() {

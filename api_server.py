@@ -1192,13 +1192,17 @@ def _verify_privy_access_token(access_token: str) -> dict | None:
     return claims
 
 
-def _get_or_create_privy_user(claims: dict, *, referral_code: str = "") -> dict | None:
+def _get_or_create_privy_user(claims: dict, *, referral_code: str = "", wallet_address: str = "") -> dict | None:
     did = str(claims.get("did") or "").strip()
     if not did:
         return None
     email_local = re.sub(r"[^a-zA-Z0-9_.-]+", "_", did)[:120]
     default_email = f"{email_local}@privy.local"
     now = datetime.now(timezone.utc).isoformat()
+    wa = (wallet_address or "").strip()[:64]
+    cm = _credits_module()
+    if wa and not cm.validate_wallet_address(wa):
+        wa = ""
     with _db() as conn:
         row = conn.execute(
             "SELECT id, email, name, role, org_id, provider, avatar_url, created_at FROM users WHERE id = ?",
@@ -1225,14 +1229,43 @@ def _get_or_create_privy_user(claims: dict, *, referral_code: str = "") -> dict 
             from dashboard_points import ensure_user_points_row
 
             ensure_user_points_row(conn, did)
-            _credits_module().ensure_user_credits_row(conn, did)
+            cm.ensure_user_credits_row(conn, did)
         except Exception:
             pass
+        if wa:
+            _auto_link_privy_wallet(conn, did, wa, cm)
         row2 = conn.execute(
             "SELECT id, email, name, role, org_id, provider, avatar_url, created_at FROM users WHERE id = ?",
             (did,),
         ).fetchone()
     return dict(row2) if row2 else None
+
+
+def _auto_link_privy_wallet(conn: sqlite3.Connection, user_id: str, wallet_address: str, cm) -> None:
+    """Link wallet for Privy SIWS users and fetch token balance if possible."""
+    existing = conn.execute(
+        "SELECT wallet_address FROM user_credits WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    current_wa = str((existing["wallet_address"] if existing else "") or "").strip()
+    if current_wa and current_wa == wallet_address:
+        return
+    balance_ui = 0.0
+    api_key = (os.environ.get("HELIUS_API_KEY") or "").strip()
+    if api_key:
+        try:
+            balance_ui, _ = _fetch_diverg_holder_balance(wallet_address, api_key)
+        except Exception:
+            balance_ui = 0.0
+    try:
+        cm.refresh_wallet_and_grant(
+            conn,
+            user_id,
+            wallet_address=wallet_address,
+            token_balance_ui=balance_ui,
+            mark_verified=True,
+        )
+    except Exception:
+        pass
 
 
 def get_current_user():
@@ -1627,6 +1660,7 @@ def auth_privy():
     if auth_mode not in ("login", "register"):
         auth_mode = "login"
     referral_code = sanitize_text(data.get("referral_code") or "", 64).strip().upper()
+    wallet_address = sanitize_text(data.get("wallet_address") or "", 64).strip()
     if not access_token:
         return jsonify({"error": "Missing access_token"}), 400
     claims, verify_err = _verify_privy_access_token_with_reason(access_token)
@@ -1644,7 +1678,11 @@ def auth_privy():
             "code": verify_err or "privy_verify_failed",
             "hint": "Token may be expired, from a different Privy app, or signed with mismatched app credentials.",
         }), 401
-    user = _get_or_create_privy_user(claims, referral_code=referral_code if auth_mode == "register" else "")
+    user = _get_or_create_privy_user(
+        claims,
+        referral_code=referral_code if auth_mode == "register" else "",
+        wallet_address=wallet_address,
+    )
     if not user:
         return jsonify({"error": "Could not resolve Privy user"}), 500
     token = create_token(user["id"], user["email"])
