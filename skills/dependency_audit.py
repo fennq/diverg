@@ -1,7 +1,10 @@
 """
 Dependency / CVE audit skill — APT-style upgrade (Upgrade 2 + 5).
-Collects product/version from headers and optional client_surface (or recon) output,
-checks against a curated CVE watchlist, and reports "Detected [stack] [version]; CVE may apply."
+Collects product/version from headers, JS/CDN patterns, and optional
+client_surface (or recon) output, checks against a curated CVE watchlist
+AND live OSV.dev, and reports known CVEs with fix versions and CVSS.
+
+Also detects end-of-life (EOL) frameworks missing security patches.
 
 Authorized use only.
 """
@@ -24,7 +27,7 @@ from stealth import get_session
 
 SESSION = get_session()
 TIMEOUT = 6
-RUN_BUDGET_SEC = 25
+RUN_BUDGET_SEC = 40
 WATCHLIST_PATH = Path(__file__).parent / "cve_watchlist.json"
 
 # Header patterns: Server, X-Powered-By
@@ -41,6 +44,27 @@ HEADER_VERSION_RE = [
     (re.compile(r"Tomcat(?:/?\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?))?", re.I), "Tomcat"),
     (re.compile(r"cloudflare", re.I), "Cloudflare"),
     (re.compile(r"Varnish(?:\s+([0-9]+\.[0-9]+\.[0-9]+))?", re.I), "Varnish"),
+]
+
+
+EOL_VERSIONS: dict[str, dict[str, str]] = {
+    "Node.js": {
+        "12": "2022-04-30", "14": "2023-04-30", "16": "2023-09-11",
+        "18": "2025-04-30", "19": "2023-06-01", "21": "2024-06-01",
+    },
+    "PHP": {"7.4": "2022-11-28", "8.0": "2023-11-26", "8.1": "2025-12-31"},
+    "Django": {"3.2": "2024-04-01", "4.0": "2023-04-01", "4.1": "2023-12-01"},
+    "Python": {"3.7": "2023-06-27", "3.8": "2024-10-07", "3.9": "2025-10-05"},
+    "nginx": {"1.22": "2023-06-01", "1.24": "2024-06-01"},
+    "Apache": {"2.2": "2018-01-01"},
+    "WordPress": {"5.9": "2024-11-01"},
+    "Tomcat": {"8.5": "2024-03-31", "9.0": "2025-03-31"},
+}
+
+CDN_VERSION_PATTERNS = [
+    re.compile(r"/npm/([a-z@][a-z0-9_./@-]*)@([0-9]+\.[0-9]+\.[0-9]+)", re.I),
+    re.compile(r"/ajax/libs/([a-z][a-z0-9._-]*)/([0-9]+\.[0-9]+\.[0-9]+)", re.I),
+    re.compile(r"([a-z][a-z0-9._-]*?)[-.]([0-9]+\.[0-9]+\.[0-9]+)(?:\.min)?\.js", re.I),
 ]
 
 
@@ -139,6 +163,131 @@ def _collect_versions_from_headers(url: str) -> list[dict]:
     return versions
 
 
+def _extract_cdn_versions(client_surface_json: str) -> list[dict]:
+    """Extract package versions from CDN URLs found in client_surface output."""
+    versions: list[dict] = []
+    try:
+        data = json.loads(client_surface_json)
+    except Exception:
+        return versions
+
+    urls: list[str] = []
+    for script in data.get("scripts", []) or []:
+        src = script.get("src", "") if isinstance(script, dict) else str(script)
+        if src:
+            urls.append(src)
+    for ep in data.get("extracted_endpoints", []) or []:
+        url = ep.get("url", "") if isinstance(ep, dict) else str(ep)
+        if url and ".js" in url:
+            urls.append(url)
+
+    seen: set[tuple[str, str]] = set()
+    for url in urls:
+        for pattern in CDN_VERSION_PATTERNS:
+            for m in pattern.finditer(url):
+                pkg = m.group(1).strip().rstrip("/")
+                ver = m.group(2).strip()
+                if pkg and ver and (pkg.lower(), ver) not in seen:
+                    seen.add((pkg.lower(), ver))
+                    versions.append({
+                        "product": pkg, "version": ver,
+                        "source": f"cdn:{url[:120]}",
+                    })
+    return versions
+
+
+def _check_eol(product: str, version: str, target_url: str) -> Finding | None:
+    """Check if a product version has reached end-of-life."""
+    eol_entries = EOL_VERSIONS.get(product)
+    if not eol_entries:
+        return None
+    parts = version.split(".")
+    for prefix_len in (2, 1):
+        major_minor = ".".join(parts[:prefix_len])
+        eol_date = eol_entries.get(major_minor)
+        if eol_date:
+            try:
+                from datetime import date
+                if date.fromisoformat(eol_date) < date.today():
+                    return Finding(
+                        title=f"{product} {version} reached end-of-life ({eol_date})",
+                        severity="High",
+                        url=target_url,
+                        category="Dependency / EOL",
+                        evidence=(
+                            f"{product} {major_minor}.x EOL date: {eol_date}. "
+                            f"Detected version: {version}."
+                        ),
+                        impact=(
+                            "End-of-life software receives no security patches. "
+                            "Known and future vulnerabilities will remain unpatched."
+                        ),
+                        remediation=(
+                            f"Upgrade {product} to a currently supported version. "
+                            f"Check vendor release schedule for LTS options."
+                        ),
+                    )
+            except Exception:
+                pass
+    return None
+
+
+def _run_osv_lookup(
+    all_versions: list[dict], target_url: str, cve_seen: set,
+) -> list[Finding]:
+    """Query OSV.dev for live CVE data on detected packages."""
+    try:
+        import osv_client
+    except ImportError:
+        return []
+
+    osv_items: list[tuple[str, str, str]] = []
+    for d in all_versions:
+        product = d.get("product", "")
+        version = d.get("version", "")
+        if not product or not version or version == "unknown":
+            continue
+        eco = osv_client.resolve_ecosystem(product)
+        if eco:
+            osv_items.append((product, version, eco))
+
+    if not osv_items:
+        return []
+
+    findings: list[Finding] = []
+    try:
+        results = osv_client.query_batch(osv_items)
+    except Exception:
+        return []
+
+    for (pkg, ver, eco) in osv_items:
+        cache_key = f"{eco}:{pkg}:{ver}"
+        vulns = results.get(cache_key, [])
+        for v in vulns:
+            dedupe = (pkg, ver, v.cve_id)
+            if dedupe in cve_seen:
+                continue
+            cve_seen.add(dedupe)
+            severity = v.severity or "High"
+            fix_str = ", ".join(v.fixed_versions[:3]) if v.fixed_versions else "unknown"
+            ref_str = " ".join(v.references[:2]) if v.references else ""
+            cvss_note = f" (CVSS {v.cvss_score})" if v.cvss_score else ""
+            findings.append(Finding(
+                title=f"{pkg} {ver}: {v.cve_id}{cvss_note}",
+                severity=severity,
+                url=target_url,
+                category="Dependency / CVE",
+                evidence=(
+                    f"OSV.dev: {v.summary[:200]} "
+                    f"Fix: {fix_str}. {ref_str}"
+                ).strip(),
+                impact="Known vulnerability confirmed by OSV.dev live database.",
+                remediation=f"Upgrade {pkg} to {fix_str}." if fix_str != "unknown"
+                else f"Check {v.cve_id} for patch guidance.",
+            ))
+    return findings
+
+
 def run(
     target_url: str,
     scan_type: str = "full",
@@ -149,21 +298,30 @@ def run(
     run_start = time.time()
     all_versions: list[dict] = []
 
-    # From headers
     all_versions.extend(_collect_versions_from_headers(target_url))
 
-    # From client_surface report
     if client_surface_json and (time.time() - run_start) < RUN_BUDGET_SEC:
         try:
             data = json.loads(client_surface_json)
             for d in data.get("detected_versions", []):
                 key = (d.get("product"), d.get("version"))
-                if key[0] and key[1] and not any((v.get("product"), v.get("version")) == key for v in all_versions):
-                    all_versions.append({"product": d.get("product"), "version": d.get("version"), "source": d.get("source", "js")})
+                if key[0] and key[1] and not any(
+                    (v.get("product"), v.get("version")) == key for v in all_versions
+                ):
+                    all_versions.append({
+                        "product": d.get("product"),
+                        "version": d.get("version"),
+                        "source": d.get("source", "js"),
+                    })
         except Exception:
             pass
 
-    # From recon technologies (optional)
+        cdn_versions = _extract_cdn_versions(client_surface_json)
+        for cv in cdn_versions:
+            key = (cv["product"], cv["version"])
+            if not any((v.get("product"), v.get("version")) == key for v in all_versions):
+                all_versions.append(cv)
+
     if recon_json and (time.time() - run_start) < RUN_BUDGET_SEC:
         try:
             data = json.loads(recon_json)
@@ -172,8 +330,12 @@ def run(
                 ver = (tech.get("version") or "").strip()
                 if name and ver:
                     key = (name, ver)
-                    if not any((v.get("product"), v.get("version")) == key for v in all_versions):
-                        all_versions.append({"product": name, "version": ver, "source": "recon"})
+                    if not any(
+                        (v.get("product"), v.get("version")) == key for v in all_versions
+                    ):
+                        all_versions.append({
+                            "product": name, "version": ver, "source": "recon",
+                        })
         except Exception:
             pass
 
@@ -205,21 +367,40 @@ def run(
                     severity="High",
                     url=target_url,
                     category="Dependency / CVE",
-                    evidence=f"Version {version} (source: {d.get('source', '')}) is in affected range. {entry.get('summary', '')}",
+                    evidence=(
+                        f"Version {version} (source: {d.get('source', '')}) "
+                        f"is in affected range. {entry.get('summary', '')}"
+                    ),
                     impact="Known vulnerability may be exploitable. Verify patch status.",
                     remediation="Upgrade to a patched version and re-scan.",
                 ))
                 break
 
+    if (time.time() - run_start) < RUN_BUDGET_SEC:
+        osv_findings = _run_osv_lookup(all_versions, target_url, cve_seen)
+        report.findings.extend(osv_findings)
+
+    for d in all_versions:
+        product = d.get("product", "")
+        version = d.get("version", "")
+        if not product or not version or version == "unknown":
+            continue
+        eol_finding = _check_eol(product, version, target_url)
+        if eol_finding:
+            report.findings.append(eol_finding)
+
     if report.detected_versions and not report.findings:
         report.findings.append(Finding(
-            title="Detected versions (no CVE match in watchlist)",
+            title="Detected versions (no CVE match)",
             severity="Info",
             url=target_url,
             category="Dependency / CVE",
-            evidence="Collected: " + ", ".join(f"{v.get('product')} {v.get('version')}" for v in report.detected_versions[:10]),
-            impact="Update cve_watchlist.json when new critical CVEs drop to get alerts.",
-            remediation="Keep stack updated; add new CVEs to watchlist for future scans.",
+            evidence="Collected: " + ", ".join(
+                f"{v.get('product')} {v.get('version')}"
+                for v in report.detected_versions[:10]
+            ),
+            impact="No known CVEs found in watchlist or OSV.dev for these versions.",
+            remediation="Keep stack updated; re-scan periodically.",
         ))
 
     return json.dumps(asdict(report), indent=2)

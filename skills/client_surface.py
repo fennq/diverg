@@ -92,6 +92,31 @@ CRYPTO_TRUST_PATTERNS = [
     (re.compile(r"\brecover\s*\(|\bwallet\.recover\b", re.I), "Wallet recover in client"),
     (re.compile(r"\bapprove\s*\(\s*.*address|\btransfer\s*\(\s*.*to\s*:", re.I), "Approve/transfer to address in client"),
 ]
+LEGITIMATE_CDN_HOSTS = {
+    "cdn.jsdelivr.net", "cdnjs.cloudflare.com", "unpkg.com",
+    "ajax.googleapis.com", "code.jquery.com", "stackpath.bootstrapcdn.com",
+    "cdn.bootcdn.net", "cdn.bootcss.com", "cdn.staticfile.org",
+    "maxcdn.bootstrapcdn.com", "use.fontawesome.com", "kit.fontawesome.com",
+    "fonts.googleapis.com", "fonts.gstatic.com",
+    "js.stripe.com", "checkout.stripe.com",
+    "connect.facebook.net", "platform.twitter.com",
+    "www.googletagmanager.com", "www.google-analytics.com",
+    "static.cloudflareinsights.com", "cdn.segment.com",
+    "cdn.plyr.io", "cdn.tailwindcss.com",
+    "esm.sh", "esm.run", "ga.jspm.io",
+}
+
+CDN_TYPOSQUAT_HINTS = [
+    re.compile(r"cdn[\-_.]?jsdeliver", re.I),
+    re.compile(r"cdnjs[\-_.]?cloudf1are", re.I),
+    re.compile(r"cdnjs[\-]cloudflare\.(?!com)", re.I),
+    re.compile(r"unpkg\.(?!com\b)", re.I),
+    re.compile(r"cdn\.jsdel1vr", re.I),
+    re.compile(r"googlapis|googelapis|googleaips", re.I),
+    re.compile(r"cloudfl[a]?re\.(?!com\b)", re.I),
+    re.compile(r"bootsrapcdn|bootstrpacdn", re.I),
+]
+
 VERSION_PATTERNS = [
     (re.compile(r'"next"\s*:\s*["\']([0-9]+\.[0-9]+\.[0-9]+)["\']', re.I), "Next.js"),
     (re.compile(r'"react"\s*:\s*["\']([0-9]+\.[0-9]+\.[0-9]+)["\']', re.I), "React"),
@@ -441,6 +466,107 @@ def _check_source_map(js_content: str, js_url: str, run_start: float) -> tuple[i
         return 0, findings
 
 
+def _check_sri_and_cdn_trust(base_url: str, run_start: float) -> list[Finding]:
+    """Check external <script> tags for missing SRI and suspicious CDN domains."""
+    findings: list[Finding] = []
+    try:
+        resp = SESSION.get(base_url, timeout=TIMEOUT, allow_redirects=True)
+        if _over_budget(run_start) or resp.status_code != 200:
+            return findings
+    except Exception:
+        return findings
+
+    try:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(resp.text, "html.parser")
+    except Exception:
+        return findings
+
+    parsed_base = urlparse(base_url)
+    base_domain = parsed_base.netloc.lower()
+    seen_hosts: set[str] = set()
+
+    for script in soup.find_all("script", src=True):
+        src = script.get("src", "").strip()
+        if not src or src.startswith("data:"):
+            continue
+        full_url = urljoin(base_url, src)
+        script_parsed = urlparse(full_url)
+        script_host = script_parsed.netloc.lower()
+
+        if script_host == base_domain:
+            continue
+
+        has_integrity = bool(script.get("integrity", "").strip())
+
+        if not has_integrity and script_host not in seen_hosts:
+            seen_hosts.add(script_host)
+            findings.append(Finding(
+                title=f"External script without SRI: {script_host}",
+                severity="Medium",
+                url=full_url[:200],
+                category="Supply Chain / SRI",
+                evidence=(
+                    f"<script src=\"{src[:120]}\"> loaded from {script_host} "
+                    f"without integrity attribute. A compromised CDN could inject "
+                    f"malicious code."
+                ),
+                impact=(
+                    "Without Subresource Integrity, a CDN compromise or MITM "
+                    "attack can silently replace the script with malicious code."
+                ),
+                remediation=(
+                    f"Add integrity=\"sha384-...\" and crossorigin=\"anonymous\" "
+                    f"to the <script> tag for {script_host}."
+                ),
+            ))
+
+        for pattern in CDN_TYPOSQUAT_HINTS:
+            if pattern.search(script_host):
+                findings.append(Finding(
+                    title=f"Suspicious CDN domain: {script_host}",
+                    severity="High",
+                    url=full_url[:200],
+                    category="Supply Chain / CDN Trust",
+                    evidence=(
+                        f"Script loaded from {script_host} which resembles a "
+                        f"typosquatted CDN domain. Full src: {src[:150]}"
+                    ),
+                    impact=(
+                        "Typosquatted CDN domains are a common supply chain "
+                        "attack vector used to deliver malicious JavaScript."
+                    ),
+                    remediation=(
+                        f"Verify {script_host} is the correct CDN. "
+                        f"Replace with the legitimate CDN URL and add SRI."
+                    ),
+                ))
+                break
+
+        if script_host not in LEGITIMATE_CDN_HOSTS and \
+           not any(script_host.endswith("." + cdn) for cdn in LEGITIMATE_CDN_HOSTS) and \
+           script_host not in THIRD_PARTY_ALLOWLIST and \
+           not any(script_host.endswith("." + a) for a in THIRD_PARTY_ALLOWLIST) and \
+           script_host not in seen_hosts:
+            seen_hosts.add(script_host + ":unknown")
+            findings.append(Finding(
+                title=f"Script from unrecognized external host: {script_host}",
+                severity="Low",
+                url=full_url[:200],
+                category="Supply Chain / CDN Trust",
+                evidence=(
+                    f"Script loaded from {script_host} which is not in the "
+                    f"known-legitimate CDN list. src: {src[:150]}"
+                ),
+                impact="Unverified script sources increase supply chain risk.",
+                remediation=(
+                    f"Verify {script_host} is trusted, add SRI, or self-host the script."
+                ),
+            ))
+
+    return findings
+
+
 def run(target_url: str, scan_type: str = "full") -> str:
     set_scan_seed(target_url)
     report = ClientSurfaceReport(target_url=target_url)
@@ -514,10 +640,22 @@ def run(target_url: str, scan_type: str = "full") -> str:
             severity="Info",
             url=target_url,
             category="Client-Side Security",
-            evidence=f"Found {len(report.extracted_endpoints)} path-like strings (fetch/axios/literals). Use for targeted API testing. Sample: " + ", ".join(report.extracted_endpoints[:8]),
+            evidence=(
+                f"Found {len(report.extracted_endpoints)} path-like strings "
+                f"(fetch/axios/literals). Use for targeted API testing. "
+                f"Sample: " + ", ".join(report.extracted_endpoints[:8])
+            ),
             impact="Client-known endpoints may not be in server docs; test for auth bypass and parameter abuse.",
             remediation="Ensure API docs and auth coverage match what the frontend actually calls.",
         ))
+
+    if not _over_budget(run_start):
+        sri_findings = _check_sri_and_cdn_trust(target_url, run_start)
+        for f in sri_findings:
+            key = (f.title, f.url)
+            if key not in seen_sink_findings:
+                seen_sink_findings.add(key)
+                report.findings.append(f)
 
     return json.dumps(asdict(report), indent=2)
 

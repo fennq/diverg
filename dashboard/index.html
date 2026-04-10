@@ -339,6 +339,8 @@
           <div class="toggle-pill active" data-scan-tab="findings">Findings</div>
           <div class="toggle-pill" data-scan-tab="overview">Overview</div>
           <div class="toggle-pill" data-scan-tab="attack-paths">Attack Paths</div>
+          <div class="toggle-pill" data-scan-tab="compliance">Compliance</div>
+          <div class="toggle-pill" data-scan-tab="threat-intel">Threat Intel</div>
           <div class="toggle-pill" data-scan-tab="diagnostics">Diagnostics</div>
         </div>
         <div class="scan-tab-panel" id="scanTab-overview">
@@ -450,6 +452,24 @@
                 <div class="mini-stat"><span class="mini-stat-label">Impact Signals</span><span class="mini-stat-value" id="scanPathImpact">0</span></div>
               </div>
               <div class="analytics-list" id="scanGapAnalysis"></div>
+            </div>
+          </div>
+        </div>
+        <div class="scan-tab-panel" id="scanTab-compliance">
+          <div class="card">
+            <div class="card-header"><span class="card-title">Compliance Impact</span></div>
+            <div class="card-body" style="font-size:0.75rem;">
+              <p style="color:var(--text-secondary);margin:0 0 10px 0;">Findings mapped to OWASP Top 10, PCI-DSS, SOC 2, NIST CSF, and ISO 27001 controls.</p>
+              <div id="scanComplianceSummary" class="analytics-list"></div>
+            </div>
+          </div>
+        </div>
+        <div class="scan-tab-panel" id="scanTab-threat-intel">
+          <div class="card">
+            <div class="card-header"><span class="card-title">Threat Intelligence</span></div>
+            <div class="card-body" style="font-size:0.75rem;">
+              <p style="color:var(--text-secondary);margin:0 0 10px 0;">IPs and domains checked against AbuseIPDB, URLhaus, and ThreatFox feeds.</p>
+              <div id="scanThreatIntelSummary" class="analytics-list"></div>
             </div>
           </div>
         </div>

@@ -1031,6 +1031,101 @@ def enrich_findings_with_exploits(findings: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Compliance mapping
+# ---------------------------------------------------------------------------
+
+_COMPLIANCE_MAP_CACHE: dict | None = None
+
+
+def _load_compliance_map() -> dict:
+    global _COMPLIANCE_MAP_CACHE
+    if _COMPLIANCE_MAP_CACHE is not None:
+        return _COMPLIANCE_MAP_CACHE
+    path = CONTENT_DIR / "compliance_map.json"
+    try:
+        with open(path, encoding="utf-8") as f:
+            _COMPLIANCE_MAP_CACHE = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        _COMPLIANCE_MAP_CACHE = {}
+    return _COMPLIANCE_MAP_CACHE
+
+
+def _enrich_finding_compliance(finding: dict) -> None:
+    """Attach compliance tags from compliance_map.json if finding matches."""
+    cmap = _load_compliance_map()
+    if not cmap:
+        return
+    by_id = cmap.get("by_exploit_id", {})
+    by_cat = cmap.get("by_category", {})
+
+    exploit_ref = finding.get("exploit_ref") or {}
+    matched: dict | None = None
+
+    exploit_id = (exploit_ref.get("id") or "").strip()
+    if exploit_id and exploit_id in by_id:
+        matched = by_id[exploit_id]
+    else:
+        for eid, mapping in by_id.items():
+            ename = by_id[eid].get("owasp_top10", "")
+            ref_owasp = exploit_ref.get("owasp", "")
+            if ref_owasp and ename and ref_owasp == ename:
+                matched = mapping
+                break
+
+    if not matched:
+        category = (finding.get("category") or "").strip()
+        if category in by_cat:
+            matched = by_cat[category]
+        else:
+            for cat_key, cat_mapping in by_cat.items():
+                if cat_key.lower() in category.lower():
+                    matched = cat_mapping
+                    break
+
+    if matched:
+        finding["compliance"] = {
+            k: v for k, v in matched.items()
+            if k in ("owasp_top10", "pci_dss", "soc2", "nist_csf", "iso_27001")
+        }
+
+
+def enrich_findings_compliance(findings: list[dict]) -> list[dict]:
+    """Attach compliance tags to all findings."""
+    for f in findings:
+        _enrich_finding_compliance(f)
+    return findings
+
+
+def build_compliance_summary(findings: list[dict]) -> dict:
+    """Build an aggregate compliance summary from enriched findings."""
+    summary: dict[str, dict[str, int]] = {
+        "owasp_top10": {},
+        "pci_dss": {},
+        "soc2": {},
+        "nist_csf": {},
+        "iso_27001": {},
+    }
+    for f in findings:
+        comp = f.get("compliance")
+        if not comp:
+            continue
+        for framework in summary:
+            refs = comp.get(framework)
+            if not refs:
+                continue
+            if isinstance(refs, str):
+                refs = [refs]
+            for ref in refs:
+                summary[framework][ref] = summary[framework].get(ref, 0) + 1
+
+    return {
+        fw: dict(sorted(controls.items(), key=lambda x: -x[1]))
+        for fw, controls in summary.items()
+        if controls
+    }
+
+
+# ---------------------------------------------------------------------------
 # Banner
 # ---------------------------------------------------------------------------
 
@@ -1143,6 +1238,14 @@ def run_skill_variant(
         elif skill_name == "entity_reputation":
             import entity_reputation
             raw = entity_reputation.run(target, scan_type=scan_type, osint_json=ctx.get("osint_json"))
+        elif skill_name == "threat_intel":
+            import threat_intel
+            raw = threat_intel.run(
+                target_url,
+                scan_type=scan_type,
+                recon_json=ctx.get("recon_json"),
+                osint_json=ctx.get("osint_json"),
+            )
         elif skill_name == "chain_validation_abuse":
             import chain_validation_abuse
             raw = chain_validation_abuse.run(
@@ -1456,6 +1559,7 @@ def aggregate_findings(results: dict[str, dict]) -> list[dict]:
     deduped, medium_stats = enforce_medium_consensus_gate(deduped)
     deduped, replay_stats = enforce_replay_gate(deduped)
     enriched = enrich_findings_with_exploits(deduped)
+    enriched = enrich_findings_compliance(enriched)
     try:
         from rag import build_index, enrich_findings_with_citations
 
@@ -2303,7 +2407,7 @@ WEB_SCAN_PHASE1 = [
     "company_exposure", "web_vulns", "auth_test", "api_test", "high_value_flaws",
     "workflow_probe", "race_condition", "payment_financial", "client_surface",
 ]
-WEB_SCAN_PHASE2 = ["dependency_audit", "logic_abuse", "entity_reputation"]
+WEB_SCAN_PHASE2 = ["dependency_audit", "logic_abuse", "entity_reputation", "threat_intel"]
 WEB_SCAN_PROFILE = WEB_SCAN_PHASE1 + WEB_SCAN_PHASE2
 
 # Phase 3 (attack-style probing): targeted scan_type passes for high-signal checks.
@@ -2582,6 +2686,7 @@ def run_web_scan(
         },
         "summary": summary_block,
         "evidence_summary": evidence_summary,
+        "compliance_summary": build_compliance_summary(findings),
         "filtered_out_total": filtered_out_total,
         "filtered_out_breakdown": filtered_out_breakdown,
         "scan_fingerprint": scan_fp,
@@ -2881,6 +2986,7 @@ def run_web_scan_streaming(
         },
         "summary": summary_block,
         "evidence_summary": evidence_summary,
+        "compliance_summary": build_compliance_summary(findings),
         "filtered_out_total": filtered_out_total,
         "filtered_out_breakdown": filtered_out_breakdown,
         "proof_bundle": proof_bundle,

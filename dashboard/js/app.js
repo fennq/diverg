@@ -1367,6 +1367,59 @@ function renderScanAnalytics(report, findings) {
     'No diagnostics'
   );
   renderScanDiff(report || {});
+  renderComplianceSummary(report.compliance_summary || {});
+  renderThreatIntelSummary(findings);
+}
+
+function renderComplianceSummary(compSummary) {
+  const el = document.getElementById('scanComplianceSummary');
+  if (!el) return;
+  const frameworks = Object.entries(compSummary);
+  if (!frameworks.length) {
+    el.innerHTML = '<div class="analytics-empty">No compliance data for this scan</div>';
+    return;
+  }
+  const labels = {
+    owasp_top10: 'OWASP Top 10',
+    pci_dss: 'PCI-DSS',
+    soc2: 'SOC 2',
+    nist_csf: 'NIST CSF',
+    iso_27001: 'ISO 27001',
+  };
+  let html = '';
+  for (const [fw, controls] of frameworks) {
+    const name = labels[fw] || fw;
+    const items = Object.entries(controls)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([ctrl, count]) =>
+        `<div class="analytics-item"><span>${escHtml(ctrl)}</span><span class="analytics-pill">${count}</span></div>`
+      ).join('');
+    html += `<div style="margin-bottom:12px"><div style="font-weight:600;font-size:0.75rem;margin-bottom:4px;color:var(--text-primary)">${escHtml(name)}</div>${items}</div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderThreatIntelSummary(findings) {
+  const el = document.getElementById('scanThreatIntelSummary');
+  if (!el) return;
+  const tiFindings = findings.filter(f => (f.category || '').includes('Threat Intelligence'));
+  if (!tiFindings.length) {
+    el.innerHTML = '<div class="analytics-empty">No threat intelligence findings</div>';
+    return;
+  }
+  const infoOnly = tiFindings.every(f => (f.severity || '').toLowerCase() === 'info');
+  if (infoOnly) {
+    el.innerHTML = '<div class="analytics-empty">No threat intelligence hits — infrastructure appears clean</div>';
+    return;
+  }
+  el.innerHTML = tiFindings
+    .filter(f => (f.severity || '').toLowerCase() !== 'info')
+    .slice(0, 10)
+    .map(f => {
+      const sev = (f.severity || 'medium').toLowerCase();
+      return `<div class="analytics-item analytics-item-stack"><div><span class="badge badge-${sev}">${sev}</span> <strong>${escHtml(f.title || '')}</strong></div><span>${escHtml((f.evidence || '').slice(0, 200))}</span></div>`;
+    }).join('');
 }
 
 // ── Scanner (streaming) ─────────────────────────────────────────────────
