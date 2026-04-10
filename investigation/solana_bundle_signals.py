@@ -82,6 +82,152 @@ def _safe_int(x: Any) -> Optional[int]:
         return None
 
 
+def evaluate_authority_misuse(
+    *,
+    token_program_analysis: Optional[dict[str, Any]],
+    token_supply_ui: float,
+    top_holders: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    """
+    Build conservative authority-misuse heuristics from token authority/extension signals.
+    Returns review-oriented output unless enough corroboration exists for medium confidence.
+    """
+    tpa = token_program_analysis if isinstance(token_program_analysis, dict) else {}
+    authority_signals = tpa.get("authority_signals") if isinstance(tpa.get("authority_signals"), list) else []
+    extensions = tpa.get("extensions") if isinstance(tpa.get("extensions"), list) else []
+    standard = str(tpa.get("token_standard") or "unknown").strip().lower()
+    risk_flags = tpa.get("risk_flags") if isinstance(tpa.get("risk_flags"), list) else []
+
+    top = top_holders if isinstance(top_holders, list) else []
+    try:
+        largest_pct = float(top[0].get("pct_supply") or 0.0) if top else 0.0
+    except (TypeError, ValueError):
+        largest_pct = 0.0
+    holder_n = len(top)
+    circulating = token_supply_ui > 0 and holder_n >= 2
+
+    lines: list[str] = []
+    findings: list[dict[str, Any]] = []
+    matched: list[str] = []
+    score = 0.0
+
+    has = {str(x).strip().lower() for x in authority_signals if isinstance(x, str)}
+    ext_l = [str(x).strip().lower() for x in extensions if isinstance(x, str)]
+
+    if "mint_authority_set" in has and circulating:
+        matched.append("mint_authority_set_with_circulating_supply")
+        score += 2.0
+        lines.append("Mint authority is still set while token supply is circulating across multiple holders.")
+        findings.append(
+            {
+                "kind": "mint_authority_active",
+                "risk_reason": "Mint authority can increase supply post-launch if compromised or misused.",
+                "confidence": "medium",
+                "remediation": "Revoke mint authority or move it to a governed, transparent timelock/multisig.",
+            }
+        )
+
+    if "freeze_authority_set" in has:
+        matched.append("freeze_authority_set")
+        score += 1.5
+        lines.append("Freeze authority is set and can lock token accounts.")
+        findings.append(
+            {
+                "kind": "freeze_authority_present",
+                "risk_reason": "Freeze authority can censor or immobilize holder accounts if abused.",
+                "confidence": "review_required",
+                "remediation": "Document freeze policy and secure freeze authority with strict governance controls.",
+            }
+        )
+
+    if "permanent_delegate_set" in has or any("permanentdelegate" in x or "permanent_delegate" in x for x in ext_l):
+        matched.append("permanent_delegate_extension")
+        score += 2.0
+        lines.append("Permanent delegate capability detected in Token-2022 authority/extension fields.")
+        findings.append(
+            {
+                "kind": "permanent_delegate_capability",
+                "risk_reason": "Permanent delegate may transfer or burn tokens depending on extension configuration.",
+                "confidence": "medium" if standard == "token-2022" else "review_required",
+                "remediation": "Verify delegate address ownership and expected privilege boundaries.",
+            }
+        )
+
+    if any("default_account_state:frozen" in x for x in has) or any(
+        "defaultaccountstate" in x or "default_account_state" in x for x in ext_l
+    ):
+        matched.append("default_account_state_controls")
+        score += 1.0
+        lines.append("Default account state controls are enabled; transferability may be restricted by default.")
+        findings.append(
+            {
+                "kind": "default_account_state_control",
+                "risk_reason": "Default account state can surprise holders when transfers are blocked until explicit thaw/approval.",
+                "confidence": "review_required",
+                "remediation": "Disclose account state behavior and verify issuance/activation workflow.",
+            }
+        )
+
+    if any("closeauthority" in x or "close_authority" in x for x in ext_l) or "close_authority_set" in has:
+        matched.append("close_authority_controls")
+        score += 1.0
+        lines.append("Close authority controls are present for token accounts/mint extensions.")
+        findings.append(
+            {
+                "kind": "close_authority_capability",
+                "risk_reason": "Close authority can terminate accounts and reclaim rent in unexpected flows.",
+                "confidence": "review_required",
+                "remediation": "Limit close authority scope and monitor close operations with alerts.",
+            }
+        )
+
+    if any("transferfee" in x or "transfer_fee" in x for x in ext_l):
+        matched.append("transfer_fee_extension")
+        score += 0.75
+        lines.append("Transfer-fee extension detected; post-launch fee changes can alter token economics.")
+        findings.append(
+            {
+                "kind": "transfer_fee_extension",
+                "risk_reason": "Transfer-fee configuration can be changed by privileged authorities in some setups.",
+                "confidence": "review_required",
+                "remediation": "Publish fee governance policy and cap parameters on-chain where possible.",
+            }
+        )
+
+    if largest_pct >= 50.0 and ("mint_authority_set" in has or "freeze_authority_set" in has):
+        matched.append("authority_plus_concentration")
+        score += 1.25
+        lines.append("Authority controls combined with high holder concentration increase governance and abuse impact.")
+
+    confidence = "low"
+    if score >= 4.0:
+        confidence = "medium"
+    elif score >= 2.0:
+        confidence = "review_required"
+    severity = "low"
+    if score >= 5.0:
+        severity = "high"
+    elif score >= 2.5:
+        severity = "medium"
+
+    return {
+        "confidence": confidence,
+        "severity": severity,
+        "score": round(min(10.0, score), 2),
+        "token_standard": standard,
+        "risk_flags": [str(x) for x in risk_flags[:30]],
+        "matched_signals": matched[:20],
+        "findings": findings[:12],
+        "risk_reason": lines[:8],
+        "holder_context": {
+            "holders_sampled": holder_n,
+            "largest_holder_pct_supply": round(largest_pct, 4),
+            "circulating_supply_detected": circulating,
+        },
+        "remediation": "Treat as governance/authority review items unless corroborated with explicit misuse on-chain.",
+    }
+
+
 def parse_funded_by_row(fb: Optional[dict]) -> dict[str, Any]:
     """Normalize Helius funded-by payload (field names vary)."""
     out: dict[str, Any] = {
@@ -1661,6 +1807,9 @@ def compute_coordination_bundle(
     transfers_cache_preload: Optional[dict[str, Optional[dict]]] = None,
     funder_root_by_wallet: Optional[dict[str, Optional[str]]] = None,
     funder_chain_by_wallet: Optional[dict[str, list[str]]] = None,
+    token_program_analysis: Optional[dict[str, Any]] = None,
+    token_supply_ui: float = 0.0,
+    top_holders: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """
     Run all signals; return structured report + score 0–100.
@@ -2207,6 +2356,12 @@ def compute_coordination_bundle(
 
     tier_export_keys = sorted(sample_addrs | set(funders) | set(root_addrs))
 
+    authority_misuse = evaluate_authority_misuse(
+        token_program_analysis=token_program_analysis,
+        token_supply_ui=float(token_supply_ui or 0.0),
+        top_holders=top_holders,
+    )
+
     return {
         "funding_metadata_by_wallet": meta_by_wallet,
         "funding_time_clusters": time_clusters,
@@ -2228,6 +2383,7 @@ def compute_coordination_bundle(
         "enhanced_tx_type_overlap_pairs": type_overlap[:20],
         "program_overlap_pairs": p_overlap[:20],
         "funding_cluster_bridge_mixer": funding_cluster_bridge_mixer,
+        "authority_misuse": authority_misuse,
         "cex_split_pattern": cex_split_pattern,
         "wash_flow_patterns": wash_flow_patterns,
         "candidate_evidence": candidate_evidence[:120],

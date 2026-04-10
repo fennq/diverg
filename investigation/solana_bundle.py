@@ -43,6 +43,8 @@ from solana_bundle_signals import (
 
 # Base58 Solana address (rough)
 _ADDR_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+_TOKEN_PROGRAM_ID = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+_TOKEN_2022_PROGRAM_ID = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
 _LP_STRONG_MARKERS = (
     "liquidity pool",
     "amm pool",
@@ -54,6 +56,146 @@ _LP_STRONG_MARKERS = (
 )
 _LP_POOL_WORDS = ("pool", "liquidity", "amm", "lp", "vault", "whirlpool", "clmm")
 _LP_DEX_WORDS = ("raydium", "orca", "meteora", "saber", "lifinity", "goosefx", "fluxbeam")
+
+
+def _extract_token2022_security_signals(das_asset: Optional[dict]) -> dict[str, Any]:
+    """
+    Parse DAS asset payload for token program and extension-linked risk indicators.
+
+    Returns a normalized object:
+      {
+        "program_id": str|None,
+        "token_standard": "spl-token"|"token-2022"|"unknown",
+        "extensions": [str, ...],
+        "authority_signals": [str, ...],
+        "risk_flags": [str, ...],
+        "risk_level": "low"|"medium"|"high",
+        "notes": [str, ...],
+      }
+    """
+    out: dict[str, Any] = {
+        "program_id": None,
+        "token_standard": "unknown",
+        "extensions": [],
+        "authority_signals": [],
+        "risk_flags": [],
+        "risk_level": "low",
+        "notes": [],
+    }
+    if not isinstance(das_asset, dict):
+        return out
+
+    token_info = das_asset.get("token_info") if isinstance(das_asset.get("token_info"), dict) else {}
+    mint_extensions = (
+        token_info.get("extensions")
+        if isinstance(token_info.get("extensions"), list)
+        else token_info.get("token_extensions")
+        if isinstance(token_info.get("token_extensions"), list)
+        else []
+    )
+    ext_norm: list[str] = []
+    for ex in mint_extensions[:40]:
+        if isinstance(ex, str) and ex.strip():
+            ext_norm.append(ex.strip()[:80])
+        elif isinstance(ex, dict):
+            name = ex.get("name") or ex.get("extension") or ex.get("type")
+            if isinstance(name, str) and name.strip():
+                ext_norm.append(name.strip()[:80])
+    out["extensions"] = sorted(set(ext_norm))
+
+    ownership = das_asset.get("ownership") if isinstance(das_asset.get("ownership"), dict) else {}
+    authorities = token_info.get("authorities") if isinstance(token_info.get("authorities"), dict) else {}
+    mint_authority = (
+        authorities.get("mint_authority")
+        or token_info.get("mint_authority")
+        or token_info.get("mintAuthority")
+    )
+    freeze_authority = (
+        authorities.get("freeze_authority")
+        or token_info.get("freeze_authority")
+        or token_info.get("freezeAuthority")
+    )
+    close_authority = (
+        authorities.get("close_authority")
+        or token_info.get("close_authority")
+        or token_info.get("closeAuthority")
+    )
+    permanent_delegate = (
+        authorities.get("permanent_delegate")
+        or token_info.get("permanent_delegate")
+        or token_info.get("permanentDelegate")
+    )
+    default_account_state = (
+        token_info.get("default_account_state")
+        or token_info.get("defaultAccountState")
+        or authorities.get("default_account_state")
+    )
+
+    if isinstance(mint_authority, str) and mint_authority:
+        out["authority_signals"].append("mint_authority_set")
+    if isinstance(freeze_authority, str) and freeze_authority:
+        out["authority_signals"].append("freeze_authority_set")
+    if isinstance(close_authority, str) and close_authority:
+        out["authority_signals"].append("close_authority_set")
+    if isinstance(permanent_delegate, str) and permanent_delegate:
+        out["authority_signals"].append("permanent_delegate_set")
+    if isinstance(default_account_state, str) and default_account_state.strip():
+        out["authority_signals"].append(f"default_account_state:{default_account_state.strip().lower()[:24]}")
+
+    interface = str(das_asset.get("interface") or "").strip().lower()
+    prog = (
+        token_info.get("token_program")
+        or token_info.get("program_id")
+        or token_info.get("programId")
+        or ownership.get("owner")
+        or ""
+    )
+    prog_s = str(prog).strip()
+    if prog_s:
+        out["program_id"] = prog_s
+
+    if prog_s == _TOKEN_2022_PROGRAM_ID or "token-2022" in interface or "token_2022" in interface:
+        out["token_standard"] = "token-2022"
+    elif prog_s == _TOKEN_PROGRAM_ID or "fungible" in interface or "token" in interface:
+        out["token_standard"] = "spl-token"
+
+    ext_low = [e.lower() for e in out["extensions"]]
+    risky_ext_markers = (
+        "transferfee",
+        "transfer_fee",
+        "permanentdelegate",
+        "permanent_delegate",
+        "defaultaccountstate",
+        "default_account_state",
+        "metadata_pointer",
+        "group_pointer",
+        "closeauthority",
+        "close_authority",
+    )
+    for m in risky_ext_markers:
+        if any(m in e for e in ext_low):
+            out["risk_flags"].append(f"extension:{m}")
+    for s in out["authority_signals"]:
+        if s in {"mint_authority_set", "freeze_authority_set", "permanent_delegate_set"}:
+            out["risk_flags"].append(f"authority:{s}")
+
+    score = len(out["risk_flags"])
+    if score >= 4:
+        out["risk_level"] = "high"
+    elif score >= 2:
+        out["risk_level"] = "medium"
+    else:
+        out["risk_level"] = "low"
+
+    if out["token_standard"] == "token-2022":
+        out["notes"].append(
+            "Token-2022 extensions can change transfer/authority assumptions; validate extension behavior before trust decisions."
+        )
+    if "mint_authority_set" in out["authority_signals"]:
+        out["notes"].append("Mint authority is still set; additional minting remains possible unless revoked.")
+    if "freeze_authority_set" in out["authority_signals"]:
+        out["notes"].append("Freeze authority is set; holders can be frozen if authority is misused.")
+    return out
 
 
 def _should_fetch_x_intel(include_x_intel: Optional[bool]) -> bool:
@@ -675,11 +817,30 @@ def run_bundle_snapshot(
     seed_pct = supply_pct(float(seed_balance_ui or 0.0)) if sw and seed_balance_ui is not None else None
 
     token_metadata: Optional[dict[str, Any]] = None
+    token_program_analysis: dict[str, Any] = {
+        "program_id": None,
+        "token_standard": "unknown",
+        "extensions": [],
+        "authority_signals": [],
+        "risk_flags": [],
+        "risk_level": "low",
+        "notes": [],
+    }
     try:
         das_asset = helius_das_asset(mint)
         token_metadata = token_metadata_from_das_asset(das_asset)
+        token_program_analysis = _extract_token2022_security_signals(das_asset)
     except Exception:
         token_metadata = None
+        token_program_analysis = {
+            "program_id": None,
+            "token_standard": "unknown",
+            "extensions": [],
+            "authority_signals": [],
+            "risk_flags": [],
+            "risk_level": "low",
+            "notes": [],
+        }
 
     id_targets: set[str] = set(focus_members)
     for w in owners_sorted[:40]:
@@ -809,6 +970,9 @@ def run_bundle_snapshot(
             transfers_cache_preload=transfers_by,
             funder_root_by_wallet=funder_root_by_wallet,
             funder_chain_by_wallet=funder_chain_by_wallet,
+            token_program_analysis=token_program_analysis,
+            token_supply_ui=total_ui,
+            top_holders=holders_out,
         )
     except Exception as e:
         bundle_signals = {
@@ -876,6 +1040,7 @@ def run_bundle_snapshot(
         "ok": True,
         "mint": mint,
         "token_metadata": token_metadata,
+        "token_program_analysis": token_program_analysis,
         "token_supply_ui": total_ui,
         "seed_wallet": sw,
         "seed_balance_ui": round(float(seed_balance_ui), 8) if seed_balance_ui is not None else None,

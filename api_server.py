@@ -2787,11 +2787,33 @@ def _enrich_solana_bundle_payload(raw: dict) -> dict:
     raw["cluster_wallet_count"] = len(raw.get("focus_cluster_wallets") or [])
     reasons = bs.get("coordination_reasons") or []
     raw["risk_signals"] = reasons if isinstance(reasons, list) else []
+    tpa = raw.get("token_program_analysis") if isinstance(raw.get("token_program_analysis"), dict) else {}
+    if tpa:
+        tstd = str(tpa.get("token_standard") or "").strip()
+        rlevel = str(tpa.get("risk_level") or "").strip().lower()
+        if tstd:
+            raw["risk_signals"] = list(raw["risk_signals"]) + [f"token_standard:{tstd}"]
+        if rlevel and rlevel in {"low", "medium", "high"}:
+            raw["risk_signals"] = list(raw["risk_signals"]) + [f"token_program_risk:{rlevel}"]
+        tflags = tpa.get("risk_flags") if isinstance(tpa.get("risk_flags"), list) else []
+        if tflags:
+            raw["risk_signals"] = list(raw["risk_signals"]) + [f"token2022: {str(x)}" for x in tflags[:8]]
     fc = bs.get("funding_cluster_bridge_mixer") or {}
     fc_lines = fc.get("risk_lines") if isinstance(fc, dict) else None
     if isinstance(fc_lines, list) and fc_lines:
         extra = [str(x) for x in fc_lines[:6] if x]
         raw["risk_signals"] = list(raw["risk_signals"]) + [f"bridge_mixer: {x}" for x in extra]
+    am = bs.get("authority_misuse") if isinstance(bs.get("authority_misuse"), dict) else {}
+    if am:
+        am_score = am.get("score")
+        try:
+            am_score_f = float(am_score) if am_score is not None else 0.0
+        except (TypeError, ValueError):
+            am_score_f = 0.0
+        raw["authority_misuse_score"] = round(max(0.0, min(10.0, am_score_f)), 2)
+        am_matched = am.get("matched_signals") if isinstance(am.get("matched_signals"), list) else []
+        if am_matched:
+            raw["risk_signals"] = list(raw["risk_signals"]) + [f"authority: {str(x)}" for x in am_matched[:6]]
     if coord_f >= 70 or (coord_f >= 45 and cp >= 20):
         verdict = "High risk"
     elif coord_f >= 40 or (coord_f >= 25 and cp >= 12):
@@ -2804,9 +2826,17 @@ def _enrich_solana_bundle_payload(raw: dict) -> dict:
         f"{verdict}: {raw['risk_score']}/100 funding overlap across {cw} cluster wallet{'s' if cw != 1 else ''} "
         f"holding {cp:.2f}% of sampled supply."
     )
+    if isinstance(am, dict):
+        sev = str(am.get("severity") or "").strip().lower()
+        if sev in {"medium", "high"}:
+            raw["risk_summary"] += " Authority control risks detected; manual governance review recommended."
     ccb = raw.get("cross_chain_bundle")
     if isinstance(ccb, dict) and ccb.get("combined_escalation"):
         raw["risk_summary"] += " Cross-chain bridge and mixer funding signals detected."
+    raw["solana_depth_signals"] = {
+        "token_program_analysis": tpa if isinstance(tpa, dict) else {},
+        "authority_misuse": am if isinstance(am, dict) else {},
+    }
     return raw
 
 

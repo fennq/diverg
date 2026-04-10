@@ -47,7 +47,8 @@ def test_allowlisted_cdn_suppressed() -> None:
     ethereum.request({ method: 'eth_sendTransaction' });
     """
     out = wds.analyze_wallet_abuse_js(content, js_url, base, deep=False)
-    assert out == []
+    assert len(out) == 1
+    assert "BLIND SPOT" in out[0].title
 
 
 def test_wallet_vendor_host_suppressed() -> None:
@@ -59,7 +60,9 @@ def test_wallet_vendor_host_suppressed() -> None:
     token.approve(attacker, amount);
     eth_sendTransaction({});
     """
-    assert wds.analyze_wallet_abuse_js(content, js_url, base, deep=False) == []
+    out = wds.analyze_wallet_abuse_js(content, js_url, base, deep=False)
+    assert len(out) == 1
+    assert "BLIND SPOT" in out[0].title
 
 
 def test_subdomain_mismatch_is_third_party() -> None:
@@ -83,3 +86,32 @@ def test_third_party_obfuscation_only_in_deep_scan() -> None:
     assert not any("eval/Function" in f.title for f in shallow)
     deep = wds.analyze_wallet_abuse_js(content, js_url, base, deep=True)
     assert any("eval/Function" in f.title for f in deep)
+
+
+def test_correlated_cluster_emitted_on_multi_signal_third_party() -> None:
+    import wallet_drainer_signals as wds
+
+    base = "https://example.com"
+    js_url = "https://evil.example/drainer.js"
+    content = """
+    Object.defineProperty(window, 'ethereum', { value: {} });
+    token.approve(attacker, amount);
+    ethereum.request({ method: 'eth_sendTransaction' });
+    """
+    out = wds.analyze_wallet_abuse_js(content, js_url, base, deep=False)
+    corr = [f for f in out if "Correlated third-party wallet-drainer signal cluster" in f.title]
+    assert corr, "expected correlated drainer signal finding"
+    assert any("correlation_score=" in f.evidence and "matched_signals=" in f.evidence for f in out)
+
+
+def test_allowlist_blind_spot_finding_includes_diagnostics() -> None:
+    import wallet_drainer_signals as wds
+
+    base = "https://example.com"
+    js_url = "https://cdn.jsdelivr.net/npm/suspicious-pkg/index.js"
+    content = """
+    token.approve(attacker, amount);
+    ethereum.request({ method: 'eth_sendTransaction' });
+    """
+    out = wds.analyze_wallet_abuse_js(content, js_url, base, deep=True)
+    assert any("BLIND SPOT" in f.title for f in out)

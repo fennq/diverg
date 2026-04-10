@@ -823,6 +823,31 @@ function renderTokenBundleSuccess(mint, data, opts) {
   const crossNote = cross
     ? '<p class="token-bundle-note">Cross-chain bridge and mixer funding signals detected across linked tokens.</p>'
     : '';
+  const tpa = (data.token_program_analysis && typeof data.token_program_analysis === 'object')
+    ? data.token_program_analysis
+    : {};
+  const am = (data.bundle_signals && data.bundle_signals.authority_misuse && typeof data.bundle_signals.authority_misuse === 'object')
+    ? data.bundle_signals.authority_misuse
+    : {};
+  const tStd = String(tpa.token_standard || 'unknown');
+  const tRisk = String(tpa.risk_level || 'low');
+  const tExt = Array.isArray(tpa.extensions) ? tpa.extensions : [];
+  const amScore = Number(am.score || 0);
+  const amSig = Array.isArray(am.matched_signals) ? am.matched_signals : [];
+  const solanaDepthBlock = `
+    <details class="token-wallet-section">
+      <summary class="token-bundle-h4">Solana protocol-depth signals</summary>
+      <div class="token-bundle-summary" style="margin-top:8px;">
+        <span class="token-bundle-summary-label">Token standard</span>
+        <p>${escHtml(tStd)} · program-risk ${escHtml(tRisk)}</p>
+      </div>
+      <div class="token-bundle-summary" style="margin-top:8px;">
+        <span class="token-bundle-summary-label">Authority misuse</span>
+        <p>score ${Number.isFinite(amScore) ? amScore.toFixed(2) : '0.00'} / 10 · signals ${escHtml(String(amSig.length))}</p>
+      </div>
+      ${tExt.length ? `<div class="token-bundle-summary" style="margin-top:8px;"><span class="token-bundle-summary-label">Token-2022 extensions</span><p>${escHtml(tExt.slice(0, 8).join(', '))}</p></div>` : ''}
+    </details>
+  `;
 
   const wlTvl = o.watchlistTvlUsd;
   const watchlistTvlNote = (wlTvl != null && !Number.isNaN(Number(wlTvl)))
@@ -888,6 +913,7 @@ function renderTokenBundleSuccess(mint, data, opts) {
       </div>
       ${summary ? `<div class="token-bundle-summary"><span class="token-bundle-summary-label">Summary</span><p>${escHtml(summary)}</p></div>` : ''}
       ${signals.length ? `<div class="token-signals-section"><h4 class="token-bundle-h4">What drove the score</h4><div class="token-signal-grid">${signalBlocks}</div></div>` : ''}
+      ${solanaDepthBlock}
       ${holdersRows ? `<details class="token-wallet-section"><summary class="token-bundle-h4">Top holders (${holders.length})</summary><div class="token-wallet-table"><table><thead><tr><th class="col-num">#</th><th>Address</th><th>Balance</th><th>% Supply</th><th>Funder</th><th></th></tr></thead><tbody>${holdersRows}</tbody></table></div></details>` : ''}
       ${clusterRows ? `<details class="token-wallet-section"><summary class="token-bundle-h4">Cluster wallets (${clusterWallets.length})</summary><div class="token-wallet-table"><table><thead><tr><th>Address</th><th>Balance</th><th>% Supply</th><th>Funder</th></tr></thead><tbody>${clusterRows}</tbody></table></div></details>` : ''}
       ${crossNote}

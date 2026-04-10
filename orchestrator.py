@@ -439,6 +439,9 @@ _PROOF_CLASS_CONTRACTS: dict[str, list[str]] = {
     "ssrf": ["url", "request"],
     "traversal": ["../", "response"],
     "cmdi": ["payload", "delay"],
+    "solana_authority": ["authority", "holder", "supply"],
+    "solana_token2022": ["token-2022", "extension", "authority"],
+    "wallet_abuse_corr": ["correlation", "matched_signals", "score"],
 }
 
 
@@ -473,6 +476,12 @@ def _infer_proof_class(f: dict) -> str:
         return "traversal"
     if "command injection" in hay or "cmdi" in hay:
         return "cmdi"
+    if "token-2022" in hay or "token2022" in hay:
+        return "solana_token2022"
+    if "authority misuse" in hay or "mint authority" in hay or "freeze authority" in hay:
+        return "solana_authority"
+    if "wallet-drainer signal cluster" in hay or "wallet abuse" in hay:
+        return "wallet_abuse_corr"
     return ""
 
 

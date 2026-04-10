@@ -689,6 +689,24 @@
           parts.push(`<p class="sol-disclaimer-mini">${escapeHtml(hint)}</p>`);
         });
       }
+      const am = bs.authority_misuse && typeof bs.authority_misuse === 'object' ? bs.authority_misuse : null;
+      if (am) {
+        const amScore = Number(am.score || 0);
+        const amSev = String(am.severity || 'low');
+        const amSig = Array.isArray(am.matched_signals) ? am.matched_signals : [];
+        parts.push(
+          `<div class="sol-card-mini"><div class="sol-k-mini">Authority misuse</div><div class="sol-v-mini">${escapeHtml(amScore.toFixed(2))}/10 · ${escapeHtml(amSev)} · ${escapeHtml(String(amSig.length))} signals</div></div>`
+        );
+      }
+    }
+    if (data.token_program_analysis && typeof data.token_program_analysis === 'object') {
+      const tpa = data.token_program_analysis;
+      const tStd = String(tpa.token_standard || 'unknown');
+      const tRisk = String(tpa.risk_level || 'low');
+      const exts = Array.isArray(tpa.extensions) ? tpa.extensions : [];
+      parts.push(
+        `<div class="sol-card-mini"><div class="sol-k-mini">Token program</div><div class="sol-v-mini">${escapeHtml(tStd)} · ${escapeHtml(tRisk)}</div>${exts.length ? `<div class="sol-v-mini" style="font-size:11px">${escapeHtml(exts.slice(0, 6).join(', '))}</div>` : ''}</div>`
+      );
     }
     const cr = data.crime_report;
     if (cr && typeof cr === 'object') {

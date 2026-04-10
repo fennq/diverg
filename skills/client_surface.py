@@ -128,6 +128,29 @@ VERSION_PATTERNS = [
 ]
 
 
+def _extract_corr_from_evidence(evidence: str) -> dict | None:
+    if not isinstance(evidence, str) or not evidence:
+        return None
+    m_score = re.search(r"correlation_score=([0-9]+(?:\.[0-9]+)?)", evidence)
+    m_sig = re.search(r"matched_signals=\[([^\]]*)\]", evidence)
+    m_reason = re.search(r"reason=([a-zA-Z0-9_ \-]+)", evidence)
+    if not m_score and not m_sig and not m_reason:
+        return None
+    out: dict[str, object] = {}
+    if m_score:
+        try:
+            out["score"] = float(m_score.group(1))
+        except (TypeError, ValueError):
+            pass
+    if m_sig:
+        raw = m_sig.group(1)
+        sigs = [s.strip().strip("'\"") for s in raw.split(",") if s.strip()]
+        out["matched_signals"] = sigs[:12]
+    if m_reason:
+        out["reason"] = m_reason.group(1).strip()[:120]
+    return out if out else None
+
+
 @dataclass
 class Finding:
     title: str
@@ -628,6 +651,9 @@ def run(target_url: str, scan_type: str = "full") -> str:
                 report.findings.append(f)
         if not _over_budget(run_start):
             for f in analyze_wallet_abuse_js(content_stripped, js_url, base, deep=deep):
+                corr = _extract_corr_from_evidence(f.evidence)
+                if corr:
+                    f.evidence = f"{f.evidence}\nCorrelation context: {json.dumps(corr, ensure_ascii=True)}"
                 key = (f.title, js_url)
                 if key not in seen_sink_findings:
                     seen_sink_findings.add(key)

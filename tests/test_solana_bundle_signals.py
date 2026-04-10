@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -216,9 +217,9 @@ class TestRecallAndMeaningOutputs(unittest.TestCase):
         def _enhanced(addr: str, limit: int = 25, token_accounts: str = "balanceChanged", type_filter=None):
             return [{"slot": 1, "tokenTransfers": [], "nativeTransfers": []}]
 
-        with unittest.mock.patch("solana_bundle_signals.helius_transfers", return_value=transfer_payload), \
-            unittest.mock.patch("solana_bundle_signals.helius_wallet_identity", return_value=identity_none), \
-            unittest.mock.patch("solana_bundle_signals.helius_enhanced_transactions", side_effect=_enhanced):
+        with patch("solana_bundle_signals.helius_transfers", return_value=transfer_payload), \
+            patch("solana_bundle_signals.helius_wallet_identity", return_value=identity_none), \
+            patch("solana_bundle_signals.helius_enhanced_transactions", side_effect=_enhanced):
             out = sbs.compute_coordination_bundle(
                 lookup_wallets=[addr1, addr2],
                 funded_by=funded_by,
@@ -239,6 +240,29 @@ class TestRecallAndMeaningOutputs(unittest.TestCase):
         self.assertIn("observed_signals", cm)
         self.assertIn("corroborated_signals", cm)
         self.assertIn("high_confidence_signals", cm)
+
+    def test_authority_misuse_token2022_detects_core_controls(self) -> None:
+        out = sbs.evaluate_authority_misuse(
+            token_program_analysis={
+                "token_standard": "token-2022",
+                "authority_signals": [
+                    "mint_authority_set",
+                    "freeze_authority_set",
+                    "permanent_delegate_set",
+                ],
+                "extensions": ["TransferFeeConfig", "PermanentDelegate", "DefaultAccountState"],
+                "risk_flags": ["authority:mint_authority_set"],
+            },
+            token_supply_ui=1_000_000.0,
+            top_holders=[
+                {"wallet": "A", "pct_supply": 66.0},
+                {"wallet": "B", "pct_supply": 10.0},
+            ],
+        )
+        self.assertEqual(out.get("token_standard"), "token-2022")
+        self.assertIn("mint_authority_set_with_circulating_supply", out.get("matched_signals") or [])
+        self.assertIn(out.get("severity"), ("medium", "high"))
+        self.assertTrue(out.get("findings"))
 
 
 if __name__ == "__main__":

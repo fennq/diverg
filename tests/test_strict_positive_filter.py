@@ -157,3 +157,23 @@ def test_medium_consensus_gate_downgrades_unstable_medium() -> None:
     assert stats["medium_downgraded"] == 1
     assert str(gated[0].get("finding_confidence") or "").lower() == "possible"
     assert gated[0].get("verified") is False
+
+
+def test_wallet_abuse_correlation_requires_contract_tokens() -> None:
+    good = {
+        "title": "Correlated third-party wallet-drainer signal cluster",
+        "category": "Web3 / Wallet Abuse (Heuristic)",
+        "finding_type": "vulnerability",
+        "severity": "high",
+        "verified": True,
+        "confidence": "high",
+        "evidence": "correlation score=7 matched_signals=[approval_api] score",
+        "proof": "matched_signals and score confirm correlation",
+    }
+    bad = dict(good)
+    bad["evidence"] = "correlation score observed without required matched signal details"
+    bad["proof"] = "insufficient details"
+    kept, dropped, breakdown = orchestrator.filter_strict_positive_findings([good, bad])
+    assert len(kept) == 1
+    assert dropped == 1
+    assert breakdown.get("proof_contract_failed", 0) >= 1

@@ -8,7 +8,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "investigation"))
 
-from solana_bundle import holder_supply_cluster_key  # noqa: E402
+from solana_bundle import _extract_token2022_security_signals, holder_supply_cluster_key  # noqa: E402
 
 
 H1 = "7DhqsvN4t9wP1uU7v7e7V5xv1qVv9v7v7v7v7v7v7v7"  # 43-char placeholder
@@ -38,6 +38,22 @@ class TestHolderSupplyClusterKey(unittest.TestCase):
     def test_invalid_direct_address_falls_back_singleton(self) -> None:
         chain = [H1, ROOT_CEX, "X"]
         self.assertEqual(holder_supply_cluster_key(H1, chain), f"singleton:{H1}")
+
+    def test_extract_token2022_security_signals_parses_extensions_and_authorities(self) -> None:
+        asset = {
+            "interface": "FungibleToken",
+            "ownership": {"owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"},
+            "token_info": {
+                "extensions": ["TransferFeeConfig", "PermanentDelegate", "MetadataPointer"],
+                "mint_authority": "Auth111111111111111111111111111111111111111",
+                "freeze_authority": "Auth222222222222222222222222222222222222222",
+            },
+        }
+        out = _extract_token2022_security_signals(asset)
+        self.assertEqual(out.get("token_standard"), "token-2022")
+        self.assertIn(out.get("risk_level"), {"medium", "high"})
+        self.assertIn("mint_authority_set", out.get("authority_signals") or [])
+        self.assertTrue(any("extension:transferfee" in x for x in (out.get("risk_flags") or [])))
 
 
 if __name__ == "__main__":
