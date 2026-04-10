@@ -1285,6 +1285,21 @@ function renderScanAnalytics(report, findings) {
   document.getElementById('scanSummaryFiltered').textContent = String(filteredTotal);
   document.getElementById('scanSummaryFilteredNote').textContent = `Diagnostics: ${diagnostics.length} · Safe: ${report.safe_to_run ? 'yes' : 'no'}`;
   document.getElementById('scanSummaryDiagnostics').textContent = String(diagnostics.length);
+  const complianceSummary = report.compliance_summary || {};
+  const complianceFrameworks = Object.keys(complianceSummary);
+  const complianceControls = complianceFrameworks.reduce((acc, fw) => {
+    const controls = complianceSummary[fw] || {};
+    return acc + Object.keys(controls).length;
+  }, 0);
+  document.getElementById('scanSummaryComplianceImpacted').textContent = String(complianceControls);
+  document.getElementById('scanSummaryComplianceNote').textContent = `${complianceFrameworks.length} frameworks impacted`;
+  const tiHits = findings.filter((f) => {
+    const cat = String(f.category || '');
+    const sev = String(f.severity || '').toLowerCase();
+    return cat.includes('Threat Intelligence') && sev !== 'info';
+  }).length;
+  document.getElementById('scanSummaryThreatHits').textContent = String(tiHits);
+  document.getElementById('scanSummaryThreatNote').textContent = tiHits ? 'Known-bad indicators detected' : 'No known-bad indicators';
 
   document.getElementById('scanEvidenceStrict').textContent = String(findings.length);
   document.getElementById('scanEvidenceFiltered').textContent = String(filteredTotal);
@@ -1369,6 +1384,60 @@ function renderScanAnalytics(report, findings) {
   renderScanDiff(report || {});
   renderComplianceSummary(report.compliance_summary || {});
   renderThreatIntelSummary(findings);
+}
+
+function exportComplianceCsv() {
+  const report = (lastScanReport && typeof lastScanReport === 'object') ? lastScanReport : {};
+  const summary = report.compliance_summary || {};
+  const rows = [['framework', 'control', 'findings_count']];
+  Object.entries(summary).forEach(([framework, controls]) => {
+    Object.entries(controls || {}).forEach(([control, count]) => {
+      rows.push([framework, control, String(count)]);
+    });
+  });
+  if (rows.length === 1) {
+    alert('No compliance data to export.');
+    return;
+  }
+  const csv = rows
+    .map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  a.href = href;
+  a.download = `diverg_compliance_${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(href);
+}
+
+function exportThreatIntelJson() {
+  const findings = Array.isArray(currentScanFindings) ? currentScanFindings : [];
+  const tiFindings = findings.filter((f) => String(f.category || '').includes('Threat Intelligence'));
+  if (!tiFindings.length) {
+    alert('No threat intel findings to export.');
+    return;
+  }
+  const payload = {
+    exported_at: new Date().toISOString(),
+    target: lastScanTarget || '',
+    scope: lastScanScope || 'full',
+    count: tiFindings.length,
+    findings: tiFindings,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  a.href = href;
+  a.download = `diverg_threat_intel_${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(href);
 }
 
 function renderComplianceSummary(compSummary) {

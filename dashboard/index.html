@@ -334,6 +334,8 @@
           <div class="stat-card"><div class="stat-value" id="scanSummaryPaths">0</div><div class="stat-label">Attack Paths</div><div class="stat-meta" id="scanSummaryRoles">0 role signals</div></div>
           <div class="stat-card"><div class="stat-value" id="scanSummarySkills">0</div><div class="stat-label">Skills Run</div><div class="stat-meta" id="scanSummaryDuration">0s runtime</div></div>
           <div class="stat-card"><div class="stat-value" id="scanSummaryFiltered">0</div><div class="stat-label">Filtered Signals</div><div class="stat-meta" id="scanSummaryFilteredNote">Strict mode active</div></div>
+          <div class="stat-card"><div class="stat-value" id="scanSummaryComplianceImpacted">0</div><div class="stat-label">Compliance Controls</div><div class="stat-meta" id="scanSummaryComplianceNote">0 frameworks impacted</div></div>
+          <div class="stat-card"><div class="stat-value" id="scanSummaryThreatHits">0</div><div class="stat-label">Threat Intel Hits</div><div class="stat-meta" id="scanSummaryThreatNote">Known-bad indicators</div></div>
         </div>
         <div class="toggle-pills" id="scanResultsTabs" style="margin-bottom:14px;">
           <div class="toggle-pill active" data-scan-tab="findings">Findings</div>
@@ -457,7 +459,7 @@
         </div>
         <div class="scan-tab-panel" id="scanTab-compliance">
           <div class="card">
-            <div class="card-header"><span class="card-title">Compliance Impact</span></div>
+            <div class="card-header"><span class="card-title">Compliance Impact</span><button class="btn btn-ghost btn-sm" onclick="exportComplianceCsv()">Export CSV</button></div>
             <div class="card-body" style="font-size:0.75rem;">
               <p style="color:var(--text-secondary);margin:0 0 10px 0;">Findings mapped to OWASP Top 10, PCI-DSS, SOC 2, NIST CSF, and ISO 27001 controls.</p>
               <div id="scanComplianceSummary" class="analytics-list"></div>
@@ -466,7 +468,7 @@
         </div>
         <div class="scan-tab-panel" id="scanTab-threat-intel">
           <div class="card">
-            <div class="card-header"><span class="card-title">Threat Intelligence</span></div>
+            <div class="card-header"><span class="card-title">Threat Intelligence</span><button class="btn btn-ghost btn-sm" onclick="exportThreatIntelJson()">Export JSON</button></div>
             <div class="card-body" style="font-size:0.75rem;">
               <p style="color:var(--text-secondary);margin:0 0 10px 0;">IPs and domains checked against AbuseIPDB, URLhaus, and ThreatFox feeds.</p>
               <div id="scanThreatIntelSummary" class="analytics-list"></div>

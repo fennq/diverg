@@ -605,6 +605,10 @@ def _strict_filter_reason(f: dict) -> str | None:
         return "manual_verification_only"
     if finding_type in _NON_VULN_FINDING_TYPES:
         return "non_vulnerability_type"
+    # Zero-FP hardening: vulnerability findings must be explicitly verified.
+    # This intentionally sacrifices recall to avoid surfacing weak signals.
+    if finding_type == "vulnerability" and not verified:
+        return "vulnerability_requires_verified"
     if status == "pass":
         return "pass_status"
     if severity in {"info", "low"} and not verified:

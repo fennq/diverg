@@ -22,6 +22,7 @@ def _mk(
     finding_type: str = "vulnerability",
     finding_confidence: str | None = "confirmed",
     status: str | None = None,
+    verified: bool | None = None,
 ) -> dict:
     row = {
         "title": title,
@@ -38,6 +39,8 @@ def _mk(
         row["finding_confidence"] = finding_confidence
     if status:
         row["status"] = status
+    if verified is not None:
+        row["verified"] = verified
     return row
 
 
@@ -46,7 +49,7 @@ def test_strict_filter_excludes_heuristic_and_pass_rows() -> None:
         [
             _mk("Blind SQL Injection [LIKELY]", finding_confidence="likely", evidence="[Needs manual verification] suspect"),
             _mk("HTTP header: Strict-Transport-Security — pass", finding_type="positive", status="pass"),
-            _mk("Validated SQL injection", finding_confidence="confirmed"),
+            _mk("Validated SQL injection", finding_confidence="confirmed", verified=True),
         ]
     )
     kept, dropped, breakdown = orchestrator.filter_strict_positive_findings(normalized)
@@ -59,8 +62,8 @@ def test_strict_filter_excludes_heuristic_and_pass_rows() -> None:
 def test_strict_filter_requires_real_proof_text() -> None:
     normalized = orchestrator.finalize_api_findings(
         [
-            _mk("Confirmed finding without proof", evidence="See source output.", finding_confidence="confirmed"),
-            _mk("Confirmed finding with proof", evidence="POST request returned 500 with stack trace and payload echo.", finding_confidence="confirmed"),
+            _mk("Confirmed finding without proof", evidence="See source output.", finding_confidence="confirmed", verified=True),
+            _mk("Confirmed finding with proof", evidence="POST request returned 500 with stack trace and payload echo.", finding_confidence="confirmed", verified=True),
         ]
     )
     kept, dropped, breakdown = orchestrator.filter_strict_positive_findings(normalized)
@@ -72,9 +75,9 @@ def test_strict_filter_requires_real_proof_text() -> None:
 def test_strict_filter_repeatability_same_input_same_output() -> None:
     sample = orchestrator.finalize_api_findings(
         [
-            _mk("Confirmed A", finding_confidence="confirmed"),
+            _mk("Confirmed A", finding_confidence="confirmed", verified=True),
             _mk("Possible B [POSSIBLE]", finding_confidence="possible", evidence="[Needs manual verification] check"),
-            _mk("Confirmed C", finding_confidence="confirmed"),
+            _mk("Confirmed C", finding_confidence="confirmed", verified=True),
         ]
     )
     kept_1, dropped_1, breakdown_1 = orchestrator.filter_strict_positive_findings(sample)
@@ -109,8 +112,8 @@ def test_strict_filter_enforces_replay_gate_for_high_critical() -> None:
 def test_fp_memory_suppression_filters_matching_findings() -> None:
     findings = orchestrator.finalize_api_findings(
         [
-            _mk("Known noisy title", category="Business Logic / Concurrency", finding_confidence="confirmed"),
-            _mk("Real confirmed issue", category="Injection", finding_confidence="confirmed"),
+            _mk("Known noisy title", category="Business Logic / Concurrency", finding_confidence="confirmed", verified=True),
+            _mk("Real confirmed issue", category="Injection", finding_confidence="confirmed", verified=True),
         ]
     )
     for f in findings:
