@@ -43,6 +43,36 @@ Copy this template for each new day:
 
 ---
 
+## 2026-04-10
+
+### Highlights
+- Shipped Solana protocol-depth analysis with Token-2022 extension risk extraction and authority misuse heuristics in bundle investigations.
+- Added correlated wallet-drainer signal scoring to reduce single-pattern noise while preserving explicit allowlist blind-spot visibility.
+- Extended strict evidence gates and proof contracts for new Solana and wallet-abuse categories, then validated via full regression tests.
+
+### Product & UX
+- Token bundle results now include concise Solana depth panels for token program standard, extension indicators, and authority misuse score/signals.
+- Dashboard token investigation view now surfaces protocol-depth rationale without overwhelming the existing holder/funder workflow.
+- Extension popup now displays Token-2022/program risk context and authority misuse summary alongside coordination output.
+
+### Platform & API
+- `investigation/solana_bundle.py` now parses DAS token program/extension authority indicators and emits normalized `token_program_analysis`.
+- `investigation/solana_bundle_signals.py` now computes authority misuse findings (`risk_reason`, `confidence`, remediation, holder context) and exposes them in `bundle_signals`.
+- `skills/wallet_drainer_signals.py` now applies multi-signal correlation (approval + signing + hijack + obfuscation + origin context) and emits correlated cluster diagnostics.
+- `skills/client_surface.py` now attaches wallet-drainer correlation context fields (`matched_signals`, `score`, `reason`) into finding evidence.
+- `orchestrator.py` strict proof contracts now include Solana authority/Token-2022 and wallet-abuse correlation classes to keep evidence requirements explicit.
+- `api_server.py` Solana bundle enrichment now exposes top-level depth signals (`token_program_analysis`, `authority_misuse_score`, `solana_depth_signals`) for dashboard/extension parity.
+
+### Validation
+- Targeted suites passed for Solana depth and strict-gate changes (`44 passed`).
+- Full regression suite passed: `python3 -m pytest tests/ -q` (`166 passed`, `6 skipped`).
+- Lint diagnostics check reported no new issues on edited files.
+
+### Notes
+- Wallet-drainer detection remains heuristic; medium/high correlated severity now requires multi-signal corroboration for third-party scripts.
+- Allowlisted third-party wallet hosts still suppress direct drainer alerts by design, but now emit explicit blind-spot diagnostics for analyst awareness.
+- This entry excludes social/article publication assets and focuses on product/platform/tested shipping work.
+
 ## 2026-04-09
 
 ### Highlights
