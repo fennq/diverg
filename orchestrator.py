@@ -2685,6 +2685,7 @@ def run_web_scan(
 
     return {
         "target_url": target_url,
+        "scan_scope": scope,
         "findings": findings,
         "scan_diagnostics": scan_diagnostics,
         "company_surfaces": company_surfaces,
@@ -2985,6 +2986,7 @@ def run_web_scan_streaming(
     )
     report = {
         "target_url": target_url,
+        "scan_scope": scope,
         "findings": findings,
         "scan_diagnostics": scan_diagnostics,
         "company_surfaces": company_surfaces,

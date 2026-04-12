@@ -848,33 +848,144 @@ def _normalize_target_for_diff(target_url: str) -> str:
     return raw
 
 
-def _latest_previous_report_for_target(user_id: str, target_url: str) -> dict:
+def _normalize_scan_scope_for_diff(scope: str | None) -> str:
+    """Normalize scope for diff baseline matching (must stay aligned with VALID_SCOPES)."""
+    s = (scope or "full").strip().lower()
+    allowed = {"full", "quick", "crypto", "recon", "web", "api", "passive", "attack"}
+    return s if s in allowed else "full"
+
+
+def _build_scan_diff_verification_summary(
+    diff: dict,
+    *,
+    has_baseline: bool,
+    baseline_meta: dict,
+) -> dict:
+    """Human-facing copy and strict-count labels for fix-verification UX."""
+    meta = baseline_meta if isinstance(baseline_meta, dict) else {}
+    scope_match = bool(meta.get("baseline_scope_match"))
+    base_scope = str(meta.get("baseline_scope") or "")
+    cur_scope = str(meta.get("current_scope") or "")
+
+    if not has_baseline:
+        return {
+            "strict_baseline_total": 0,
+            "strict_current_total": int(diff.get("current_total") or 0),
+            "verified_fixed_count": 0,
+            "baseline_scope_match": False,
+            "baseline_scope": None,
+            "current_scope": cur_scope or None,
+            "one_line": (
+                "No prior scan on this URL with the same profile yet — this run establishes your baseline. "
+                "Run again after fixes to see cleared vs new strict findings."
+            ),
+        }
+
+    n_new = int(diff.get("new_count") or 0)
+    n_fixed = int(diff.get("fixed_count") or 0)
+    n_reg = int(diff.get("regressed_count") or 0)
+    n_imp = int(diff.get("improved_count") or 0)
+    fixed_rows = diff.get("fixed_findings") if isinstance(diff.get("fixed_findings"), list) else []
+    verified_fixed = sum(1 for f in fixed_rows if isinstance(f, dict) and bool(f.get("verified")))
+
+    parts: list[str] = []
+    if n_fixed:
+        parts.append(f"{n_fixed} strict finding(s) no longer present")
+    if n_new:
+        parts.append(f"{n_new} new")
+    if n_imp:
+        parts.append(f"{n_imp} improved")
+    if n_reg:
+        parts.append(f"{n_reg} regressed")
+    if not parts:
+        parts.append("No strict finding count changes vs baseline")
+
+    one_line = "; ".join(parts) + " (vs prior run)."
+    if not scope_match and base_scope and cur_scope:
+        one_line += f" Note: baseline used profile “{base_scope}”; this run is “{cur_scope}”."
+
+    return {
+        "strict_baseline_total": int(diff.get("baseline_total") or 0),
+        "strict_current_total": int(diff.get("current_total") or 0),
+        "verified_fixed_count": verified_fixed,
+        "baseline_scope_match": scope_match,
+        "baseline_scope": base_scope or None,
+        "current_scope": cur_scope or None,
+        "one_line": one_line,
+    }
+
+
+def _latest_previous_report_for_target(
+    user_id: str, target_url: str, scope: str | None = None,
+) -> tuple[dict, dict]:
+    """
+    Return (previous_report, baseline_meta).
+
+    Prefers the most recent prior scan with the same normalized URL and same scope.
+    If none, falls back to the most recent prior scan on the same URL (any scope) and
+    sets baseline_scope_match False in meta.
+    """
     target_norm = _normalize_target_for_diff(target_url)
+    scope_n = _normalize_scan_scope_for_diff(scope)
+    empty_meta: dict = {"baseline_scope_match": False, "baseline_scope": "", "current_scope": scope_n}
     if not user_id or not target_norm:
-        return {}
+        return {}, empty_meta
     with _db() as conn:
         rows = conn.execute(
-            """SELECT report_json, target_url
+            """SELECT report_json, target_url, scope
                FROM scans
                WHERE user_id = ?
                ORDER BY created_at DESC
-               LIMIT 40""",
+               LIMIT 80""",
             (user_id,),
         ).fetchall()
     if not rows:
-        return {}
+        return {}, empty_meta
+
+    same_scope_report: dict | None = None
+    fallback_report: dict | None = None
+    fallback_scope: str = ""
+
     for row in rows:
-        if _normalize_target_for_diff(str(row["target_url"] or "")) == target_norm:
-            return _safe_report_json(row["report_json"])
-    return {}
+        tu = _normalize_target_for_diff(str(row["target_url"] or ""))
+        if tu != target_norm:
+            continue
+        rep = _safe_report_json(row["report_json"])
+        if not rep:
+            continue
+        row_scope = _normalize_scan_scope_for_diff(str(row["scope"] or "full"))
+        if fallback_report is None:
+            fallback_report = rep
+            fallback_scope = row_scope
+        if same_scope_report is None and row_scope == scope_n:
+            same_scope_report = rep
+            break
+
+    if same_scope_report is not None:
+        return same_scope_report, {
+            "baseline_scope_match": True,
+            "baseline_scope": scope_n,
+            "current_scope": scope_n,
+        }
+    if fallback_report is not None:
+        return fallback_report, {
+            "baseline_scope_match": False,
+            "baseline_scope": fallback_scope,
+            "current_scope": scope_n,
+        }
+    return {}, empty_meta
 
 
-def _attach_scan_diff(result: dict, user_id: str) -> dict:
+def _attach_scan_diff(result: dict, user_id: str, scope: str | None = None) -> dict:
     if not isinstance(result, dict):
         return result
-    prev_report = _latest_previous_report_for_target(user_id, str(result.get("target_url") or ""))
+    scope_eff = _normalize_scan_scope_for_diff(scope or result.get("scan_scope"))
+    result["scan_scope"] = scope_eff
+    prev_report, baseline_meta = _latest_previous_report_for_target(
+        user_id, str(result.get("target_url") or ""), scope_eff,
+    )
     if not prev_report:
-        result["scan_diff"] = {
+        fdiff = {
             "baseline_total": 0,
             "current_total": len(_safe_findings(result)),
             "new_count": len(_safe_findings(result)),
@@ -887,11 +998,27 @@ def _attach_scan_diff(result: dict, user_id: str) -> dict:
             "regressed_findings": [],
             "improved_findings": [],
             "has_baseline": False,
+            "verification_summary": _build_scan_diff_verification_summary(
+                {
+                    "current_total": len(_safe_findings(result)),
+                    "new_count": len(_safe_findings(result)),
+                    "fixed_count": 0,
+                    "regressed_count": 0,
+                    "improved_count": 0,
+                    "fixed_findings": [],
+                },
+                has_baseline=False,
+                baseline_meta=baseline_meta,
+            ),
         }
+        result["scan_diff"] = fdiff
         return result
     diff = _scan_diff(prev_report, result)
     diff["has_baseline"] = True
     diff["baseline_scanned_at"] = prev_report.get("scanned_at")
+    diff["verification_summary"] = _build_scan_diff_verification_summary(
+        diff, has_baseline=True, baseline_meta=baseline_meta,
+    )
     result["scan_diff"] = diff
     return result
 
@@ -1850,7 +1977,7 @@ def api_scan():
     try:
         _audit_log(user_id, "scan.start", target=url, metadata={"scope": scope, "goal": goal or "", "scan_id": scan_id})
         result = run_web_scan(url, scope=scope, goal=goal, auth_context=auth_context)
-        result = _attach_scan_diff(result, user_id)
+        result = _attach_scan_diff(result, user_id, scope=scope)
         result = _attach_solana_security_profile_to_scan_result(result)
         save_scan(scan_id, result, scope, user_id=user_id)
         ok_finalize, st_final, err_final = _finalize_scan_credits(
@@ -1890,6 +2017,7 @@ def api_scan():
             "report_provenance": result.get("report_provenance"),
             "scan_fingerprint": result.get("scan_fingerprint"),
             "scan_diff": result.get("scan_diff"),
+            "scan_scope": result.get("scan_scope"),
             "solana_security_profile": result.get("solana_security_profile"),
             "credits": st_final,
             "credits_charged": cost,
@@ -1949,7 +2077,7 @@ def api_scan_stream():
             for event in run_web_scan_streaming(url, scope=scope, goal=goal, auth_context=auth_context):
                 if event.get("event") == "done":
                     report = event.get("report") or {}
-                    report = _attach_scan_diff(report, user_id)
+                    report = _attach_scan_diff(report, user_id, scope=scope)
                     report = _attach_solana_security_profile_to_scan_result(report)
                     report["id"] = scan_id
                     accumulated = report

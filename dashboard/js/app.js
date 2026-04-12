@@ -971,22 +971,53 @@ function renderScanDiff(report) {
 
   const note = document.getElementById('scanDiffNote');
   const cta = document.getElementById('scanDiffCta');
+  const vStrip = document.getElementById('scanDiffVerificationStrip');
+  const vs = diff && diff.verification_summary && typeof diff.verification_summary === 'object'
+    ? diff.verification_summary
+    : null;
+  if (vStrip) {
+    if (vs && vs.one_line) {
+      vStrip.hidden = false;
+      vStrip.textContent = String(vs.one_line);
+      const nReg = diff ? Number(diff.regressed_count || 0) : 0;
+      const nFixed = diff ? Number(diff.fixed_count || 0) : 0;
+      if (nReg > 0) {
+        vStrip.setAttribute('data-tone', 'warn');
+      } else if (nFixed > 0 && hasBaseline) {
+        vStrip.setAttribute('data-tone', 'positive');
+      } else if (vs.baseline_scope_match === false && hasBaseline) {
+        vStrip.setAttribute('data-tone', 'warn');
+      } else {
+        vStrip.setAttribute('data-tone', hasBaseline ? 'neutral' : 'neutral');
+      }
+    } else {
+      vStrip.hidden = true;
+      vStrip.textContent = '';
+      vStrip.removeAttribute('data-tone');
+    }
+  }
   if (note) {
     if (!diff) {
-      note.textContent = 'Run a first scan to create a baseline, then recheck the same target to track deltas.';
+      note.textContent = 'Run a first scan to create a baseline, then recheck the same target and profile to track deltas.';
     } else if (!hasBaseline) {
-      note.textContent = 'No baseline scan for this target yet. This run establishes the baseline.';
+      note.textContent = 'No baseline scan for this URL and profile yet. This run establishes the baseline — recheck after remediation to see what cleared.';
     } else {
       const baselineLabel = formatDiffBaselineTime(diff.baseline_scanned_at);
       const baselineAt = baselineLabel ? ` (baseline: ${baselineLabel})` : '';
-      note.textContent = `Compared against your most recent scan on this target${baselineAt}.`;
+      let scopeHint = '';
+      if (vs && vs.baseline_scope_match === false && vs.baseline_scope && vs.current_scope) {
+        scopeHint =
+          ` Profile mismatch: compared to latest “${String(vs.baseline_scope)}” run; this scan is “${String(vs.current_scope)}”.`;
+      }
+      note.textContent = `Compared against your most recent scan on this URL and profile${baselineAt}.${scopeHint}`;
     }
   }
   if (cta) {
+    const recheckBtn = '<button class="btn btn-primary btn-sm" onclick="recheckLastTarget()">Recheck same target</button>';
     if (!diff || !hasBaseline) {
-      cta.innerHTML = '<button class="btn btn-primary btn-sm" onclick="recheckLastTarget()">Run recheck now</button>';
+      cta.innerHTML = recheckBtn;
     } else {
-      cta.innerHTML = '';
+      cta.innerHTML = `${recheckBtn}<span class="scan-diff-cta-hint"> Run again after fixes to refresh this comparison.</span>`;
     }
   }
 

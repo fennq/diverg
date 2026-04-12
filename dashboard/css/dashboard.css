@@ -807,8 +807,34 @@ body {
   font-size: 0.75rem;
   color: var(--text-secondary);
 }
+.scan-diff-verification-strip {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-card);
+  background: rgba(34, 197, 94, 0.08);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+.scan-diff-verification-strip[data-tone="neutral"] {
+  background: rgba(148, 163, 184, 0.1);
+}
+.scan-diff-verification-strip[data-tone="warn"] {
+  background: rgba(251, 191, 36, 0.12);
+}
+.scan-diff-verification-strip[data-tone="positive"] {
+  background: rgba(34, 197, 94, 0.1);
+}
 .scan-diff-cta {
   margin-bottom: 12px;
+}
+.scan-diff-cta-hint {
+  display: inline-block;
+  margin-left: 10px;
+  font-size: 0.6875rem;
+  color: var(--text-dim);
+  vertical-align: middle;
 }
 .diff-help {
   display: inline-flex;

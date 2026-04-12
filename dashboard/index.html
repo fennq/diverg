@@ -273,7 +273,8 @@
           <button class="btn btn-ghost" onclick="recheckLastTarget()">Recheck target</button>
         </div>
         <div class="card-body">
-          <div class="scan-diff-explainer">Compares this scan to your most recent scan on the same target.</div>
+          <div class="scan-diff-explainer">Compares this scan to your most recent scan on the same URL and the same scan profile (Full, Quick, Web, etc.). Run again after fixes to see cleared vs new strict findings.</div>
+          <div class="scan-diff-verification-strip" id="scanDiffVerificationStrip" hidden></div>
           <div class="mini-stat-grid">
             <div class="mini-stat"><span class="mini-stat-label">New <span class="diff-help" title="Findings that did not exist in the baseline scan.">?</span></span><span class="mini-stat-value" id="scanDiffNew">0</span></div>
             <div class="mini-stat"><span class="mini-stat-label">Fixed <span class="diff-help" title="Findings that were present before and are now gone.">?</span></span><span class="mini-stat-value scan-diff-value-fixed" id="scanDiffFixed">0</span></div>
