@@ -40,6 +40,18 @@ function getSessionToken() {
   return localStorage.getItem('dv_session') || localStorage.getItem('diverg_token') || '';
 }
 
+/** Invalid/expired JWT: clear storage and send user to sign-in (avoids stale diverg_user + confusing 401 alerts). */
+function clearSessionAndRedirectToLogin() {
+  try {
+    localStorage.removeItem('dv_session');
+    localStorage.removeItem('diverg_token');
+    localStorage.removeItem('diverg_user');
+  } catch (_) {
+    /* ignore */
+  }
+  window.location.href = '/dashboard/login.html?session=expired';
+}
+
 let serverScans = [];
 let serverFindings = [];
 let serverSummary = null;
@@ -259,6 +271,10 @@ async function loadUserProfile() {
     const res = await fetch(apiUrl + '/api/auth/me', {
       headers: { Authorization: 'Bearer ' + token },
     });
+    if (res.status === 401) {
+      clearSessionAndRedirectToLogin();
+      return;
+    }
     if (!res.ok) return;
     const data = await res.json();
     if (data && data.user) {
@@ -345,6 +361,10 @@ async function apiJson(path, body) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (res.status === 401) {
+      clearSessionAndRedirectToLogin();
+      return new Promise(() => {});
+    }
     if (data && data.code === 'insufficient_credits') {
       const req = Number(data.required || 0);
       const avail = Number(data.available || 0);
@@ -371,6 +391,10 @@ async function apiAuth(method, path, body) {
   const res = await fetch(getApiUrl() + path, opts);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    if (res.status === 401) {
+      clearSessionAndRedirectToLogin();
+      return new Promise(() => {});
+    }
     throw new Error(data.error || ('HTTP ' + res.status));
   }
   return data;

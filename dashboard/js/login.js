@@ -37,6 +37,13 @@
     document.getElementById('authError').classList.remove('show');
   }
 
+  try {
+    var sp = new URL(window.location.href).searchParams;
+    if (sp.get('session') === 'expired') {
+      showError('Your session expired. Please sign in again.');
+    }
+  } catch (e) { /* ignore */ }
+
   function toggleMode(e) {
     if (e) e.preventDefault();
     isRegister = !isRegister;
