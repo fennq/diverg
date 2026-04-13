@@ -267,6 +267,28 @@
         <div class="scope-pill active" data-scope="full">Full</div><div class="scope-pill" data-scope="quick">Quick</div><div class="scope-pill" data-scope="web">Web</div><div class="scope-pill" data-scope="api">API</div><div class="scope-pill" data-scope="crypto">Crypto</div><div class="scope-pill" data-scope="recon">Recon</div><div class="scope-pill" data-scope="passive">Passive</div><div class="scope-pill" data-scope="attack">Attack</div>
       </div>
       <div class="scan-scope-help" id="scanScopeHelp">Recommended: Full — complete assessment across recon, web, API, and high-value flaw checks.</div>
+      <div class="card site-watchlist-card">
+        <div class="card-header">
+          <span class="card-title">Site watchlist</span>
+          <span class="info-wrap"><span class="info-icon">i</span><span class="tooltip">Save URLs you care about. After each scan on a watched URL, Diverg updates last score, verdict, and critical/high counts. “Alert stub” records an audit event when a scan completes—email/Slack delivery is not wired yet.</span></span>
+        </div>
+        <div class="card-body">
+          <p class="token-watchlist-hint">Same account as your scan history. Use Run scan to queue the current profile against a saved URL.</p>
+          <div class="tool-row token-scan-row token-watchlist-toolbar">
+            <input type="text" class="input" id="siteWatchlistUrl" placeholder="https://example.com" spellcheck="false" autocomplete="off">
+            <input type="text" class="input" id="siteWatchlistLabel" placeholder="Label (optional)" maxlength="200" autocomplete="off">
+            <select class="input" id="siteWatchlistAlertPref" title="Alerts">
+              <option value="off">Alerts: off</option>
+              <option value="stub">Alerts: stub (audit only)</option>
+            </select>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="siteWatchlistAdd()">Add</button>
+            <span id="siteWatchlistFlash" class="token-watchlist-flash" aria-live="polite"></span>
+          </div>
+          <div class="analytics-list token-watchlist-list" id="siteWatchlistBody">
+            <div class="analytics-empty">Open Scanner to load your site watchlist.</div>
+          </div>
+        </div>
+      </div>
       <div class="card">
         <div class="card-header">
           <span class="card-title">Scan Diff</span>

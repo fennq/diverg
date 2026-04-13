@@ -24,6 +24,7 @@ function navigate(page) {
   if (page === 'history') renderHistory();
   if (page === 'analytics') updateAnalytics();
   if (page === 'investigation') void loadSolanaWatchlist({ silent: true });
+  if (page === 'scanner') void loadSiteWatchlist({ silent: true });
 }
 
 function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); }
@@ -377,6 +378,7 @@ async function apiAuth(method, path, body) {
 
 let lastTokenBundleMint = '';
 let solanaWatchlistCache = [];
+let siteWatchlistCache = [];
 
 function normalizeSolanaMint(raw) {
   return String(raw || '').replace(/\s+/g, '').trim();
@@ -529,6 +531,164 @@ async function loadSolanaWatchlist(options) {
     return;
   }
   renderSolanaWatchlistDom();
+}
+
+let _siteWatchlistFlashTimer = null;
+function flashSiteWatchlistMessage(message, isError) {
+  const el = document.getElementById('siteWatchlistFlash');
+  if (!el) {
+    if (message && isError) alert(message);
+    return;
+  }
+  el.textContent = message || '';
+  el.classList.remove('token-watchlist-flash--ok', 'token-watchlist-flash--error');
+  if (message) {
+    el.classList.add(isError ? 'token-watchlist-flash--error' : 'token-watchlist-flash--ok');
+  }
+  if (_siteWatchlistFlashTimer) clearTimeout(_siteWatchlistFlashTimer);
+  if (!message) return;
+  _siteWatchlistFlashTimer = setTimeout(() => {
+    el.textContent = '';
+    el.classList.remove('token-watchlist-flash--ok', 'token-watchlist-flash--error');
+  }, 3200);
+}
+
+async function refreshSiteWatchlistCacheFromApi() {
+  try {
+    const data = await apiAuth('GET', '/api/site/watchlist');
+    siteWatchlistCache = Array.isArray(data.items) ? data.items : [];
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function bindSiteWatchlistRowActions(container) {
+  if (!container) return;
+  container.querySelectorAll('[data-site-watch-load]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const u = b.getAttribute('data-site-watch-load') || '';
+      const scanIn = document.getElementById('scanUrl');
+      if (scanIn) scanIn.value = u;
+    });
+  });
+  container.querySelectorAll('[data-site-watch-scan]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const u = b.getAttribute('data-site-watch-scan') || '';
+      const scanIn = document.getElementById('scanUrl');
+      if (scanIn) scanIn.value = u;
+      launchScan();
+    });
+  });
+  container.querySelectorAll('[data-site-watch-del]').forEach((b) => {
+    b.addEventListener('click', async () => {
+      const id = parseInt(b.getAttribute('data-site-watch-del'), 10);
+      if (!id) return;
+      try {
+        await apiAuth('DELETE', '/api/site/watchlist/' + id);
+        await loadSiteWatchlist({ silent: true });
+      } catch (err) {
+        flashSiteWatchlistMessage(String(err.message || err), true);
+      }
+    });
+  });
+  container.querySelectorAll('[data-site-watch-alert]').forEach((sel) => {
+    sel.addEventListener('change', async () => {
+      const id = parseInt(sel.getAttribute('data-site-watch-alert'), 10);
+      const v = sel.value || 'off';
+      if (!id) return;
+      try {
+        await apiAuth('PATCH', '/api/site/watchlist', { id, alert_pref: v });
+        flashSiteWatchlistMessage('Alert preference saved');
+      } catch (err) {
+        flashSiteWatchlistMessage(String(err.message || err), true);
+        void loadSiteWatchlist({ silent: true });
+      }
+    });
+  });
+}
+
+function renderSiteWatchlistDom() {
+  const el = document.getElementById('siteWatchlistBody');
+  if (!el) return;
+  const items = siteWatchlistCache;
+  if (!items.length) {
+    el.innerHTML = '<div class="analytics-empty">No sites yet. Add a URL to track last scan results here.</div>';
+    return;
+  }
+  el.innerHTML = items.map((row) => {
+    const url = row.display_url || '';
+    const label = (row.label || '').trim();
+    const title = label ? `${label} — ${url}` : url;
+    const v = row.last_risk_verdict ? escHtml(row.last_risk_verdict) : '—';
+    const s = row.last_risk_score != null && row.last_risk_score !== '' ? escHtml(String(row.last_risk_score)) : '—';
+    const checked = formatWatchlistCheckedAt(row.last_scanned_at);
+    const checkedHtml = checked
+      ? `<span title="From your last completed scan on this URL">Last scan: ${escHtml(checked)}</span>`
+      : '<span>Last scan: —</span>';
+    const ch = (row.last_critical != null && row.last_critical !== '') ? escHtml(String(row.last_critical)) : '0';
+    const hh = (row.last_high != null && row.last_high !== '') ? escHtml(String(row.last_high)) : '0';
+    const ap = String(row.alert_pref || 'off').toLowerCase() === 'stub' ? 'stub' : 'off';
+    return `<div class="analytics-item token-watchlist-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+      <div><strong>${escHtml(title)}</strong></div>
+      <div class="token-watchlist-meta"><span>Verdict: ${v}</span><span>Score: ${s}</span><span>C/H: ${ch}/${hh}</span>${checkedHtml}</div>
+      <div class="token-watchlist-actions-inline" style="flex-wrap:wrap;gap:8px;align-items:center;">
+        <label class="site-watchlist-alert-label" style="font-size:0.75rem;color:var(--text-dim);display:flex;align-items:center;gap:6px;">
+          <span>Alerts</span>
+          <select class="input" style="max-width:130px;padding:4px 8px;font-size:0.75rem;" data-site-watch-alert="${row.id}" aria-label="Alert preference for ${escAttr(url)}">
+            <option value="off"${ap === 'off' ? ' selected' : ''}>Off</option>
+            <option value="stub"${ap === 'stub' ? ' selected' : ''}>Stub</option>
+          </select>
+        </label>
+        <button type="button" class="btn btn-ghost btn-sm" data-site-watch-load="${escAttr(url)}">Load</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-site-watch-scan="${escAttr(url)}">Run scan</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-site-watch-del="${row.id}">Remove</button>
+      </div>
+    </div>`;
+  }).join('');
+  bindSiteWatchlistRowActions(el);
+}
+
+async function loadSiteWatchlist(options) {
+  const silent = options && options.silent;
+  const el = document.getElementById('siteWatchlistBody');
+  if (!el) return;
+  if (!silent) {
+    el.innerHTML = '<div class="analytics-empty">Loading site watchlist…</div>';
+  }
+  const ok = await refreshSiteWatchlistCacheFromApi();
+  if (!ok && !silent) {
+    siteWatchlistCache = [];
+    el.innerHTML = '<div class="analytics-empty">Could not load site watchlist. Check you are signed in.</div>';
+    return;
+  }
+  renderSiteWatchlistDom();
+}
+
+async function siteWatchlistAdd() {
+  const urlEl = document.getElementById('siteWatchlistUrl');
+  const labelEl = document.getElementById('siteWatchlistLabel');
+  const apEl = document.getElementById('siteWatchlistAlertPref');
+  const url = (urlEl && urlEl.value.trim()) || '';
+  if (!url) {
+    alert('Enter a URL to add.');
+    return;
+  }
+  const body = {
+    target_url: url,
+    label: (labelEl && labelEl.value.trim()) || '',
+    alert_pref: (apEl && apEl.value) || 'off',
+  };
+  try {
+    await apiAuth('POST', '/api/site/watchlist', body);
+    if (urlEl) urlEl.value = '';
+    if (labelEl) labelEl.value = '';
+    await refreshSiteWatchlistCacheFromApi();
+    renderSiteWatchlistDom();
+    flashSiteWatchlistMessage('Saved to site watchlist');
+  } catch (err) {
+    flashSiteWatchlistMessage(String(err.message || err), true);
+  }
 }
 
 async function solanaWatchlistAddCurrentMint() {
@@ -1649,6 +1809,7 @@ async function launchScan() {
     progressBox.classList.remove('show');
     showScanResults(url, scope, findings, attackPaths, report);
     loadCredits();
+    void loadSiteWatchlist({ silent: true });
     const autoNav = document.getElementById('prefAutoNav');
     if (!autoNav || autoNav.checked) {
       setActiveScanTab('findings');

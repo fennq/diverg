@@ -21,6 +21,8 @@ Investigation (console):
   POST /api/investigation/solana-bundle  Token mint: holders, cluster %, coordination / risk score; requires server ARKHAM_API_KEY
   GET/POST/PATCH /api/solana/watchlist   Per-user SPL mint watchlist (Phase 2 hooks)
   DELETE /api/solana/watchlist/<id>      Remove one watchlist row
+  GET/POST/PATCH /api/site/watchlist     Per-user web target watchlist (last scan + alert stub)
+  DELETE /api/site/watchlist/<id>        Remove one site watchlist row
   POST /api/investigation/domain       OSINT + recon + headers (full skill JSON)
   POST /api/investigation/reputation   OSINT context + entity reputation
 
@@ -60,6 +62,7 @@ from datetime import datetime, timezone, timedelta
 from functools import wraps
 from pathlib import Path
 from threading import Lock
+from urllib.parse import urlparse, urlunparse
 
 import copy
 
@@ -686,6 +689,26 @@ CREATE TABLE IF NOT EXISTS solana_watchlist (
 );
 
 CREATE INDEX IF NOT EXISTS idx_solana_watchlist_user ON solana_watchlist(user_id);
+
+CREATE TABLE IF NOT EXISTS site_watchlist (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id          TEXT NOT NULL,
+    target_norm      TEXT NOT NULL,
+    display_url      TEXT NOT NULL,
+    label            TEXT DEFAULT '',
+    alert_pref       TEXT DEFAULT 'off',
+    last_scan_id     TEXT,
+    last_scanned_at  TEXT,
+    last_risk_score  REAL,
+    last_risk_verdict TEXT DEFAULT '',
+    last_critical    INTEGER DEFAULT 0,
+    last_high        INTEGER DEFAULT 0,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    UNIQUE(user_id, target_norm)
+);
+
+CREATE INDEX IF NOT EXISTS idx_site_watchlist_user ON site_watchlist(user_id);
 """
 
 
@@ -853,6 +876,104 @@ def _normalize_scan_scope_for_diff(scope: str | None) -> str:
     s = (scope or "full").strip().lower()
     allowed = {"full", "quick", "crypto", "recon", "web", "api", "passive", "attack"}
     return s if s in allowed else "full"
+
+
+_SITE_WATCHLIST_MAX = 100
+_SITE_WATCHLIST_ALERT_PREFS = frozenset({"off", "stub"})
+
+
+def _canonical_site_watchlist_url(raw: str) -> tuple[str, str]:
+    """Return (display_url, target_norm) for matching completed scans, or ('','') if invalid."""
+    s = sanitize_text(raw or "", 2048).strip()
+    if not s:
+        return "", ""
+    if not s.lower().startswith(("http://", "https://")):
+        s = "https://" + s
+    try:
+        p = urlparse(s)
+    except Exception:
+        return "", ""
+    host = (p.hostname or "").strip().lower()
+    if not host or ".." in host:
+        return "", ""
+    scheme = (p.scheme or "https").lower()
+    if scheme not in ("http", "https"):
+        return "", ""
+    port = p.port
+    netloc = f"{host}:{port}" if port else host
+    path = p.path or ""
+    if path not in ("/", "") and path.endswith("/"):
+        path = path.rstrip("/")
+    display = urlunparse((scheme, netloc, path, "", "", ""))
+    if path in ("", "/"):
+        display = f"{scheme}://{netloc}"
+    target_norm = _normalize_target_for_diff(display)
+    if not target_norm:
+        return "", ""
+    return display, target_norm
+
+
+def _bump_site_watchlist_for_scan(conn: sqlite3.Connection, user_id: str, scan_id: str, result: dict) -> None:
+    """Update site_watchlist rows for this user when a scan finishes (same normalized URL)."""
+    if not user_id or not scan_id:
+        return
+    tu = _normalize_target_for_diff(str(result.get("target_url") or ""))
+    if not tu:
+        return
+    findings = result.get("findings") if isinstance(result.get("findings"), list) else []
+    crit = _count_severity(findings, "Critical")
+    high = _count_severity(findings, "High")
+    scanned_at = str(result.get("scanned_at") or datetime.now(timezone.utc).isoformat())
+    rs_raw = result.get("risk_score")
+    rs: float | None
+    if rs_raw is None:
+        rs = None
+    else:
+        try:
+            rs = float(rs_raw)
+        except (TypeError, ValueError):
+            rs = None
+    verdict = str(result.get("risk_verdict") or "")[:200]
+
+    stub_rows = conn.execute(
+        """SELECT id, display_url FROM site_watchlist
+           WHERE user_id = ? AND target_norm = ? AND lower(trim(coalesce(alert_pref, ''))) = 'stub'""",
+        (user_id, tu),
+    ).fetchall()
+
+    cur = conn.execute(
+        """UPDATE site_watchlist SET
+               last_scan_id = ?, last_scanned_at = ?, last_risk_score = ?, last_risk_verdict = ?,
+               last_critical = ?, last_high = ?, updated_at = ?
+           WHERE user_id = ? AND target_norm = ?""",
+        (
+            scan_id,
+            scanned_at,
+            rs,
+            verdict,
+            int(crit),
+            int(high),
+            datetime.now(timezone.utc).isoformat(),
+            user_id,
+            tu,
+        ),
+    )
+
+    if stub_rows and getattr(cur, "rowcount", 0) > 0:
+        meta_base = {
+            "scan_id": scan_id,
+            "risk_verdict": verdict,
+            "last_critical": int(crit),
+            "last_high": int(high),
+            "note": "Alert delivery not configured; audit stub only.",
+        }
+        for row in stub_rows:
+            _audit_log(
+                user_id,
+                "site_watchlist.alert_stub",
+                target=str(row["display_url"] or "")[:400],
+                metadata={**meta_base, "watchlist_id": row["id"]},
+            )
 
 
 def _build_scan_diff_verification_summary(
@@ -1048,6 +1169,10 @@ def save_scan(scan_id: str, result: dict, scope: str, user_id: str = ""):
             ),
         )
         if user_id:
+            try:
+                _bump_site_watchlist_for_scan(conn, user_id, scan_id, result)
+            except Exception:
+                pass
             try:
                 from dashboard_points import award_scan_points
 
@@ -3473,6 +3598,146 @@ def api_solana_watchlist_delete(watch_id: int):
     with _db() as conn:
         cur = conn.execute(
             "DELETE FROM solana_watchlist WHERE id = ? AND user_id = ?",
+            (watch_id, uid),
+        )
+        if cur.rowcount == 0:
+            return jsonify({"error": "Not found"}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/api/site/watchlist", methods=["GET", "POST", "PATCH", "OPTIONS"])
+@require_auth
+def api_site_watchlist():
+    """Per-user web URL watchlist: last scan snapshot; alert_pref stub writes audit events only."""
+    if request.method == "OPTIONS":
+        return "", 204
+    uid = g.user["id"]
+    now = datetime.now(timezone.utc).isoformat()
+
+    if request.method == "GET":
+        with _db() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, target_norm, display_url, label, alert_pref, last_scan_id, last_scanned_at,
+                       last_risk_score, last_risk_verdict, last_critical, last_high, created_at, updated_at
+                FROM site_watchlist
+                WHERE user_id = ?
+                ORDER BY updated_at DESC
+                """,
+                (uid,),
+            ).fetchall()
+        return jsonify({"ok": True, "items": [dict(r) for r in rows]})
+
+    if not request.is_json:
+        return jsonify({"error": "JSON required"}), 400
+    data = request.get_json(silent=True) or {}
+
+    if request.method == "POST":
+        display, target_norm = _canonical_site_watchlist_url(str(data.get("target_url") or ""))
+        if not display or not target_norm:
+            return jsonify({"error": "Invalid target URL (need a host, e.g. https://example.com)."}), 400
+        label = sanitize_text(data.get("label") or "", 200)
+        ap = str(data.get("alert_pref") or "off").strip().lower()
+        if ap not in _SITE_WATCHLIST_ALERT_PREFS:
+            ap = "off"
+        with _db() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM site_watchlist WHERE user_id = ? AND target_norm = ?",
+                (uid, target_norm),
+            ).fetchone()
+            if not exists:
+                n = conn.execute(
+                    "SELECT COUNT(*) FROM site_watchlist WHERE user_id = ?",
+                    (uid,),
+                ).fetchone()[0]
+                if int(n or 0) >= _SITE_WATCHLIST_MAX:
+                    return jsonify({"error": "Watchlist limit reached", "max": _SITE_WATCHLIST_MAX}), 400
+            conn.execute(
+                """
+                INSERT INTO site_watchlist (
+                    user_id, target_norm, display_url, label, alert_pref,
+                    last_scan_id, last_scanned_at, last_risk_score, last_risk_verdict, last_critical, last_high,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, '', 0, 0, ?, ?)
+                ON CONFLICT(user_id, target_norm) DO UPDATE SET
+                    display_url = excluded.display_url,
+                    label = CASE
+                        WHEN trim(excluded.label) != '' THEN excluded.label
+                        ELSE site_watchlist.label
+                    END,
+                    alert_pref = excluded.alert_pref,
+                    updated_at = excluded.updated_at
+                """,
+                (uid, target_norm, display, label, ap, now, now),
+            )
+            row = conn.execute(
+                """
+                SELECT id, target_norm, display_url, label, alert_pref, last_scan_id, last_scanned_at,
+                       last_risk_score, last_risk_verdict, last_critical, last_high, created_at, updated_at
+                FROM site_watchlist WHERE user_id = ? AND target_norm = ?
+                """,
+                (uid, target_norm),
+            ).fetchone()
+        return jsonify({"ok": True, "item": dict(row) if row else None})
+
+    if request.method == "PATCH":
+        wid = data.get("id")
+        try:
+            watch_id = int(wid)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Missing or invalid id"}), 400
+        label_in = data.get("label")
+        ap_in = data.get("alert_pref")
+        with _db() as conn:
+            row0 = conn.execute(
+                "SELECT id FROM site_watchlist WHERE id = ? AND user_id = ?",
+                (watch_id, uid),
+            ).fetchone()
+            if not row0:
+                return jsonify({"error": "Not found"}), 404
+            sets: list[str] = []
+            vals: list = []
+            if label_in is not None:
+                sets.append("label = ?")
+                vals.append(sanitize_text(label_in, 200))
+            if ap_in is not None:
+                ap = str(ap_in).strip().lower()
+                if ap not in _SITE_WATCHLIST_ALERT_PREFS:
+                    return jsonify({"error": "alert_pref must be off or stub"}), 400
+                sets.append("alert_pref = ?")
+                vals.append(ap)
+            if not sets:
+                return jsonify({"error": "No fields to update"}), 400
+            sets.append("updated_at = ?")
+            vals.append(now)
+            vals.extend([watch_id, uid])
+            conn.execute(
+                f"UPDATE site_watchlist SET {', '.join(sets)} WHERE id = ? AND user_id = ?",
+                vals,
+            )
+            row = conn.execute(
+                """
+                SELECT id, target_norm, display_url, label, alert_pref, last_scan_id, last_scanned_at,
+                       last_risk_score, last_risk_verdict, last_critical, last_high, created_at, updated_at
+                FROM site_watchlist WHERE id = ? AND user_id = ?
+                """,
+                (watch_id, uid),
+            ).fetchone()
+        return jsonify({"ok": True, "item": dict(row) if row else None})
+
+    return jsonify({"error": "Method not allowed"}), 405
+
+
+@app.route("/api/site/watchlist/<int:watch_id>", methods=["DELETE", "OPTIONS"])
+@require_auth
+def api_site_watchlist_delete(watch_id: int):
+    if request.method == "OPTIONS":
+        return "", 204
+    uid = g.user["id"]
+    with _db() as conn:
+        cur = conn.execute(
+            "DELETE FROM site_watchlist WHERE id = ? AND user_id = ?",
             (watch_id, uid),
         )
         if cur.rowcount == 0:
