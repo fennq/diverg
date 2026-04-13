@@ -56,7 +56,6 @@ content/
 agents/
 contracts/
 PUBLIC.md
-RECENT_UPDATES.md
 scripts/generate_synq_report_pdf.py
 
 # Investigation: Python modules are tracked; case outputs (reports, JSON) stay private

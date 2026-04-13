@@ -43,6 +43,30 @@ Copy this template for each new day:
 
 ---
 
+## 2026-04-13
+
+### Highlights
+- Hardened HTTP security for the console and API: HTTPS-aware HSTS, stricter CSP on dashboard pages, trust-aware client IP handling, and reduced server fingerprinting.
+- Shipped professional changelog entry documenting security work alongside recent platform features (scan verification UX and site watchlist).
+
+### Product & UX
+- Dashboard `index.html` and `login.html` now send `noindex, nofollow` and an explicit referrer policy meta tag so the operator console is less likely to be indexed or leak full URLs via referrers.
+
+### Platform & API
+- `Strict-Transport-Security` is emitted only when the request is effectively HTTPS (`request.is_secure` or `X-Forwarded-Proto` when proxy trust is enabled), avoiding misleading HSTS on plain HTTP dev servers while keeping strong posture behind TLS terminators.
+- `DIVERG_TRUST_PROXY` (documented in `.env.example`) controls whether `X-Forwarded-For` / `X-Forwarded-Proto` are honored; default follows production vs dev (production defaults to trusting, matching Railway-style deployments).
+- `_get_client_ip()` no longer trusts `X-Forwarded-For` when proxy trust is disabled, reducing client IP spoofing risk on directly exposed instances.
+- Dashboard CSP extended with `base-uri 'none'`, `form-action 'self'`, `object-src 'none'`, and `upgrade-insecure-requests` in production; `Permissions-Policy` tightened with `payment`, `usb`, and ad-topic related directives.
+- `Server` response header is stripped on outbound responses where present.
+- Startup warning when `IS_PRODUCTION` and `DIVERG_JWT_SECRET` is unset (ephemeral signing key per process).
+
+### Validation
+- `python3 -m pytest tests/ -q` — full suite green after changes.
+
+### Notes
+- If you terminate TLS on a custom proxy, set `DIVERG_TRUST_PROXY=1` explicitly when needed and ensure the proxy sets `X-Forwarded-Proto: https` so HSTS and HTTPS detection stay correct.
+- Marketing site (`diverg-landing` / divergsec.com) is separate from this repo; console hardening applies to the Flask-served dashboard and API.
+
 ## 2026-04-10
 
 ### Highlights

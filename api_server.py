@@ -159,6 +159,12 @@ def _resolve_jwt_secret() -> str:
 
 JWT_SECRET = _resolve_jwt_secret()
 JWT_EXPIRY_HOURS = 72
+
+if IS_PRODUCTION and not DIVERG_JWT_SECRET:
+    logging.getLogger("diverg.api").warning(
+        "DIVERG_JWT_SECRET is unset in production: a random signing key is used per process, "
+        "so tokens become invalid after every restart/deploy. Set a stable secret in env."
+    )
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 ALLOWED_ORIGINS = [
     o.strip() for o in
@@ -167,6 +173,30 @@ ALLOWED_ORIGINS = [
         "https://dash.divergsec.com,https://divergsec.com,http://127.0.0.1:5000,http://localhost:5000,http://127.0.0.1:5001,http://localhost:5001"
     ).split(",") if o.strip()
 ]
+
+
+def _trust_proxy_headers() -> bool:
+    """
+    When True, honor X-Forwarded-For / X-Forwarded-Proto (typical behind Railway, nginx, Cloudflare).
+    Set DIVERG_TRUST_PROXY=0 to disable if the app is exposed directly without a reverse proxy.
+    """
+    raw = (os.environ.get("DIVERG_TRUST_PROXY") or "").strip().lower()
+    if raw in ("1", "true", "yes"):
+        return True
+    if raw in ("0", "false", "no"):
+        return False
+    return IS_PRODUCTION
+
+
+def _request_is_https() -> bool:
+    if getattr(request, "is_secure", False):
+        return True
+    if not _trust_proxy_headers():
+        return False
+    proto = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+    return proto == "https"
+
+
 MAX_REQUEST_SIZE = 2 * 1024 * 1024  # 2 MB
 DIVERG_AUDIT_LOG_RETENTION_DAYS = int(os.environ.get("DIVERG_AUDIT_LOG_RETENTION_DAYS", "90") or "90")
 DIVERG_ENABLE_STRICT_PROOF_API = (os.environ.get("DIVERG_ENABLE_STRICT_PROOF_API", "1").strip().lower() in ("1", "true", "yes"))
@@ -1286,7 +1316,11 @@ def decode_token(token: str) -> dict | None:
 
 
 def _get_client_ip() -> str:
-    return request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
+    if _trust_proxy_headers():
+        xff = request.headers.get("X-Forwarded-For")
+        if xff:
+            return xff.split(",")[0].strip() or "unknown"
+    return (request.remote_addr or "unknown").strip()
 
 
 def _bearer_token_from_request() -> str:
@@ -1644,6 +1678,8 @@ init_db()
 
 @app.after_request
 def _security_headers(resp):
+    resp.headers.pop("Server", None)
+
     origin = request.headers.get("Origin", "")
     if origin in ALLOWED_ORIGINS:
         resp.headers["Access-Control-Allow-Origin"] = origin
@@ -1659,14 +1695,18 @@ def _security_headers(resp):
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["X-XSS-Protection"] = "0"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    resp.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    resp.headers["Permissions-Policy"] = (
+        "geolocation=(), microphone=(), camera=(), payment=(), usb=(), "
+        "interest-cohort=(), browsing-topics=()"
+    )
     resp.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     # JSON API must be readable from the Chrome extension origin when CORS is enabled.
     if request.path.startswith("/api/"):
         resp.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
     else:
         resp.headers["Cross-Origin-Resource-Policy"] = "same-site"
-    resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    if _request_is_https():
+        resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
 
     # Privy SDK may call multiple subdomains and websocket endpoints.
     connect_src = (
@@ -1685,15 +1725,21 @@ def _security_headers(resp):
     script_src = "'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com"
     if IS_PRODUCTION:
         script_src += " https://static.cloudflareinsights.com"
-    csp = (
-        "default-src 'self'; "
-        f"script-src {script_src}; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src https://fonts.gstatic.com; "
-        "img-src 'self' data: https:; "
-        f"connect-src {connect_src}; "
-        "frame-ancestors 'none'"
-    )
+    csp_parts = [
+        "default-src 'self'",
+        f"script-src {script_src}",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src https://fonts.gstatic.com",
+        "img-src 'self' data: https:",
+        f"connect-src {connect_src}",
+        "base-uri 'none'",
+        "form-action 'self'",
+        "object-src 'none'",
+        "frame-ancestors 'none'",
+    ]
+    if IS_PRODUCTION:
+        csp_parts.append("upgrade-insecure-requests")
+    csp = "; ".join(csp_parts)
     if request.path.startswith("/dashboard") or request.path.startswith("/login"):
         resp.headers["Content-Security-Policy"] = csp
 
