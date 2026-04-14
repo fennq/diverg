@@ -43,6 +43,28 @@ Copy this template for each new day:
 
 ---
 
+## 2026-04-14
+
+### Highlights
+- Shipped **executive one-pager** export: a standalone HTML summary of a scan (score, strict findings, compliance, threat intel, verification vs prior run) with a print-to-PDF path in the browser—no server PDF pipeline.
+- Published a **Solana program upgrade / immutability** feasibility spike note to align future investigations with upgrade authority and verification expectations.
+- Captured a **full product QA pass** write-up and hardened the **security regression script** for macOS (AirPlay on port 5000) and rate-limit isolation behind trusted proxy headers.
+
+### Product & UX
+- Dashboard: **Executive 1-pager** on the Overview top bar and on the Scanner **Overall Assessment** card; History and home recent scans include **1-pager** next to JSON export (fixed seven-column layout on home recent scans).
+- Operators open the downloaded `.html` and use **Print → Save as PDF** for a shareable PDF.
+
+### Platform & API
+- Executive export uses existing persisted report JSON via **`GET /api/history/:id`** when generated from History; session path uses the in-memory last scan result.
+- **`test_security.py`**: `TEST_SECURITY_BASE` / `TEST_SECURITY_CORS_ORIGIN`, HSTS assertion matches HTTPS-only behavior on plain HTTP, CSP check aligned with current dashboard policy; docstring documents **`DIVERG_TRUST_PROXY=1`** for a full green run.
+
+### Validation
+- `python3 -m pytest tests/ -q` — **179 passed**, 1 skipped, after dashboard changes.
+
+### Notes
+- Executive export is intentionally **HTML-first**; server-generated PDF remains a future option if customers require unattended PDFs.
+- Spike doc: [`docs/solana_program_upgrade_spike.md`](solana_program_upgrade_spike.md). QA log: [`docs/QA_REPORT_PRODUCT_PASS_2026-04-14.md`](QA_REPORT_PRODUCT_PASS_2026-04-14.md).
+
 ## 2026-04-13
 
 ### Highlights
