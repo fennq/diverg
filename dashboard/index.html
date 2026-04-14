@@ -100,6 +100,7 @@
           <input type="text" id="quickUrl" placeholder="Search for targets, addresses, domains..." spellcheck="false">
         </div>
         <div class="topbar-right">
+          <button class="topbar-btn ghost" onclick="exportExecutiveOnePagerFromSession()" title="Printable HTML from last scan (save as PDF via browser)">Executive 1-pager</button>
           <button class="topbar-btn ghost" onclick="exportData()">Export Data</button>
           <button class="topbar-btn primary" onclick="navigate('scanner')">+ New Scan</button>
         </div>
@@ -237,9 +238,9 @@
       <!-- Bottom table: Recent Scans -->
       <div class="data-table">
         <table>
-          <thead><tr><th class="col-num">#</th><th>Target</th><th>Scope</th><th>Findings</th><th>Score</th><th>Date</th></tr></thead>
+          <thead><tr><th class="col-num">#</th><th>Target</th><th>Scope</th><th>Findings</th><th>Score</th><th>Date</th><th>Export</th></tr></thead>
           <tbody id="homeScansBody">
-            <tr><td colspan="6"><div class="empty"><div class="empty-title">No scans yet</div><div class="empty-desc">Launch a scan to get started</div></div></td></tr>
+            <tr><td colspan="7"><div class="empty"><div class="empty-title">No scans yet</div><div class="empty-desc">Launch a scan to get started</div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -333,8 +334,11 @@
       <div id="scanResults" style="display:none;">
         <div class="card assessment-card" id="scanAssessmentCard">
           <div class="card-header">
-            <span class="card-title">Overall Assessment</span>
-            <span id="scanAssessmentBadge" class="badge badge-info">Pending</span>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:1;min-width:0;">
+              <span class="card-title">Overall Assessment</span>
+              <span id="scanAssessmentBadge" class="badge badge-info">Pending</span>
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="exportExecutiveOnePagerFromSession()" title="Download printable HTML summary">Executive 1-pager</button>
           </div>
           <div class="card-body">
             <div class="assessment-headline" id="scanAssessmentHeadline">Scan not yet reviewed</div>

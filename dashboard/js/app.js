@@ -885,6 +885,155 @@ function scoreOutOf100(v) {
   return String(Math.max(0, Math.min(100, Math.round(v))));
 }
 
+/** Printable HTML one-pager from scan report (open in browser → Print → Save as PDF). */
+function buildExecutiveOnePagerHtml(meta) {
+  const report = meta.report || {};
+  const findings = Array.isArray(meta.findings) ? [...meta.findings] : [];
+  findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity));
+  const summary = report.summary || {};
+  const score = typeof report.risk_score === 'number' ? report.risk_score : null;
+  const verdict = verdictDisplay(report);
+  const evidence = report.evidence_summary || {};
+  const verifiedCount = typeof evidence.verified_count === 'number'
+    ? evidence.verified_count
+    : findings.filter((f) => f.verified).length;
+  const tiFindings = findings.filter((f) => {
+    const cat = String(f.category || '');
+    const sev = String(f.severity || '').toLowerCase();
+    return cat.includes('Threat Intelligence') && sev !== 'info';
+  });
+  const compliance = report.compliance_summary || {};
+  const fwKeys = Object.keys(compliance);
+  let complianceControls = 0;
+  const fwLines = [];
+  fwKeys.forEach((fw) => {
+    const controls = compliance[fw] || {};
+    const keys = Object.keys(controls);
+    complianceControls += keys.length;
+    if (keys.length) {
+      fwLines.push(`<li><strong>${escHtml(fw)}</strong> — ${keys.length} control group(s) with findings</li>`);
+    }
+  });
+  const diff = report.scan_diff || {};
+  const verLine = (diff.verification_summary && diff.verification_summary.one_line)
+    ? String(diff.verification_summary.one_line)
+    : '';
+  const rows = findings.slice(0, 20).map((f) =>
+    `<tr><td>${escHtml(f.severity || '')}</td><td>${escHtml(f.category || '')}</td><td>${escHtml(f.title || '')}</td><td>${f.verified ? 'Yes' : ''}</td></tr>`
+  ).join('');
+  const tiRows = tiFindings.slice(0, 10).map((f) =>
+    `<tr><td>${escHtml(f.severity || '')}</td><td>${escHtml(f.title || '')}</td></tr>`
+  ).join('');
+  const paths = Array.isArray(report.attack_paths) ? report.attack_paths.length : 0;
+  const genAt = new Date().toISOString();
+  const scoreDisp = score != null && !Number.isNaN(score) ? String(Math.round(score)) : '—';
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Diverg executive summary</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:24px;color:#111;line-height:1.45;max-width:900px;}
+h1{font-size:1.35rem;margin:0 0 8px;}
+h2{font-size:1.05rem;margin:24px 0 8px;border-bottom:1px solid #ccc;padding-bottom:4px;}
+.meta{color:#444;font-size:0.9rem;margin-bottom:20px;}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin:12px 0;}
+.pill{border:1px solid #ccc;border-radius:8px;padding:10px 12px;background:#f9f9f9;}
+.pill strong{display:block;font-size:1.1rem;}
+table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;}
+th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;vertical-align:top;}
+th{background:#f0f0f0;}
+.note{font-size:0.8rem;color:#555;margin-top:24px;border-top:1px solid #eee;padding-top:12px;}
+@media print{body{margin:12mm;} }
+</style></head><body>
+<h1>Diverg — executive scan summary</h1>
+<p class="meta">
+  <strong>Target:</strong> ${escHtml(meta.targetUrl || report.target_url || '')}<br>
+  <strong>Scanned:</strong> ${escHtml(meta.scannedAt || report.scanned_at || '')}<br>
+  <strong>Profile:</strong> ${escHtml(meta.scope || report.scan_scope || '')}<br>
+  <strong>Generated:</strong> ${escHtml(genAt)}
+</p>
+<div class="grid">
+  <div class="pill"><strong>${escHtml(scoreDisp)}</strong>Security score (0–100)</div>
+  <div class="pill"><strong>${escHtml(verdict)}</strong>Verdict</div>
+  <div class="pill"><strong>${findings.length}</strong>Strict findings</div>
+  <div class="pill"><strong>${escHtml(String(summary.critical || 0))} / ${escHtml(String(summary.high || 0))}</strong>Critical / High</div>
+  <div class="pill"><strong>${verifiedCount}</strong>Verified findings</div>
+  <div class="pill"><strong>${paths}</strong>Attack paths</div>
+  <div class="pill"><strong>${tiFindings.length}</strong>Threat intel hits (non-info)</div>
+  <div class="pill"><strong>${fwKeys.length}</strong>Compliance frameworks touched</div>
+</div>
+${verLine ? `<h2>Verification vs prior run</h2><p>${escHtml(verLine)}</p>` : ''}
+<h2>Compliance overview</h2>
+${fwKeys.length ? `<p><strong>${complianceControls}</strong> control group(s) with mapped findings.</p><ul>${fwLines.join('')}</ul>` : '<p>No compliance mapping for this scan.</p>'}
+<h2>Threat intelligence</h2>
+${tiFindings.length ? `<table><thead><tr><th>Severity</th><th>Title</th></tr></thead><tbody>${tiRows}</tbody></table>` : '<p>No non-info threat intelligence hits.</p>'}
+<h2>Top strict findings</h2>
+${findings.length ? `<table><thead><tr><th>Sev</th><th>Category</th><th>Title</th><th>Verified</th></tr></thead><tbody>${rows}</tbody></table>` : '<p>No strict findings in this report.</p>'}
+<p class="note">Heuristic security assessment for authorized use only; not a certification. Open in a browser and use Print → Save as PDF for a PDF copy.</p>
+</body></html>`;
+}
+
+function downloadExecutiveOnePagerHtml(meta, scanIdOpt) {
+  const html = buildExecutiveOnePagerHtml(meta);
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const t = String(meta.targetUrl || meta.report?.target_url || 'scan').replace(/^https?:\/\//i, '').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 60);
+  a.href = url;
+  a.download = `diverg_executive_${t}_${stamp}${scanIdOpt ? '_' + String(scanIdOpt).slice(0, 8) : ''}.html`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportExecutiveOnePagerFromSession() {
+  const report = lastScanReport && typeof lastScanReport === 'object' ? lastScanReport : null;
+  if (!report || !Object.keys(report).length) {
+    alert('Run a scan first (or use History → 1-pager on a saved scan).');
+    return;
+  }
+  const findings = (currentScanFindings && currentScanFindings.length)
+    ? currentScanFindings
+    : normalizeFindings(report.findings || []);
+  downloadExecutiveOnePagerHtml({
+    targetUrl: report.target_url || lastScanTarget || '',
+    scannedAt: report.scanned_at || '',
+    scope: lastScanScope || report.scan_scope || '',
+    report,
+    findings,
+  });
+}
+
+async function exportExecutiveOnePagerByScanId(scanId) {
+  const id = String(scanId || '').trim();
+  if (!id) {
+    alert('Missing scan id.');
+    return;
+  }
+  const apiUrl = getApiUrl();
+  const token = getSessionToken();
+  try {
+    const res = await fetch(`${apiUrl}/api/history/${encodeURIComponent(id)}`, {
+      headers: { Authorization: 'Bearer ' + token },
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.error || ('HTTP ' + res.status));
+    }
+    const payload = await res.json();
+    const report = payload.report || {};
+    const findings = normalizeFindings(report.findings || []);
+    downloadExecutiveOnePagerHtml({
+      targetUrl: payload.target_url || report.target_url || '',
+      scannedAt: payload.scanned_at || report.scanned_at || '',
+      scope: payload.scope || report.scan_scope || '',
+      report,
+      findings,
+    }, id);
+  } catch (err) {
+    alert('Executive export failed: ' + (err && err.message ? err.message : err));
+  }
+}
+
 function setInvestigationRaw(kind, data) {
   const wrap = document.getElementById(`${kind}RawWrap`);
   const pre = document.getElementById(`${kind}RawJson`);
@@ -2106,9 +2255,10 @@ function renderHistory() {
       return t && (now - t) <= maxAgeMs;
     });
 
-  const makeRows = (list) => list.map((s, i) =>
-    `<tr><td class="col-num">${i + 1}</td><td class="col-primary col-mono">${s.url}</td><td><span class="badge badge-info">${s.scope}</span></td><td>${s.findings}</td><td>${s.score}/100</td><td class="col-mono">${s.date}</td><td><button class="btn btn-ghost" onclick="exportScanById('${String(s.id || '').replace(/'/g, '&#39;')}')">Export</button></td></tr>`
-  ).join('');
+  const makeRows = (list) => list.map((s, i) => {
+    const sid = String(s.id || '').replace(/'/g, '&#39;');
+    return `<tr><td class="col-num">${i + 1}</td><td class="col-primary col-mono">${s.url}</td><td><span class="badge badge-info">${s.scope}</span></td><td>${s.findings}</td><td>${s.score}/100</td><td class="col-mono">${s.date}</td><td><button type="button" class="btn btn-ghost btn-sm" onclick="exportScanById('${sid}')">JSON</button> <button type="button" class="btn btn-ghost btn-sm" onclick="exportExecutiveOnePagerByScanId('${sid}')">1-pager</button></td></tr>`;
+  }).join('');
 
   const hb = document.getElementById('historyBody');
   const hsb = document.getElementById('homeScansBody');
